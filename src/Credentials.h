@@ -50,8 +50,8 @@ enum class StoredCredentialResult
 [[nodiscard]] ExitCode RegisterCredential(const AccountIdentity& account);
 [[nodiscard]] ExitCode RegisterCredentialFromStandardInput(const AccountIdentity& account);
 [[nodiscard]] ExitCode CredentialStatus(const AccountIdentity& account);
-[[nodiscard]] StoredCredentialResult LoadStoredPassword(const AccountIdentity& account,
-                                                        SecretBuffer& password);
+[[nodiscard]] StoredCredentialResult LoadStoredPassword(
+    const AccountIdentity& account, SecretBuffer& password);
 [[nodiscard]] bool SaveCredential(const AccountIdentity& account, const SecretBuffer& password);
 [[nodiscard]] ExitCode ForgetCredential(const AccountIdentity& account);
 

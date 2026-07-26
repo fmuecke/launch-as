@@ -66,7 +66,7 @@ enum class CredentialReadResult
 
 [[nodiscard]] std::wstring CurrentWindowsUsername()
 {
-    std::array<wchar_t, UNLEN + 1> username{};
+    std::array<wchar_t, UNLEN + 1> username {};
     DWORD usernameCharacters = static_cast<DWORD>(username.size());
     if (!GetUserNameW(username.data(), &usernameCharacters))
     {
@@ -89,11 +89,11 @@ enum class CredentialReadResult
 {
     HANDLE rawToken = nullptr;
     if (!LogonUserW(account.username.c_str(),
-                    L".",
-                    password.data(),
-                    LOGON32_LOGON_INTERACTIVE,
-                    LOGON32_PROVIDER_DEFAULT,
-                    &rawToken))
+            L".",
+            password.data(),
+            LOGON32_LOGON_INTERACTIVE,
+            LOGON32_PROVIDER_DEFAULT,
+            &rawToken))
     {
         std::wcerr << L"Windows rejected the credential for '" << account.qualifiedUsername
                    << L"': " << FormatWindowsError(GetLastError()) << L"\n";
@@ -103,8 +103,8 @@ enum class CredentialReadResult
     return ValidateNonAdministrativeToken(token.get(), account);
 }
 
-[[nodiscard]] CredentialReadResult ReadCredential(const AccountIdentity& account,
-                                                  CredentialBuffer& credential)
+[[nodiscard]] CredentialReadResult ReadCredential(
+    const AccountIdentity& account, CredentialBuffer& credential)
 {
     const std::wstring target = CredentialTarget(account);
     if (CredReadW(target.c_str(), CRED_TYPE_GENERIC, 0, credential.address()))
@@ -121,8 +121,8 @@ enum class CredentialReadResult
     return CredentialReadResult::Error;
 }
 
-[[nodiscard]] ExitCode ValidateAndSaveCredential(const AccountIdentity& account,
-                                                 SecretBuffer& password)
+[[nodiscard]] ExitCode ValidateAndSaveCredential(
+    const AccountIdentity& account, SecretBuffer& password)
 {
     if (!ValidatePassword(account, password) || !SaveCredential(account, password))
     {
@@ -260,8 +260,8 @@ StoredCredentialResult LoadStoredPassword(const AccountIdentity& account, Secret
                    << L"Forget and register it again.\n";
         return StoredCredentialResult::Error;
     }
-    if (!password.assign_bytes(credential.get()->CredentialBlob,
-                               credential.get()->CredentialBlobSize))
+    if (!password.assign_bytes(
+            credential.get()->CredentialBlob, credential.get()->CredentialBlobSize))
     {
         std::wcerr << L"The stored credential has an invalid password representation.\n";
         return StoredCredentialResult::Error;
@@ -279,7 +279,7 @@ bool SaveCredential(const AccountIdentity& account, const SecretBuffer& password
     {
         comment = L"claude-win-sandbox test credential: " + account.testCredentialTag;
     }
-    CREDENTIALW credential{};
+    CREDENTIALW credential {};
     credential.Type = CRED_TYPE_GENERIC;
     credential.TargetName = target.data();
     credential.Comment = comment.data();

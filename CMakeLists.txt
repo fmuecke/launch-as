@@ -36,6 +36,7 @@ function(configure_native_target target)
             /permissive-
             /sdl
             /utf-8
+            /MP
         )
         set_property(TARGET ${target} PROPERTY
             MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"

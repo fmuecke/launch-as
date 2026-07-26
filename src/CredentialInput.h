@@ -18,9 +18,8 @@ enum class CredentialPromptResult
     Error
 };
 
-[[nodiscard]] CredentialPromptResult PromptForPassword(const AccountIdentity& account,
-                                                       SecretBuffer& password,
-                                                       bool offerPersistence, bool& persist);
+[[nodiscard]] CredentialPromptResult PromptForPassword(
+    const AccountIdentity& account, SecretBuffer& password, bool offerPersistence, bool& persist);
 [[nodiscard]] bool ReadPasswordFromStandardInput(SecretBuffer& password);
 
 } // namespace sandbox_launcher

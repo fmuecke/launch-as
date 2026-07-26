@@ -13,7 +13,7 @@ namespace sandbox_launcher
 
 [[nodiscard]] std::wstring QuoteWindowsCommandLineArgument(std::wstring_view argument);
 
-[[nodiscard]] std::wstring BuildWindowsCommandLine(std::wstring_view executable,
-                                                   std::span<const std::wstring> arguments);
+[[nodiscard]] std::wstring BuildWindowsCommandLine(
+    std::wstring_view executable, std::span<const std::wstring> arguments);
 
 } // namespace sandbox_launcher

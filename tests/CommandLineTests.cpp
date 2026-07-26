@@ -40,8 +40,8 @@ class UniqueHandle
     HANDLE value_;
 };
 
-[[nodiscard]] bool ExpectEqual(std::wstring_view actual, std::wstring_view expected,
-                               std::wstring_view name)
+[[nodiscard]] bool ExpectEqual(
+    std::wstring_view actual, std::wstring_view expected, std::wstring_view name)
 {
     if (actual == expected)
     {
@@ -66,17 +66,17 @@ int wmain(int argc, wchar_t* argv[])
     if (!ExpectEqual(
             sandbox_launcher::QuoteWindowsCommandLineArgument(L""), L"\"\"", L"empty argument") ||
         !ExpectEqual(sandbox_launcher::QuoteWindowsCommandLineArgument(L"plain"),
-                     L"plain",
-                     L"plain argument") ||
+            L"plain",
+            L"plain argument") ||
         !ExpectEqual(sandbox_launcher::QuoteWindowsCommandLineArgument(L"with space"),
-                     L"\"with space\"",
-                     L"spaced argument") ||
+            L"\"with space\"",
+            L"spaced argument") ||
         !ExpectEqual(sandbox_launcher::QuoteWindowsCommandLineArgument(L"quote\"inside"),
-                     L"\"quote\\\"inside\"",
-                     L"embedded quote") ||
+            L"\"quote\\\"inside\"",
+            L"embedded quote") ||
         !ExpectEqual(sandbox_launcher::QuoteWindowsCommandLineArgument(L"trailing slash\\"),
-                     L"\"trailing slash\\\\\"",
-                     L"trailing backslash"))
+            L"\"trailing slash\\\\\"",
+            L"trailing backslash"))
     {
         return 1;
     }
@@ -99,19 +99,19 @@ int wmain(int argc, wchar_t* argv[])
     std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
     mutableCommandLine.push_back(L'\0');
 
-    STARTUPINFOW startupInfo{};
+    STARTUPINFOW startupInfo {};
     startupInfo.cb = sizeof(startupInfo);
-    PROCESS_INFORMATION processInfo{};
+    PROCESS_INFORMATION processInfo {};
     if (!CreateProcessW(probePath.c_str(),
-                        mutableCommandLine.data(),
-                        nullptr,
-                        nullptr,
-                        FALSE,
-                        0,
-                        nullptr,
-                        nullptr,
-                        &startupInfo,
-                        &processInfo))
+            mutableCommandLine.data(),
+            nullptr,
+            nullptr,
+            FALSE,
+            0,
+            nullptr,
+            nullptr,
+            &startupInfo,
+            &processInfo))
     {
         std::wcerr << L"Could not start argv probe: " << GetLastError() << L"\n";
         return 1;

@@ -48,8 +48,8 @@ std::wstring QuoteWindowsCommandLineArgument(std::wstring_view argument)
     return quoted;
 }
 
-std::wstring BuildWindowsCommandLine(std::wstring_view executable,
-                                     std::span<const std::wstring> arguments)
+std::wstring BuildWindowsCommandLine(
+    std::wstring_view executable, std::span<const std::wstring> arguments)
 {
     std::wstring commandLine = QuoteWindowsCommandLineArgument(executable);
     for (const std::wstring& argument : arguments)

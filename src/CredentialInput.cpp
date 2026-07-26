@@ -72,10 +72,10 @@ class SensitiveBytes final
     std::vector<BYTE> bytes_;
 };
 
-[[nodiscard]] bool PromptUsernameMatches(const AccountIdentity& account, std::wstring_view username,
-                                         std::wstring_view domain)
+[[nodiscard]] bool PromptUsernameMatches(
+    const AccountIdentity& account, std::wstring_view username, std::wstring_view domain)
 {
-    std::array<wchar_t, MAX_COMPUTERNAME_LENGTH + 1> computerName{};
+    std::array<wchar_t, MAX_COMPUTERNAME_LENGTH + 1> computerName {};
     DWORD computerNameCharacters = static_cast<DWORD>(computerName.size());
     if (!GetComputerNameW(computerName.data(), &computerNameCharacters))
     {
@@ -87,7 +87,7 @@ class SensitiveBytes final
     const std::wstring suppliedUsername(username);
     if (domain.empty() &&
         (_wcsicmp(suppliedUsername.c_str(), account.qualifiedUsername.c_str()) == 0 ||
-         _wcsicmp(suppliedUsername.c_str(), expectedComputerAccount.c_str()) == 0))
+            _wcsicmp(suppliedUsername.c_str(), expectedComputerAccount.c_str()) == 0))
     {
         return true;
     }
@@ -99,24 +99,23 @@ class SensitiveBytes final
            _wcsicmp(std::wstring(domain).c_str(), computerName.data()) == 0;
 }
 
-[[nodiscard]] CredentialPromptResult UnpackPromptResult(const AccountIdentity& account,
-                                                        const AuthenticationBuffer& packed,
-                                                        SecretBuffer& password)
+[[nodiscard]] CredentialPromptResult UnpackPromptResult(
+    const AccountIdentity& account, const AuthenticationBuffer& packed, SecretBuffer& password)
 {
-    std::array<wchar_t, CREDUI_MAX_USERNAME_LENGTH + 1> username{};
-    std::array<wchar_t, CREDUI_MAX_DOMAIN_TARGET_LENGTH + 1> domain{};
+    std::array<wchar_t, CREDUI_MAX_USERNAME_LENGTH + 1> username {};
+    std::array<wchar_t, CREDUI_MAX_DOMAIN_TARGET_LENGTH + 1> domain {};
     DWORD usernameCharacters = static_cast<DWORD>(username.size());
     DWORD domainCharacters = static_cast<DWORD>(domain.size());
     DWORD passwordCharacters = static_cast<DWORD>(password.capacity());
     if (!CredUnPackAuthenticationBufferW(0,
-                                         packed.get(),
-                                         packed.size(),
-                                         username.data(),
-                                         &usernameCharacters,
-                                         domain.data(),
-                                         &domainCharacters,
-                                         password.data(),
-                                         &passwordCharacters))
+            packed.get(),
+            packed.size(),
+            username.data(),
+            &usernameCharacters,
+            domain.data(),
+            &domainCharacters,
+            password.data(),
+            &passwordCharacters))
     {
         std::wcerr << L"Could not unpack the supplied credential: "
                    << FormatWindowsError(GetLastError()) << L"\n";
@@ -146,11 +145,11 @@ class SensitiveBytes final
 
 } // namespace
 
-CredentialPromptResult PromptForPassword(const AccountIdentity& account, SecretBuffer& password,
-                                         bool offerPersistence, bool& persist)
+CredentialPromptResult PromptForPassword(
+    const AccountIdentity& account, SecretBuffer& password, bool offerPersistence, bool& persist)
 {
     std::wstring inputUsername = account.qualifiedUsername;
-    std::array<wchar_t, 1> emptyPassword{ L'\0' };
+    std::array<wchar_t, 1> emptyPassword {L'\0'};
     DWORD inputBufferBytes = 0;
     CredPackAuthenticationBufferW(
         0, inputUsername.data(), emptyPassword.data(), nullptr, &inputBufferBytes);
@@ -172,7 +171,7 @@ CredentialPromptResult PromptForPassword(const AccountIdentity& account, SecretB
 
     const std::wstring message = L"Enter the password for " + account.qualifiedUsername +
                                  L". The launcher will reject administrative accounts.";
-    CREDUI_INFOW uiInfo{};
+    CREDUI_INFOW uiInfo {};
     uiInfo.cbSize = sizeof(uiInfo);
     uiInfo.pszCaptionText = L"Claude Sandbox";
     uiInfo.pszMessageText = message.c_str();
@@ -185,16 +184,15 @@ CredentialPromptResult PromptForPassword(const AccountIdentity& account, SecretB
     {
         flags |= CREDUIWIN_CHECKBOX;
     }
-    const DWORD promptResult =
-        CredUIPromptForWindowsCredentialsW(&uiInfo,
-                                           0,
-                                           &authenticationPackage,
-                                           inputBuffer.data(),
-                                           inputBufferBytes,
-                                           outputBuffer.address(),
-                                           outputBuffer.size_address(),
-                                           offerPersistence ? &save : nullptr,
-                                           flags);
+    const DWORD promptResult = CredUIPromptForWindowsCredentialsW(&uiInfo,
+        0,
+        &authenticationPackage,
+        inputBuffer.data(),
+        inputBufferBytes,
+        outputBuffer.address(),
+        outputBuffer.size_address(),
+        offerPersistence ? &save : nullptr,
+        flags);
     SecureZeroMemory(inputBuffer.data(), inputBuffer.size());
     if (promptResult == ERROR_CANCELLED)
     {
@@ -235,10 +233,10 @@ bool ReadPasswordFromStandardInput(SecretBuffer& password)
     {
         DWORD chunkBytes = 0;
         if (!ReadFile(standardInput,
-                      input.data() + bytesRead,
-                      static_cast<DWORD>(input.capacity() - bytesRead),
-                      &chunkBytes,
-                      nullptr))
+                input.data() + bytesRead,
+                static_cast<DWORD>(input.capacity() - bytesRead),
+                &chunkBytes,
+                nullptr))
         {
             const DWORD readError = GetLastError();
             if (readError == ERROR_BROKEN_PIPE)
@@ -300,11 +298,11 @@ bool ReadPasswordFromStandardInput(SecretBuffer& password)
     }
 
     const int requiredCharacters = MultiByteToWideChar(CP_UTF8,
-                                                       MB_ERR_INVALID_CHARS,
-                                                       reinterpret_cast<const char*>(input.data()),
-                                                       static_cast<int>(bytesRead),
-                                                       nullptr,
-                                                       0);
+        MB_ERR_INVALID_CHARS,
+        reinterpret_cast<const char*>(input.data()),
+        static_cast<int>(bytesRead),
+        nullptr,
+        0);
     if (requiredCharacters <= 0 ||
         static_cast<std::size_t>(requiredCharacters) >= password.capacity())
     {
@@ -312,11 +310,11 @@ bool ReadPasswordFromStandardInput(SecretBuffer& password)
         return false;
     }
     if (MultiByteToWideChar(CP_UTF8,
-                            MB_ERR_INVALID_CHARS,
-                            reinterpret_cast<const char*>(input.data()),
-                            static_cast<int>(bytesRead),
-                            password.data(),
-                            requiredCharacters) != requiredCharacters ||
+            MB_ERR_INVALID_CHARS,
+            reinterpret_cast<const char*>(input.data()),
+            static_cast<int>(bytesRead),
+            password.data(),
+            requiredCharacters) != requiredCharacters ||
         !password.set_length(static_cast<std::size_t>(requiredCharacters)))
     {
         std::wcerr << L"Could not decode password input.\n";

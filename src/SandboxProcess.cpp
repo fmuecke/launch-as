@@ -66,10 +66,10 @@ class LocalBuffer final
 
     std::vector<BYTE> tokenInformation(tokenInformationBytes);
     if (!GetTokenInformation(token.get(),
-                             TokenUser,
-                             tokenInformation.data(),
-                             tokenInformationBytes,
-                             &tokenInformationBytes))
+            TokenUser,
+            tokenInformation.data(),
+            tokenInformationBytes,
+            &tokenInformationBytes))
     {
         std::wcerr << L"Could not read the child process identity: "
                    << FormatWindowsError(GetLastError()) << L"\n";
@@ -101,8 +101,7 @@ class LocalBuffer final
 }
 
 [[nodiscard]] ExitCode AcquirePassword(const AccountIdentity& account, CredentialMode mode,
-                                       SecretBuffer& password, bool& fromStoredCredential,
-                                       bool& persistPromptedCredential)
+    SecretBuffer& password, bool& fromStoredCredential, bool& persistPromptedCredential)
 {
     fromStoredCredential = false;
     persistPromptedCredential = false;
@@ -146,7 +145,7 @@ class LocalBuffer final
 std::optional<AccountIdentity> ResolveLocalAccount(const std::wstring& username)
 {
     const std::wstring qualifiedUsername = L".\\" + username;
-    std::array<wchar_t, MAX_COMPUTERNAME_LENGTH + 1> computerName{};
+    std::array<wchar_t, MAX_COMPUTERNAME_LENGTH + 1> computerName {};
     DWORD computerNameCharacters = static_cast<DWORD>(computerName.size());
     if (!GetComputerNameW(computerName.data(), &computerNameCharacters))
     {
@@ -159,7 +158,7 @@ std::optional<AccountIdentity> ResolveLocalAccount(const std::wstring& username)
 
     DWORD sidBytes = 0;
     DWORD domainCharacters = 0;
-    SID_NAME_USE sidType{};
+    SID_NAME_USE sidType {};
     LookupAccountNameW(
         nullptr, lookupName.c_str(), nullptr, &sidBytes, nullptr, &domainCharacters, &sidType);
 
@@ -173,12 +172,12 @@ std::optional<AccountIdentity> ResolveLocalAccount(const std::wstring& username)
     std::vector<BYTE> sid(sidBytes);
     std::vector<wchar_t> domain(domainCharacters);
     if (!LookupAccountNameW(nullptr,
-                            lookupName.c_str(),
-                            sid.data(),
-                            &sidBytes,
-                            domain.data(),
-                            &domainCharacters,
-                            &sidType))
+            lookupName.c_str(),
+            sid.data(),
+            &sidBytes,
+            domain.data(),
+            &domainCharacters,
+            &sidType))
     {
         std::wcerr << L"Could not resolve local account '" << qualifiedUsername << L"': "
                    << FormatWindowsError(GetLastError()) << L"\n";
@@ -200,20 +199,22 @@ std::optional<AccountIdentity> ResolveLocalAccount(const std::wstring& username)
     }
     LocalBuffer sidBuffer(rawSid);
 
-    return AccountIdentity{ .username = username,
-                            .qualifiedUsername = qualifiedUsername,
-                            .sid = rawSid,
-                            .testCredentialTag = {} };
+    return AccountIdentity {
+        .username = username,
+        .qualifiedUsername = qualifiedUsername,
+        .sid = rawSid,
+        .testCredentialTag = {}
+    };
 }
 
 bool ValidateNonAdministrativeToken(HANDLE token, const AccountIdentity& account)
 {
-    std::array<BYTE, SECURITY_MAX_SID_SIZE> administratorsSid{};
+    std::array<BYTE, SECURITY_MAX_SID_SIZE> administratorsSid {};
     DWORD administratorsSidBytes = static_cast<DWORD>(administratorsSid.size());
     if (!CreateWellKnownSid(WinBuiltinAdministratorsSid,
-                            nullptr,
-                            administratorsSid.data(),
-                            &administratorsSidBytes))
+            nullptr,
+            administratorsSid.data(),
+            &administratorsSidBytes))
     {
         const DWORD error = GetLastError();
         std::wcerr << L"Could not construct the Administrators SID: " << FormatWindowsError(error)
@@ -290,13 +291,13 @@ ExitCode RunSandboxProcess(const AccountIdentity& account, const Options& option
         return passwordResult;
     }
 
-    STARTUPINFOW startupInfo{};
+    STARTUPINFOW startupInfo {};
     startupInfo.cb = sizeof(startupInfo);
     if (options.newConsole)
     {
         startupInfo.lpDesktop = const_cast<wchar_t*>(L"winsta0\\default");
     }
-    PROCESS_INFORMATION processInfo{};
+    PROCESS_INFORMATION processInfo {};
 
     DWORD creationFlags = CREATE_SUSPENDED;
     if (options.newConsole)
@@ -315,16 +316,16 @@ ExitCode RunSandboxProcess(const AccountIdentity& account, const Options& option
         mutableCommandLine.push_back(L'\0');
 
         created = CreateProcessWithLogonW(account.username.c_str(),
-                                          L".",
-                                          password.data(),
-                                          LOGON_WITH_PROFILE,
-                                          options.executablePath.c_str(),
-                                          mutableCommandLine.data(),
-                                          creationFlags,
-                                          nullptr,
-                                          workingDirectory,
-                                          &startupInfo,
-                                          &processInfo);
+            L".",
+            password.data(),
+            LOGON_WITH_PROFILE,
+            options.executablePath.c_str(),
+            mutableCommandLine.data(),
+            creationFlags,
+            nullptr,
+            workingDirectory,
+            &startupInfo,
+            &processInfo);
         launchError = created ? ERROR_SUCCESS : GetLastError();
         if (created || launchError != ERROR_LOGON_FAILURE ||
             options.credentialMode != CredentialMode::Auto || !fromStoredCredential)

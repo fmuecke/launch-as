@@ -87,7 +87,7 @@ std::optional<Options> ParseOptions(std::span<wchar_t*> arguments)
         return std::nullopt;
     }
 
-    Options options{ .command = *command };
+    Options options {.command = *command};
     bool processArgumentsStarted = false;
     for (std::size_t index = 2; index < arguments.size(); ++index)
     {
@@ -171,14 +171,14 @@ std::optional<Options> ParseOptions(std::span<wchar_t*> arguments)
         const bool validTag =
             options.testCredentialTag.size() <= MaximumTestCredentialTagCharacters &&
             std::all_of(options.testCredentialTag.begin(),
-                        options.testCredentialTag.end(),
-                        [](wchar_t character)
-                        {
-                            return (character >= L'a' && character <= L'z') ||
-                                   (character >= L'A' && character <= L'Z') ||
-                                   (character >= L'0' && character <= L'9') || character == L'-' ||
-                                   character == L'_' || character == L'.';
-                        });
+                options.testCredentialTag.end(),
+                [](wchar_t character)
+                {
+                    return (character >= L'a' && character <= L'z') ||
+                           (character >= L'A' && character <= L'Z') ||
+                           (character >= L'0' && character <= L'9') || character == L'-' ||
+                           character == L'_' || character == L'.';
+                });
         if (!validTag)
         {
             return std::nullopt;

@@ -9,8 +9,17 @@ configure_file(
 )
 
 add_executable(ClaudeSandboxLauncher
+    src/Credentials.cpp
+    src/Credentials.h
     src/ClaudeSandboxLauncher.cpp
+    src/LauncherOptions.cpp
+    src/LauncherOptions.h
+    src/SandboxProcess.cpp
+    src/SandboxProcess.h
+    src/Win32Support.cpp
+    src/Win32Support.h
     src/WindowsCommandLine.cpp
+    src/WindowsCommandLine.h
     "${CMAKE_CURRENT_BINARY_DIR}/LauncherVersion.rc"
 )
 

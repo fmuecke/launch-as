@@ -8,7 +8,6 @@
 #include <cstddef>
 #include <iostream>
 #include <optional>
-#include <string>
 #include <string_view>
 
 namespace sandbox_launcher
@@ -39,15 +38,34 @@ constexpr std::size_t MaximumTestCredentialTagCharacters = 64;
     return std::nullopt;
 }
 
+[[nodiscard]] std::optional<CredentialMode> ParseCredentialMode(std::wstring_view value)
+{
+    if (value == L"auto")
+    {
+        return CredentialMode::Auto;
+    }
+    if (value == L"stored")
+    {
+        return CredentialMode::Stored;
+    }
+    if (value == L"prompt")
+    {
+        return CredentialMode::Prompt;
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 void PrintUsage()
 {
     std::wcerr << L"Usage:\n"
-               << L"  ClaudeSandboxLauncher.exe register --user <local-user>\n"
+               << L"  ClaudeSandboxLauncher.exe register --user <local-user>"
+                  L" [--password-stdin]\n"
                << L"  ClaudeSandboxLauncher.exe status --user <local-user>\n"
                << L"  ClaudeSandboxLauncher.exe forget --user <local-user>\n"
                << L"  ClaudeSandboxLauncher.exe run --user <local-user>"
+                  L" [--credential-mode <auto|stored|prompt>]"
                   L" [--working-directory <directory>] [--new-console]"
                   L" -- <absolute-executable> [arguments...]\n";
 #ifndef NDEBUG
@@ -88,15 +106,38 @@ std::optional<Options> ParseOptions(std::span<wchar_t*> arguments)
             options.newConsole = true;
             continue;
         }
+        if (name == L"--password-stdin")
+        {
+            if (options.passwordFromStdin)
+            {
+                return std::nullopt;
+            }
+            options.passwordFromStdin = true;
+            continue;
+        }
         if (index + 1 >= arguments.size())
         {
             return std::nullopt;
         }
-        const std::wstring value(arguments[++index]);
+        const std::wstring_view value(arguments[++index]);
 
         if (name == L"--user")
         {
             options.username = value;
+        }
+        else if (name == L"--credential-mode")
+        {
+            if (options.credentialModeSpecified)
+            {
+                return std::nullopt;
+            }
+            const auto credentialMode = ParseCredentialMode(value);
+            if (!credentialMode)
+            {
+                return std::nullopt;
+            }
+            options.credentialMode = *credentialMode;
+            options.credentialModeSpecified = true;
         }
         else if (name == L"--test-credential-tag")
         {
@@ -117,11 +158,7 @@ std::optional<Options> ParseOptions(std::span<wchar_t*> arguments)
         }
     }
 
-    if (options.username.empty())
-    {
-        return std::nullopt;
-    }
-    if (options.username.find_first_of(L"\\/@") != std::wstring::npos)
+    if (options.username.empty() || options.username.find_first_of(L"\\/@") != std::wstring::npos)
     {
         return std::nullopt;
     }
@@ -149,14 +186,17 @@ std::optional<Options> ParseOptions(std::span<wchar_t*> arguments)
     }
     if (*command == Command::Run)
     {
-        if (!processArgumentsStarted || options.processArguments.empty())
+        if (options.passwordFromStdin || !processArgumentsStarted ||
+            options.processArguments.empty())
         {
             return std::nullopt;
         }
         options.executablePath = options.processArguments.front();
         options.processArguments.erase(options.processArguments.begin());
     }
-    else if (processArgumentsStarted || !options.workingDirectory.empty() || options.newConsole)
+    else if (processArgumentsStarted || options.credentialModeSpecified ||
+             !options.workingDirectory.empty() || options.newConsole ||
+             (options.passwordFromStdin && *command != Command::Register))
     {
         return std::nullopt;
     }

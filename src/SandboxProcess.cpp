@@ -4,6 +4,7 @@
 
 #include "SandboxProcess.h"
 
+#include "CredentialInput.h"
 #include "Credentials.h"
 #include "Win32Support.h"
 #include "WindowsCommandLine.h"
@@ -97,6 +98,47 @@ class LocalBuffer final
         return false;
     }
     return ValidateNonAdministrativeToken(token.get(), account);
+}
+
+[[nodiscard]] ExitCode AcquirePassword(const AccountIdentity& account, CredentialMode mode,
+                                       SecretBuffer& password, bool& fromStoredCredential,
+                                       bool& persistPromptedCredential)
+{
+    fromStoredCredential = false;
+    persistPromptedCredential = false;
+
+    if (mode != CredentialMode::Prompt)
+    {
+        const StoredCredentialResult storedResult = LoadStoredPassword(account, password);
+        if (storedResult == StoredCredentialResult::Success)
+        {
+            fromStoredCredential = true;
+            return ExitSuccess;
+        }
+        if (storedResult == StoredCredentialResult::Error)
+        {
+            return ExitFailure;
+        }
+        if (mode == CredentialMode::Stored)
+        {
+            std::wcerr << L"No stored launcher credential exists for " << account.qualifiedUsername
+                       << L". Register one first or use " << L"--credential-mode auto.\n";
+            return ExitCredentialMissing;
+        }
+    }
+
+    persistPromptedCredential = mode == CredentialMode::Auto;
+    const CredentialPromptResult promptResult = PromptForPassword(
+        account, password, mode == CredentialMode::Auto, persistPromptedCredential);
+    if (promptResult == CredentialPromptResult::Cancelled)
+    {
+        return ExitCancelled;
+    }
+    if (promptResult == CredentialPromptResult::Error)
+    {
+        return ExitFailure;
+    }
+    return ExitSuccess;
 }
 
 } // namespace
@@ -239,16 +281,14 @@ bool ValidateRunPaths(const Options& options)
 ExitCode RunSandboxProcess(const AccountIdentity& account, const Options& options)
 {
     SecretBuffer password;
-    const ExitCode passwordResult = LoadStoredPassword(account, password);
+    bool fromStoredCredential = false;
+    bool persistPromptedCredential = false;
+    const ExitCode passwordResult = AcquirePassword(
+        account, options.credentialMode, password, fromStoredCredential, persistPromptedCredential);
     if (passwordResult != ExitSuccess)
     {
         return passwordResult;
     }
-
-    std::wstring commandLine =
-        BuildWindowsCommandLine(options.executablePath.native(), options.processArguments);
-    std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
-    mutableCommandLine.push_back(L'\0');
 
     STARTUPINFOW startupInfo{};
     startupInfo.cb = sizeof(startupInfo);
@@ -265,27 +305,58 @@ ExitCode RunSandboxProcess(const AccountIdentity& account, const Options& option
     }
     const wchar_t* workingDirectory =
         options.workingDirectory.empty() ? nullptr : options.workingDirectory.c_str();
-    const BOOL created = CreateProcessWithLogonW(account.username.c_str(),
-                                                 L".",
-                                                 password.data(),
-                                                 LOGON_WITH_PROFILE,
-                                                 options.executablePath.c_str(),
-                                                 mutableCommandLine.data(),
-                                                 creationFlags,
-                                                 nullptr,
-                                                 workingDirectory,
-                                                 &startupInfo,
-                                                 &processInfo);
-    const DWORD launchError = created ? ERROR_SUCCESS : GetLastError();
-    password.clear();
+    BOOL created = FALSE;
+    DWORD launchError = ERROR_SUCCESS;
+    for (;;)
+    {
+        std::wstring commandLine =
+            BuildWindowsCommandLine(options.executablePath.native(), options.processArguments);
+        std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
+        mutableCommandLine.push_back(L'\0');
+
+        created = CreateProcessWithLogonW(account.username.c_str(),
+                                          L".",
+                                          password.data(),
+                                          LOGON_WITH_PROFILE,
+                                          options.executablePath.c_str(),
+                                          mutableCommandLine.data(),
+                                          creationFlags,
+                                          nullptr,
+                                          workingDirectory,
+                                          &startupInfo,
+                                          &processInfo);
+        launchError = created ? ERROR_SUCCESS : GetLastError();
+        if (created || launchError != ERROR_LOGON_FAILURE ||
+            options.credentialMode != CredentialMode::Auto || !fromStoredCredential)
+        {
+            break;
+        }
+
+        std::wcerr << L"The stored credential for " << account.qualifiedUsername
+                   << L" was rejected. Enter its current password.\n";
+        password.clear();
+        fromStoredCredential = false;
+        persistPromptedCredential = true;
+        const CredentialPromptResult promptResult =
+            PromptForPassword(account, password, true, persistPromptedCredential);
+        if (promptResult == CredentialPromptResult::Cancelled)
+        {
+            return ExitCancelled;
+        }
+        if (promptResult == CredentialPromptResult::Error)
+        {
+            return ExitFailure;
+        }
+    }
 
     if (!created)
     {
+        password.clear();
         std::wcerr << L"Could not run the process as " << account.qualifiedUsername << L": "
                    << FormatWindowsError(launchError) << L"\n";
         if (launchError == ERROR_LOGON_FAILURE)
         {
-            std::wcerr << L"The stored password may be stale. Register it again.\n";
+            std::wcerr << L"Windows rejected the supplied password.\n";
         }
         return ExitFailure;
     }
@@ -294,10 +365,23 @@ ExitCode RunSandboxProcess(const AccountIdentity& account, const Options& option
     UniqueHandle thread(processInfo.hThread);
     if (!ProcessHasAccountSid(process.get(), account))
     {
+        password.clear();
         TerminateProcess(process.get(), ExitFailure);
         WaitForSingleObject(process.get(), 5'000);
         return ExitFailure;
     }
+    if (persistPromptedCredential)
+    {
+        if (SaveCredential(account, password))
+        {
+            std::wcout << L"Stored the credential for future runs.\n";
+        }
+        else
+        {
+            std::wcerr << L"The process will continue without persisting the credential.\n";
+        }
+    }
+    password.clear();
     if (ResumeThread(thread.get()) == static_cast<DWORD>(-1))
     {
         const DWORD resumeError = GetLastError();

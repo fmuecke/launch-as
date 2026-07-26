@@ -35,7 +35,8 @@ int wmain(int argc, wchar_t* argv[])
     switch (options->command)
     {
     case Command::Register:
-        exitCode = RegisterCredential(*account);
+        exitCode = options->passwordFromStdin ? RegisterCredentialFromStandardInput(*account)
+                                              : RegisterCredential(*account);
         break;
     case Command::Run:
         exitCode = RunSandboxProcess(*account, *options);

@@ -9,6 +9,8 @@ configure_file(
 )
 
 add_executable(ClaudeSandboxLauncher
+    src/CredentialInput.cpp
+    src/CredentialInput.h
     src/Credentials.cpp
     src/Credentials.h
     src/ClaudeSandboxLauncher.cpp
@@ -56,6 +58,8 @@ endfunction()
 
 target_link_libraries(ClaudeSandboxLauncher PRIVATE
     Advapi32
+    Credui
+    Ole32
 )
 
 configure_native_target(ClaudeSandboxLauncher)

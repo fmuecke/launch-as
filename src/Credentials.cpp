@@ -4,9 +4,11 @@
 
 #include "Credentials.h"
 
+#include "CredentialInput.h"
 #include "SandboxProcess.h"
 #include "Win32Support.h"
 
+#include <Lmcons.h>
 #include <Windows.h>
 #include <array>
 #include <cstddef>
@@ -22,39 +24,19 @@ namespace sandbox_launcher
 namespace
 {
 
-constexpr std::wstring_view CredentialPrefix = L"claude-win-sandbox:";
+constexpr std::wstring_view CredentialPrefix = L"claude-win-sandbox: ";
 constexpr std::size_t MaximumPasswordCharacters = 512;
-
-class ConsoleModeGuard final
-{
-  public:
-    ConsoleModeGuard(HANDLE handle, DWORD originalMode) noexcept
-        : handle_(handle), originalMode_(originalMode)
-    {
-    }
-
-    ~ConsoleModeGuard() { SetConsoleMode(handle_, originalMode_); }
-
-    ConsoleModeGuard(const ConsoleModeGuard&) = delete;
-    ConsoleModeGuard& operator=(const ConsoleModeGuard&) = delete;
-
-  private:
-    HANDLE handle_;
-    DWORD originalMode_;
-};
 
 class CredentialBuffer final
 {
   public:
     CredentialBuffer() noexcept = default;
-
     ~CredentialBuffer() { reset(); }
 
     CredentialBuffer(const CredentialBuffer&) = delete;
     CredentialBuffer& operator=(const CredentialBuffer&) = delete;
 
     [[nodiscard]] PCREDENTIALW* address() noexcept { return &credential_; }
-
     [[nodiscard]] PCREDENTIALW get() const noexcept { return credential_; }
 
     void reset() noexcept
@@ -63,7 +45,6 @@ class CredentialBuffer final
         {
             return;
         }
-
         if (credential_->CredentialBlob != nullptr && credential_->CredentialBlobSize > 0)
         {
             SecureZeroMemory(credential_->CredentialBlob, credential_->CredentialBlobSize);
@@ -83,6 +64,17 @@ enum class CredentialReadResult
     Error
 };
 
+[[nodiscard]] std::wstring CurrentWindowsUsername()
+{
+    std::array<wchar_t, UNLEN + 1> username{};
+    DWORD usernameCharacters = static_cast<DWORD>(username.size());
+    if (!GetUserNameW(username.data(), &usernameCharacters))
+    {
+        return L"<unknown Windows user>";
+    }
+    return username.data();
+}
+
 [[nodiscard]] std::wstring CredentialTarget(const AccountIdentity& account)
 {
     if (!account.testCredentialTag.empty())
@@ -91,59 +83,6 @@ enum class CredentialReadResult
                account.sid;
     }
     return std::wstring(CredentialPrefix) + account.sid;
-}
-
-[[nodiscard]] bool ReadPassword(std::wstring_view prompt, SecretBuffer& password)
-{
-    const HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
-    if (input == nullptr || input == INVALID_HANDLE_VALUE)
-    {
-        std::wcerr << L"Password input requires an interactive console.\n";
-        return false;
-    }
-
-    DWORD originalMode = 0;
-    if (!GetConsoleMode(input, &originalMode))
-    {
-        std::wcerr << L"Password input must not be redirected; use an interactive console.\n";
-        return false;
-    }
-
-    const DWORD passwordMode = originalMode & ~static_cast<DWORD>(ENABLE_ECHO_INPUT);
-    if (!SetConsoleMode(input, passwordMode))
-    {
-        std::wcerr << L"Could not disable console echo: " << FormatWindowsError(GetLastError())
-                   << L"\n";
-        return false;
-    }
-    ConsoleModeGuard restoreMode(input, originalMode);
-
-    std::wcout << prompt << std::flush;
-    DWORD charactersRead = 0;
-    if (!ReadConsoleW(input,
-                      password.data(),
-                      static_cast<DWORD>(password.capacity() - 1),
-                      &charactersRead,
-                      nullptr))
-    {
-        std::wcout << L"\n";
-        std::wcerr << L"Could not read password: " << FormatWindowsError(GetLastError()) << L"\n";
-        return false;
-    }
-    std::wcout << L"\n";
-
-    std::size_t length = charactersRead;
-    while (length > 0 &&
-           (password.data()[length - 1] == L'\r' || password.data()[length - 1] == L'\n'))
-    {
-        --length;
-    }
-    if (!password.set_length(length) || length == 0)
-    {
-        std::wcerr << L"Password cannot be empty.\n";
-        return false;
-    }
-    return true;
 }
 
 [[nodiscard]] bool ValidatePassword(const AccountIdentity& account, const SecretBuffer& password)
@@ -164,32 +103,6 @@ enum class CredentialReadResult
     return ValidateNonAdministrativeToken(token.get(), account);
 }
 
-[[nodiscard]] bool WriteCredential(const AccountIdentity& account, const SecretBuffer& password)
-{
-    std::wstring target = CredentialTarget(account);
-    std::wstring comment = L"claude-win-sandbox launcher credential";
-    if (!account.testCredentialTag.empty())
-    {
-        comment = L"claude-win-sandbox test credential: " + account.testCredentialTag;
-    }
-    CREDENTIALW credential{};
-    credential.Type = CRED_TYPE_GENERIC;
-    credential.TargetName = target.data();
-    credential.Comment = comment.data();
-    credential.CredentialBlobSize = password.byte_size();
-    credential.CredentialBlob = reinterpret_cast<LPBYTE>(const_cast<wchar_t*>(password.data()));
-    credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
-    credential.UserName = const_cast<wchar_t*>(account.qualifiedUsername.c_str());
-
-    if (!CredWriteW(&credential, 0))
-    {
-        std::wcerr << L"Could not store credential: " << FormatWindowsError(GetLastError())
-                   << L"\n";
-        return false;
-    }
-    return true;
-}
-
 [[nodiscard]] CredentialReadResult ReadCredential(const AccountIdentity& account,
                                                   CredentialBuffer& credential)
 {
@@ -206,6 +119,18 @@ enum class CredentialReadResult
     }
     std::wcerr << L"Could not read credential: " << FormatWindowsError(error) << L"\n";
     return CredentialReadResult::Error;
+}
+
+[[nodiscard]] ExitCode ValidateAndSaveCredential(const AccountIdentity& account,
+                                                 SecretBuffer& password)
+{
+    if (!ValidatePassword(account, password) || !SaveCredential(account, password))
+    {
+        return ExitFailure;
+    }
+    std::wcout << L"Stored a machine-local credential for " << account.qualifiedUsername << L" in "
+               << CurrentWindowsUsername() << L"'s Windows Credential Manager.\n";
+    return ExitSuccess;
 }
 
 } // namespace
@@ -242,7 +167,6 @@ bool SecretBuffer::assign_bytes(const BYTE* bytes, DWORD byteCount)
     {
         return false;
     }
-
     const auto characterCount = static_cast<std::size_t>(byteCount / sizeof(wchar_t));
     if (characterCount + 1 > characters_.size())
     {
@@ -268,22 +192,28 @@ void SecretBuffer::clear() noexcept
 ExitCode RegisterCredential(const AccountIdentity& account)
 {
     SecretBuffer password;
-    if (!ReadPassword(L"Password for " + account.qualifiedUsername + L": ", password))
+    bool persist = false;
+    const CredentialPromptResult promptResult =
+        PromptForPassword(account, password, false, persist);
+    if (promptResult == CredentialPromptResult::Cancelled)
+    {
+        return ExitCancelled;
+    }
+    if (promptResult == CredentialPromptResult::Error)
     {
         return ExitFailure;
     }
-    if (!ValidatePassword(account, password))
-    {
-        return ExitFailure;
-    }
-    if (!WriteCredential(account, password))
-    {
-        return ExitFailure;
-    }
+    return ValidateAndSaveCredential(account, password);
+}
 
-    std::wcout << L"Stored a machine-local credential for " << account.qualifiedUsername
-               << L" in the current Windows user's Credential Manager.\n";
-    return ExitSuccess;
+ExitCode RegisterCredentialFromStandardInput(const AccountIdentity& account)
+{
+    SecretBuffer password;
+    if (!ReadPasswordFromStandardInput(password))
+    {
+        return ExitFailure;
+    }
+    return ValidateAndSaveCredential(account, password);
 }
 
 ExitCode CredentialStatus(const AccountIdentity& account)
@@ -306,41 +236,65 @@ ExitCode CredentialStatus(const AccountIdentity& account)
     return ExitSuccess;
 }
 
-ExitCode LoadStoredPassword(const AccountIdentity& account, SecretBuffer& password)
+StoredCredentialResult LoadStoredPassword(const AccountIdentity& account, SecretBuffer& password)
 {
     CredentialBuffer credential;
     const CredentialReadResult result = ReadCredential(account, credential);
     if (result == CredentialReadResult::NotFound)
     {
-        std::wcerr << L"Register the credential first with:\n"
-                   << L"  ClaudeSandboxLauncher.exe register --user " << account.username << L"\n";
-        return ExitCredentialMissing;
+        return StoredCredentialResult::NotFound;
     }
     if (result == CredentialReadResult::Error)
     {
-        return ExitFailure;
+        return StoredCredentialResult::Error;
     }
     if (credential.get()->CredentialBlobSize == 0 || credential.get()->CredentialBlob == nullptr)
     {
         std::wcerr << L"The stored credential contains no password.\n";
-        return ExitFailure;
+        return StoredCredentialResult::Error;
     }
     if (credential.get()->UserName == nullptr ||
         _wcsicmp(credential.get()->UserName, account.qualifiedUsername.c_str()) != 0)
     {
         std::wcerr << L"The stored credential belongs to an unexpected account. "
                    << L"Forget and register it again.\n";
-        return ExitFailure;
+        return StoredCredentialResult::Error;
     }
     if (!password.assign_bytes(credential.get()->CredentialBlob,
                                credential.get()->CredentialBlobSize))
     {
         std::wcerr << L"The stored credential has an invalid password representation.\n";
-        return ExitFailure;
+        return StoredCredentialResult::Error;
     }
 
     credential.reset();
-    return ExitSuccess;
+    return StoredCredentialResult::Success;
+}
+
+bool SaveCredential(const AccountIdentity& account, const SecretBuffer& password)
+{
+    std::wstring target = CredentialTarget(account);
+    std::wstring comment = L"claude-win-sandbox launcher credential";
+    if (!account.testCredentialTag.empty())
+    {
+        comment = L"claude-win-sandbox test credential: " + account.testCredentialTag;
+    }
+    CREDENTIALW credential{};
+    credential.Type = CRED_TYPE_GENERIC;
+    credential.TargetName = target.data();
+    credential.Comment = comment.data();
+    credential.CredentialBlobSize = password.byte_size();
+    credential.CredentialBlob = reinterpret_cast<LPBYTE>(const_cast<wchar_t*>(password.data()));
+    credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
+    credential.UserName = const_cast<wchar_t*>(account.qualifiedUsername.c_str());
+
+    if (!CredWriteW(&credential, 0))
+    {
+        std::wcerr << L"Could not store credential: " << FormatWindowsError(GetLastError())
+                   << L"\n";
+        return false;
+    }
+    return true;
 }
 
 ExitCode ForgetCredential(const AccountIdentity& account)

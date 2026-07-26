@@ -20,6 +20,7 @@ inline constexpr ExitCode ExitSuccess = 0;
 inline constexpr ExitCode ExitFailure = 1;
 inline constexpr ExitCode ExitUsage = 2;
 inline constexpr ExitCode ExitCredentialMissing = 3;
+inline constexpr ExitCode ExitCancelled = 4;
 
 enum class Command
 {
@@ -29,12 +30,22 @@ enum class Command
     Forget
 };
 
+enum class CredentialMode
+{
+    Auto,
+    Stored,
+    Prompt
+};
+
 struct Options
 {
     Command command;
     std::wstring username;
     std::wstring testCredentialTag;
     bool testCredentialTagSpecified = false;
+    bool passwordFromStdin = false;
+    CredentialMode credentialMode = CredentialMode::Auto;
+    bool credentialModeSpecified = false;
     std::filesystem::path workingDirectory;
     std::filesystem::path executablePath;
     std::vector<std::wstring> processArguments;

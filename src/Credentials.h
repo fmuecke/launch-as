@@ -40,9 +40,19 @@ class SecretBuffer final
     std::size_t length_ = 0;
 };
 
+enum class StoredCredentialResult
+{
+    Success,
+    NotFound,
+    Error
+};
+
 [[nodiscard]] ExitCode RegisterCredential(const AccountIdentity& account);
+[[nodiscard]] ExitCode RegisterCredentialFromStandardInput(const AccountIdentity& account);
 [[nodiscard]] ExitCode CredentialStatus(const AccountIdentity& account);
-[[nodiscard]] ExitCode LoadStoredPassword(const AccountIdentity& account, SecretBuffer& password);
+[[nodiscard]] StoredCredentialResult LoadStoredPassword(const AccountIdentity& account,
+                                                        SecretBuffer& password);
+[[nodiscard]] bool SaveCredential(const AccountIdentity& account, const SecretBuffer& password);
 [[nodiscard]] ExitCode ForgetCredential(const AccountIdentity& account);
 
 } // namespace sandbox_launcher

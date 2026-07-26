@@ -38,10 +38,29 @@ function Invoke-Launcher {
         [int[]] $ExpectedExitCodes,
 
         [Parameter(Mandatory)]
-        [string] $ExpectedOutput
+        [string] $ExpectedOutput,
+
+        [Parameter()]
+        [AllowEmptyString()]
+        [string] $StandardInput
     )
 
-    $nativeOutput = @(& $script:ResolvedLauncher @Arguments 2>&1)
+    if ($PSBoundParameters.ContainsKey('StandardInput')) {
+        $previousOutputEncoding = $OutputEncoding
+        try {
+            $OutputEncoding = [Text.UTF8Encoding]::new($false)
+            $nativeOutput = @(
+                $StandardInput |
+                    & $script:ResolvedLauncher @Arguments 2>&1
+            )
+        }
+        finally {
+            $OutputEncoding = $previousOutputEncoding
+        }
+    }
+    else {
+        $nativeOutput = @(& $script:ResolvedLauncher @Arguments 2>&1)
+    }
     $exitCode = $LASTEXITCODE
     $outputText = ($nativeOutput |
         ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
@@ -129,6 +148,83 @@ $null = Invoke-Launcher `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
+    -Name 'Plaintext command-line passwords are rejected' `
+    -Arguments @(
+    'register',
+    '--user',
+    $SandboxUser,
+    '--password',
+    'not-a-real-password'
+) `
+    -ExpectedExitCodes 2 `
+    -ExpectedOutput 'Usage:'
+
+$null = Invoke-Launcher `
+    -Name 'Password stdin is accepted only by register' `
+    -Arguments @(
+    'status',
+    '--user',
+    $SandboxUser,
+    '--password-stdin'
+) `
+    -ExpectedExitCodes 2 `
+    -ExpectedOutput 'Usage:'
+
+$null = Invoke-Launcher `
+    -Name 'Duplicate password stdin options are rejected' `
+    -Arguments @(
+    'register',
+    '--user',
+    $SandboxUser,
+    '--password-stdin',
+    '--password-stdin'
+) `
+    -ExpectedExitCodes 2 `
+    -ExpectedOutput 'Usage:'
+
+$null = Invoke-Launcher `
+    -Name 'Credential mode is accepted only by run' `
+    -Arguments @(
+    'status',
+    '--user',
+    $SandboxUser,
+    '--credential-mode',
+    'stored'
+) `
+    -ExpectedExitCodes 2 `
+    -ExpectedOutput 'Usage:'
+
+$null = Invoke-Launcher `
+    -Name 'Unknown credential mode is rejected' `
+    -Arguments @(
+    'run',
+    '--user',
+    $SandboxUser,
+    '--credential-mode',
+    'unknown',
+    '--',
+    'C:\missing.exe'
+) `
+    -ExpectedExitCodes 2 `
+    -ExpectedOutput 'Usage:'
+
+$null = Invoke-Launcher `
+    -Name 'Duplicate credential modes are rejected' `
+    -Arguments @(
+    'run',
+    '--user',
+    $SandboxUser,
+    '--credential-mode',
+    'auto',
+    '--credential-mode',
+    'stored',
+    '--',
+    'C:\missing.exe'
+) `
+    -ExpectedExitCodes 2 `
+    -ExpectedOutput 'Usage:'
+
+$null = Invoke-Launcher `
     -Name 'Invalid test credential tag is rejected' `
     -Arguments @(
     'status',
@@ -191,12 +287,51 @@ $null = Invoke-Launcher `
 
 $missingUser = '__L' + [Guid]::NewGuid().ToString('N').Substring(0, 12)
 $null = Invoke-Launcher `
+    -Name 'Register accepts password stdin mode' `
+    -Arguments @(
+    'register',
+    '--user',
+    $missingUser,
+    '--password-stdin'
+) `
+    -ExpectedExitCodes 1 `
+    -ExpectedOutput 'Could not resolve local account'
+
+$null = Invoke-Launcher `
     -Name 'Unknown local account is rejected' `
     -Arguments @('status', '--user', $missingUser) `
     -ExpectedExitCodes 1 `
     -ExpectedOutput 'Could not resolve local account'
 
 if ($hasInstalledAccountFixture) {
+    $stdinCredentialTag =
+    'stdin-' + [Guid]::NewGuid().ToString('N')
+    $null = Invoke-Launcher `
+        -Name 'Password stdin rejects an empty line without writing a credential' `
+        -Arguments @(
+        'register',
+        '--user',
+        $SandboxUser,
+        '--password-stdin',
+        '--test-credential-tag',
+        $stdinCredentialTag
+    ) `
+        -ExpectedExitCodes 1 `
+        -ExpectedOutput 'exactly one non-empty UTF-8 line' `
+        -StandardInput ''
+
+    $null = Invoke-Launcher `
+        -Name 'Rejected password stdin leaves no tagged credential' `
+        -Arguments @(
+        'status',
+        '--user',
+        $SandboxUser,
+        '--test-credential-tag',
+        $stdinCredentialTag
+    ) `
+        -ExpectedExitCodes 3 `
+        -ExpectedOutput 'No launcher credential'
+
     $status = Invoke-Launcher `
         -Name 'Existing local account resolves and credential status is read' `
         -Arguments @('status', '--user', $SandboxUser) `
@@ -296,6 +431,8 @@ if ($hasInstalledAccountFixture) {
             'run',
             '--user',
             $SandboxUser,
+            '--credential-mode',
+            'stored',
             '--working-directory',
             $env:SystemRoot,
             '--',
@@ -314,6 +451,8 @@ if ($hasInstalledAccountFixture) {
             'run',
             '--user',
             $SandboxUser,
+            '--credential-mode',
+            'stored',
             '--working-directory',
             $env:SystemRoot,
             '--',
@@ -323,7 +462,7 @@ if ($hasInstalledAccountFixture) {
             'exit 37'
         ) `
             -ExpectedExitCodes 3 `
-            -ExpectedOutput 'Register the credential first'
+            -ExpectedOutput 'No stored launcher credential'
     }
 }
 

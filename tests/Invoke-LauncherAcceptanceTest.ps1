@@ -13,7 +13,10 @@ param(
     [string] $LauncherPath = (
         Join-Path $PSScriptRoot `
             '..\..\out\build-native\native\Release\ClaudeSandboxLauncher.exe'
-    )
+    ),
+
+    [Parameter()]
+    [securestring] $Password
 )
 
 Set-StrictMode -Version Latest
@@ -28,11 +31,27 @@ function Invoke-LauncherStep {
         [string[]] $Arguments,
 
         [Parameter()]
-        [int] $ExpectedExitCode = 0
+        [int] $ExpectedExitCode = 0,
+
+        [Parameter()]
+        [AllowEmptyString()]
+        [string] $StandardInput
     )
 
     Write-Host "`n[$Name]"
-    & $script:ResolvedLauncher @Arguments
+    if ($PSBoundParameters.ContainsKey('StandardInput')) {
+        $previousOutputEncoding = $OutputEncoding
+        try {
+            $OutputEncoding = [Text.UTF8Encoding]::new($false)
+            $StandardInput | & $script:ResolvedLauncher @Arguments
+        }
+        finally {
+            $OutputEncoding = $previousOutputEncoding
+        }
+    }
+    else {
+        & $script:ResolvedLauncher @Arguments
+    }
     $exitCode = $LASTEXITCODE
     if ($exitCode -ne $ExpectedExitCode) {
         throw (
@@ -65,15 +84,38 @@ try {
     Write-Host "Acceptance user: .\$SandboxUser"
     Write-Host 'The credential is stored for the Windows user running this test.'
     Write-Host "Temporary credential tag: $testCredentialTag"
-    Write-Host 'Enter the sandbox account password at the native secure prompt.'
 
-    Invoke-LauncherStep -Name 'Register and store credential' -Arguments @(
+    $registrationArguments = @(
         'register',
         '--user',
         $SandboxUser,
         '--test-credential-tag',
         $testCredentialTag
     )
+    if ($null -eq $Password) {
+        Write-Host 'Enter the sandbox account password in Windows Credential UI.'
+        Invoke-LauncherStep `
+            -Name 'Register and store credential' `
+            -Arguments $registrationArguments
+    }
+    else {
+        Write-Host 'Registering with the supplied password through standard input.'
+        $plainTextPassword = [pscredential]::new(
+            'sandbox',
+            $Password
+        ).GetNetworkCredential().Password
+        try {
+            $registrationArguments += '--password-stdin'
+            Invoke-LauncherStep `
+                -Name 'Register and store credential' `
+                -Arguments $registrationArguments `
+                -StandardInput $plainTextPassword
+        }
+        finally {
+            $registrationArguments = $null
+            $plainTextPassword = $null
+        }
+    }
 
     Invoke-LauncherStep -Name 'Read credential-store status' -Arguments @(
         'status',
@@ -89,6 +131,8 @@ try {
             'run',
             '--user',
             $SandboxUser,
+            '--credential-mode',
+            'stored',
             '--test-credential-tag',
             $testCredentialTag,
             '--working-directory',

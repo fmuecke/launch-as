@@ -10,11 +10,15 @@ param(
 
     [Parameter()]
     [ValidateNotNullOrEmpty()]
-    [string] $ExpectedVersion = '0.4.0',
+    [string] $ExpectedVersion = '0.5.0',
 
     [Parameter()]
     [ValidateNotNullOrEmpty()]
-    [string] $SandboxUser = 'ClaudeSandbox'
+    [string] $SandboxUser = 'ClaudeSandbox',
+
+    [Parameter(Mandatory)]
+    [ValidateSet('Visible', 'Hidden')]
+    [string] $ExpectedTestCredentialTagVisibility
 )
 
 Set-StrictMode -Version Latest
@@ -58,7 +62,7 @@ function Invoke-Launcher {
     Write-Host "[PASS] $Name (exit $exitCode)"
     return [pscustomobject] @{
         ExitCode = $exitCode
-        Output = $outputText
+        Output   = $outputText
     }
 }
 
@@ -89,7 +93,7 @@ $localUser = Get-LocalUser `
     -Name $SandboxUser `
     -ErrorAction SilentlyContinue
 $hasInstalledAccountFixture =
-    $null -ne $localUser -and $localUser.Enabled
+$null -ne $localUser -and $localUser.Enabled
 if (-not $hasInstalledAccountFixture) {
     Write-Host (
         "[SKIP] Installed-account checks: local user '$SandboxUser' " +
@@ -97,11 +101,20 @@ if (-not $hasInstalledAccountFixture) {
     )
 }
 
-$null = Invoke-Launcher `
+$usageResult = Invoke-Launcher `
     -Name 'No arguments reports usage' `
     -Arguments @() `
     -ExpectedExitCodes 2 `
     -ExpectedOutput 'Usage:'
+
+$testCredentialTagIsVisible =
+    $usageResult.Output.Contains('--test-credential-tag')
+$expectedTestCredentialTagIsVisible =
+    $ExpectedTestCredentialTagVisibility -eq 'Visible'
+Assert-Equal `
+    -Name "Test credential option is $($ExpectedTestCredentialTagVisibility.ToLower())" `
+    -Actual $testCredentialTagIsVisible `
+    -Expected $expectedTestCredentialTagIsVisible
 
 $null = Invoke-Launcher `
     -Name 'Unknown command reports usage' `
@@ -118,61 +131,61 @@ $null = Invoke-Launcher `
 $null = Invoke-Launcher `
     -Name 'Invalid test credential tag is rejected' `
     -Arguments @(
-        'status',
-        '--user',
-        $SandboxUser,
-        '--test-credential-tag',
-        'invalid:tag'
-    ) `
+    'status',
+    '--user',
+    $SandboxUser,
+    '--test-credential-tag',
+    'invalid:tag'
+) `
     -ExpectedExitCodes 2 `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
     -Name 'Empty test credential tag cannot select production credential' `
     -Arguments @(
-        'status',
-        '--user',
-        $SandboxUser,
-        '--test-credential-tag',
-        ''
-    ) `
+    'status',
+    '--user',
+    $SandboxUser,
+    '--test-credential-tag',
+    ''
+) `
     -ExpectedExitCodes 2 `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
     -Name 'Duplicate test credential tags are rejected' `
     -Arguments @(
-        'status',
-        '--user',
-        $SandboxUser,
-        '--test-credential-tag',
-        'first',
-        '--test-credential-tag',
-        'second'
-    ) `
+    'status',
+    '--user',
+    $SandboxUser,
+    '--test-credential-tag',
+    'first',
+    '--test-credential-tag',
+    'second'
+) `
     -ExpectedExitCodes 2 `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
     -Name 'Run requires the process separator' `
     -Arguments @(
-        'run',
-        '--user',
-        $SandboxUser,
-        'C:\missing.exe'
-    ) `
+    'run',
+    '--user',
+    $SandboxUser,
+    'C:\missing.exe'
+) `
     -ExpectedExitCodes 2 `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
     -Name 'Credential command rejects process arguments' `
     -Arguments @(
-        'status',
-        '--user',
-        $SandboxUser,
-        '--',
-        'C:\missing.exe'
-    ) `
+    'status',
+    '--user',
+    $SandboxUser,
+    '--',
+    'C:\missing.exe'
+) `
     -ExpectedExitCodes 2 `
     -ExpectedOutput 'Usage:'
 
@@ -191,28 +204,28 @@ if ($hasInstalledAccountFixture) {
         -ExpectedOutput 'launcher credential'
 
     $behaviorCredentialTag =
-        'behavior-' + [Guid]::NewGuid().ToString('N')
+    'behavior-' + [Guid]::NewGuid().ToString('N')
     $null = Invoke-Launcher `
         -Name 'Tagged test credential is isolated from production credential' `
         -Arguments @(
-            'status',
-            '--user',
-            $SandboxUser,
-            '--test-credential-tag',
-            $behaviorCredentialTag
-        ) `
+        'status',
+        '--user',
+        $SandboxUser,
+        '--test-credential-tag',
+        $behaviorCredentialTag
+    ) `
         -ExpectedExitCodes 3 `
         -ExpectedOutput 'No launcher credential'
 
     $null = Invoke-Launcher `
         -Name 'Tagged credential cleanup is idempotent' `
         -Arguments @(
-            'forget',
-            '--user',
-            $SandboxUser,
-            '--test-credential-tag',
-            $behaviorCredentialTag
-        ) `
+        'forget',
+        '--user',
+        $SandboxUser,
+        '--test-credential-tag',
+        $behaviorCredentialTag
+    ) `
         -ExpectedExitCodes 0 `
         -ExpectedOutput 'No launcher credential'
 
@@ -228,32 +241,32 @@ if ($hasInstalledAccountFixture) {
 }
 
 $missingRoot = Join-Path `
-    ([System.IO.Path]::GetPathRoot($script:ResolvedLauncher)) `
-    ('claude-win-sandbox-test-missing-' + [Guid]::NewGuid().ToString('N'))
+([System.IO.Path]::GetPathRoot($script:ResolvedLauncher)) `
+('claude-win-sandbox-test-missing-' + [Guid]::NewGuid().ToString('N'))
 $missingExecutable = Join-Path $missingRoot 'missing.exe'
 $null = Invoke-Launcher `
     -Name 'Relative executable is rejected before credential access' `
     -Arguments @(
-        'run',
-        '--user',
-        $SandboxUser,
-        '--',
-        'cmd.exe'
-    ) `
+    'run',
+    '--user',
+    $SandboxUser,
+    '--',
+    'cmd.exe'
+) `
     -ExpectedExitCodes 1 `
     -ExpectedOutput 'Executable is not an existing absolute file'
 
 $null = Invoke-Launcher `
     -Name 'Missing executable is rejected before credential access' `
     -Arguments @(
-        'run',
-        '--user',
-        $SandboxUser,
-        '--working-directory',
-        [System.IO.Path]::GetPathRoot($script:ResolvedLauncher),
-        '--',
-        $missingExecutable
-    ) `
+    'run',
+    '--user',
+    $SandboxUser,
+    '--working-directory',
+    [System.IO.Path]::GetPathRoot($script:ResolvedLauncher),
+    '--',
+    $missingExecutable
+) `
     -ExpectedExitCodes 1 `
     -ExpectedOutput 'Executable is not an existing absolute file'
 
@@ -261,17 +274,17 @@ $commandPrompt = Join-Path $env:SystemRoot 'System32\cmd.exe'
 $null = Invoke-Launcher `
     -Name 'Missing working directory is rejected before credential access' `
     -Arguments @(
-        'run',
-        '--user',
-        $SandboxUser,
-        '--working-directory',
-        $missingRoot,
-        '--',
-        $commandPrompt,
-        '/d',
-        '/c',
-        'exit 37'
-    ) `
+    'run',
+    '--user',
+    $SandboxUser,
+    '--working-directory',
+    $missingRoot,
+    '--',
+    $commandPrompt,
+    '/d',
+    '/c',
+    'exit 37'
+) `
     -ExpectedExitCodes 1 `
     -ExpectedOutput 'Working directory is not an existing absolute directory'
 
@@ -280,17 +293,17 @@ if ($hasInstalledAccountFixture) {
         $null = Invoke-Launcher `
             -Name 'Run propagates the checked child process exit code' `
             -Arguments @(
-                'run',
-                '--user',
-                $SandboxUser,
-                '--working-directory',
-                $env:SystemRoot,
-                '--',
-                $commandPrompt,
-                '/d',
-                '/c',
-                'exit 37'
-            ) `
+            'run',
+            '--user',
+            $SandboxUser,
+            '--working-directory',
+            $env:SystemRoot,
+            '--',
+            $commandPrompt,
+            '/d',
+            '/c',
+            'exit 37'
+        ) `
             -ExpectedExitCodes 37 `
             -ExpectedOutput 'exited with code 37'
     }
@@ -298,17 +311,17 @@ if ($hasInstalledAccountFixture) {
         $null = Invoke-Launcher `
             -Name 'Run reports a missing credential distinctly' `
             -Arguments @(
-                'run',
-                '--user',
-                $SandboxUser,
-                '--working-directory',
-                $env:SystemRoot,
-                '--',
-                $commandPrompt,
-                '/d',
-                '/c',
-                'exit 37'
-            ) `
+            'run',
+            '--user',
+            $SandboxUser,
+            '--working-directory',
+            $env:SystemRoot,
+            '--',
+            $commandPrompt,
+            '/d',
+            '/c',
+            'exit 37'
+        ) `
             -ExpectedExitCodes 3 `
             -ExpectedOutput 'Register the credential first'
     }

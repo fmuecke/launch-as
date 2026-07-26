@@ -287,9 +287,12 @@ void PrintUsage() {
         << L"  ClaudeSandboxLauncher.exe forget --user <local-user>\n"
         << L"  ClaudeSandboxLauncher.exe run --user <local-user>"
            L" [--working-directory <directory>] [--new-console]"
-           L" -- <absolute-executable> [arguments...]\n"
+           L" -- <absolute-executable> [arguments...]\n";
+#ifndef NDEBUG
+    std::wcerr
         << L"Credential commands used by tests also accept:"
            L" --test-credential-tag <tag>\n";
+#endif
 }
 
 [[nodiscard]] std::optional<Command> ParseCommand(std::wstring_view value) {

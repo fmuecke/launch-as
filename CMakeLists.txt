@@ -96,6 +96,8 @@ if(BUILD_TESTING)
             "$<TARGET_FILE:ClaudeSandboxLauncher>"
             -ExpectedVersion
             "${PROJECT_VERSION}"
+            -ExpectedTestCredentialTagVisibility
+            "$<IF:$<CONFIG:Debug>,Visible,Hidden>"
     )
     set_tests_properties(launcher.behavior PROPERTIES
         LABELS "launcher;behavior"

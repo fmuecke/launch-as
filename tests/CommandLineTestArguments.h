@@ -7,13 +7,11 @@
 #include <array>
 #include <string_view>
 
-inline constexpr std::array<std::wstring_view, 8>
-    CommandLineTestArguments{
-        L"",
-        L"plain",
-        L"with space",
-        L"quote\"inside",
-        L"trailing\\",
-        L"two\\\\trailing\\\\",
-        L"slash\\\"quote",
-        L"\t"};
+inline constexpr std::array<std::wstring_view, 8> CommandLineTestArguments{ L"",
+                                                                            L"plain",
+                                                                            L"with space",
+                                                                            L"quote\"inside",
+                                                                            L"trailing\\",
+                                                                            L"two\\\\trailing\\\\",
+                                                                            L"slash\\\"quote",
+                                                                            L"\t" };

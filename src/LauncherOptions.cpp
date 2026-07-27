@@ -72,6 +72,7 @@ void PrintUsage()
     std::wcerr << L"Credential commands used by tests also accept:"
                   L" --test-credential-tag <tag>\n";
 #endif
+    std::wcerr << std::endl;
 }
 
 std::optional<Options> ParseOptions(std::span<wchar_t*> arguments)

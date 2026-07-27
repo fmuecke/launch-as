@@ -5,10 +5,37 @@
 #include "Credentials.h"
 #include "LaunchProcess.h"
 #include "LauncherOptions.h"
+#include "LauncherVersion.h"
 #include "PseudoConsoleHost.h"
 
 #include <cstddef>
+#include <cstdio>
+#include <fcntl.h>
+#include <io.h>
+#include <iostream>
 #include <span>
+
+namespace
+{
+
+void ConfigureUserFacingOutput()
+{
+    static_cast<void>(_setmode(_fileno(stdout), _O_U8TEXT));
+    static_cast<void>(_setmode(_fileno(stderr), _O_U8TEXT));
+}
+
+void PrintLicenseHeader()
+{
+    std::wcout << L"\nlaunch-as v" << launch_as::LauncherVersion
+               << L" - Launcher for repeatable least-privilege execution on Windows\n"
+               << L"Copyright (C) 2026 Florian Mücke\n"
+               << L"This program comes with ABSOLUTELY NO WARRANTY.\n"
+               //<< L"This is free software, and you are welcome to redistribute it under the\n"
+               //<< L"terms of the GNU General Public License version 3; see LICENSE for details.\n"
+               << std::endl;
+}
+
+} // namespace
 
 int wmain(int argc, wchar_t* argv[])
 {
@@ -20,9 +47,12 @@ int wmain(int argc, wchar_t* argv[])
         return static_cast<int>(RunPseudoConsoleHost(arguments));
     }
 
+    ConfigureUserFacingOutput();
+
     const auto options = ParseOptions(arguments);
     if (!options)
     {
+        PrintLicenseHeader();
         PrintUsage();
         return static_cast<int>(ExitUsage);
     }

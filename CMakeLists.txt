@@ -23,6 +23,11 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/LauncherVersion.rc"
     @ONLY
 )
+configure_file(
+    resources/LauncherVersion.h.in
+    "${CMAKE_CURRENT_BINARY_DIR}/LauncherVersion.h"
+    @ONLY
+)
 
 add_executable(launch_as
     src/CredentialInput.cpp
@@ -45,6 +50,9 @@ add_executable(launch_as
     src/WindowsCommandLine.cpp
     src/WindowsCommandLine.h
     "${CMAKE_CURRENT_BINARY_DIR}/LauncherVersion.rc"
+)
+target_include_directories(launch_as PRIVATE
+    "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
 function(configure_launch_as_target target)

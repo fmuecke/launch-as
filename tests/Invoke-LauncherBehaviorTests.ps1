@@ -135,6 +135,31 @@ Assert-Equal `
     -Actual $testCredentialTagIsVisible `
     -Expected $expectedTestCredentialTagIsVisible
 
+Assert-Equal `
+    -Name 'Startup header includes the copyright notice' `
+    -Actual $usageResult.Output.Contains(
+        'Copyright (C) 2026 Florian Mücke'
+    ) `
+    -Expected $true
+Assert-Equal `
+    -Name 'Startup header includes the product version' `
+    -Actual $usageResult.Output.Contains(
+        "launch-as v$ExpectedVersion - "
+    ) `
+    -Expected $true
+Assert-Equal `
+    -Name 'Startup header includes the warranty disclaimer' `
+    -Actual $usageResult.Output.Contains(
+        'This program comes with ABSOLUTELY NO WARRANTY.'
+    ) `
+    -Expected $true
+Assert-Equal `
+    -Name 'Startup header identifies GPL version 3' `
+    -Actual $usageResult.Output.Contains(
+        'GNU General Public License version 3'
+    ) `
+    -Expected $true
+
 $null = Invoke-Launcher `
     -Name 'Unknown command reports usage' `
     -Arguments @('not-a-command') `
@@ -432,7 +457,7 @@ $null = Invoke-Launcher `
     -ExpectedExitCodes 1 `
     -ExpectedOutput 'Executable is not an existing absolute file'
 
-$null = Invoke-Launcher `
+$validInvocationResult = Invoke-Launcher `
     -Name 'Relative executable is rejected before credential access' `
     -Arguments @(
     '--user',
@@ -442,6 +467,12 @@ $null = Invoke-Launcher `
 ) `
     -ExpectedExitCodes 1 `
     -ExpectedOutput 'Executable is not an existing absolute file'
+Assert-Equal `
+    -Name 'Valid command lines do not print the GPL usage header' `
+    -Actual $validInvocationResult.Output.Contains(
+        'This program comes with ABSOLUTELY NO WARRANTY.'
+    ) `
+    -Expected $false
 
 $null = Invoke-Launcher `
     -Name 'Explicit run subcommand remains supported' `
@@ -544,7 +575,11 @@ Assert-Equal `
 Assert-Equal `
     -Name 'File description metadata' `
     -Actual $version.FileDescription `
-    -Expected 'launch-as alternate-user launcher'
+    -Expected 'A launcher for repeatable least-privilege execution on Windows'
+Assert-Equal `
+    -Name 'Repository URL metadata' `
+    -Actual $version.Comments `
+    -Expected 'https://github.com/fmuecke/launch-as'
 Assert-Equal `
     -Name 'Product name metadata' `
     -Actual $version.ProductName `

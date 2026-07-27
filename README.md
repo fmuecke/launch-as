@@ -151,8 +151,8 @@ relay shutdown. The suite covers optional installed-account checks when the
 `LaunchAsTest` fixture exists and validates the embedded binary version metadata.
 
 The executable is built with the latest C++ language mode, embedded version
-information, and the dynamic MSVC runtime. A target machine therefore needs the
-matching Visual C++ Redistributable.
+information, and the static MSVC runtime. The release binary therefore does not
+require a separately installed Visual C++ Redistributable.
 
 ## Acceptance test
 
@@ -197,6 +197,6 @@ The build wrapper can launch the same interactive test after building:
 ## License
 
 `launch-as` is licensed under the GNU General Public License version 3 only.
-A short copyright, no-warranty, and GPLv3 notice accompanies the usage text
-when the launcher is called without parameters or with invalid parameters.
+A short copyright and no-warranty notice accompanies the usage text when the
+launcher is called without parameters or with invalid parameters.
 See [LICENSE](LICENSE).

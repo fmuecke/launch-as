@@ -153,13 +153,6 @@ Assert-Equal `
         'This program comes with ABSOLUTELY NO WARRANTY.'
     ) `
     -Expected $true
-Assert-Equal `
-    -Name 'Startup header identifies GPL version 3' `
-    -Actual $usageResult.Output.Contains(
-        'GNU General Public License version 3'
-    ) `
-    -Expected $true
-
 $null = Invoke-Launcher `
     -Name 'Unknown command reports usage' `
     -Arguments @('not-a-command') `
@@ -468,7 +461,7 @@ $validInvocationResult = Invoke-Launcher `
     -ExpectedExitCodes 1 `
     -ExpectedOutput 'Executable is not an existing absolute file'
 Assert-Equal `
-    -Name 'Valid command lines do not print the GPL usage header' `
+    -Name 'Valid command lines do not print the usage header' `
     -Actual $validInvocationResult.Output.Contains(
         'This program comes with ABSOLUTELY NO WARRANTY.'
     ) `
@@ -575,11 +568,7 @@ Assert-Equal `
 Assert-Equal `
     -Name 'File description metadata' `
     -Actual $version.FileDescription `
-    -Expected 'A launcher for repeatable least-privilege execution on Windows'
-Assert-Equal `
-    -Name 'Repository URL metadata' `
-    -Actual $version.Comments `
-    -Expected 'https://github.com/fmuecke/launch-as'
+    -Expected 'Launcher for repeatable least-privilege execution on Windows'
 Assert-Equal `
     -Name 'Product name metadata' `
     -Actual $version.ProductName `

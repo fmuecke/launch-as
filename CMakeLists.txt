@@ -69,7 +69,7 @@ function(configure_launch_as_target target)
             /MP
         )
         set_property(TARGET ${target} PROPERTY
-            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
         )
     else()
         message(FATAL_ERROR "Native targets currently require the MSVC toolchain.")

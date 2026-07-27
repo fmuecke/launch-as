@@ -16,8 +16,14 @@ add_executable(ClaudeSandboxLauncher
     src/ClaudeSandboxLauncher.cpp
     src/LauncherOptions.cpp
     src/LauncherOptions.h
+    src/PseudoConsoleHost.cpp
+    src/PseudoConsoleHost.h
+    src/PseudoConsoleSession.cpp
+    src/PseudoConsoleSession.h
     src/SandboxProcess.cpp
     src/SandboxProcess.h
+    src/TerminalBridge.cpp
+    src/TerminalBridge.h
     src/Win32Support.cpp
     src/Win32Support.h
     src/WindowsCommandLine.cpp
@@ -89,6 +95,33 @@ if(BUILD_TESTING)
     )
     set_tests_properties(launcher.command_line PROPERTIES
         LABELS "launcher;unit"
+    )
+
+    add_executable(LauncherPseudoConsoleTests
+        tests/PseudoConsoleTests.cpp
+        src/TerminalBridge.cpp
+        src/Win32Support.cpp
+        src/WindowsCommandLine.cpp
+    )
+    target_include_directories(LauncherPseudoConsoleTests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    configure_native_target(LauncherPseudoConsoleTests)
+    target_link_libraries(LauncherPseudoConsoleTests PRIVATE
+        Advapi32
+        Ole32
+    )
+
+    add_test(
+        NAME launcher.pseudoconsole
+        COMMAND
+            "$<TARGET_FILE:LauncherPseudoConsoleTests>"
+            "$<TARGET_FILE:ClaudeSandboxLauncher>"
+    )
+    set_tests_properties(launcher.pseudoconsole PROPERTIES
+        LABELS "launcher;integration;terminal"
+        PASS_REGULAR_EXPRESSION "conpty-smoke-256"
+        TIMEOUT 15
     )
 
     find_program(

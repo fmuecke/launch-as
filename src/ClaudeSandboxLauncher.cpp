@@ -4,6 +4,7 @@
 
 #include "Credentials.h"
 #include "LauncherOptions.h"
+#include "PseudoConsoleHost.h"
 #include "SandboxProcess.h"
 
 #include <cstddef>
@@ -13,7 +14,13 @@ int wmain(int argc, wchar_t* argv[])
 {
     using namespace sandbox_launcher;
 
-    const auto options = ParseOptions(std::span<wchar_t*>(argv, static_cast<std::size_t>(argc)));
+    const std::span arguments(argv, static_cast<std::size_t>(argc));
+    if (IsPseudoConsoleHostInvocation(arguments))
+    {
+        return static_cast<int>(RunPseudoConsoleHost(arguments));
+    }
+
+    const auto options = ParseOptions(arguments);
     if (!options)
     {
         PrintUsage();

@@ -225,6 +225,45 @@ $null = Invoke-Launcher `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
+    -Name 'Terminal mode is accepted only by run' `
+    -Arguments @(
+        'status',
+        '--user',
+        $SandboxUser,
+        '--terminal'
+    ) `
+    -ExpectedExitCodes 2 `
+    -ExpectedOutput 'Usage:'
+
+$null = Invoke-Launcher `
+    -Name 'Duplicate terminal modes are rejected' `
+    -Arguments @(
+        'run',
+        '--user',
+        $SandboxUser,
+        '--terminal',
+        '--terminal',
+        '--',
+        'C:\missing.exe'
+    ) `
+    -ExpectedExitCodes 2 `
+    -ExpectedOutput 'Usage:'
+
+$null = Invoke-Launcher `
+    -Name 'Terminal and new-console modes are mutually exclusive' `
+    -Arguments @(
+        'run',
+        '--user',
+        $SandboxUser,
+        '--terminal',
+        '--new-console',
+        '--',
+        'C:\missing.exe'
+    ) `
+    -ExpectedExitCodes 2 `
+    -ExpectedOutput 'Usage:'
+
+$null = Invoke-Launcher `
     -Name 'Invalid test credential tag is rejected' `
     -Arguments @(
     'status',
@@ -379,6 +418,20 @@ $missingRoot = Join-Path `
 ([System.IO.Path]::GetPathRoot($script:ResolvedLauncher)) `
 ('claude-win-sandbox-test-missing-' + [Guid]::NewGuid().ToString('N'))
 $missingExecutable = Join-Path $missingRoot 'missing.exe'
+$null = Invoke-Launcher `
+    -Name 'Internal pseudoconsole host accepts cursor inheritance' `
+    -Arguments @(
+    '--internal-pseudoconsole-host',
+    '--size',
+    '120',
+    '30',
+    '--inherit-cursor',
+    '--',
+    $missingExecutable
+) `
+    -ExpectedExitCodes 1 `
+    -ExpectedOutput 'Executable is not an existing absolute file'
+
 $null = Invoke-Launcher `
     -Name 'Relative executable is rejected before credential access' `
     -Arguments @(

@@ -34,25 +34,47 @@ function Invoke-LauncherStep {
         [int] $ExpectedExitCode = 0,
 
         [Parameter()]
+        [ValidateNotNullOrEmpty()]
+        [string] $ExpectedOutput,
+
+        [Parameter()]
         [AllowEmptyString()]
         [string] $StandardInput
     )
 
     Write-Host "`n[$Name]"
+    $captureOutput = $PSBoundParameters.ContainsKey('ExpectedOutput')
     if ($PSBoundParameters.ContainsKey('StandardInput')) {
         $previousOutputEncoding = $OutputEncoding
         try {
             $OutputEncoding = [Text.UTF8Encoding]::new($false)
-            $StandardInput | & $script:ResolvedLauncher @Arguments
+            if ($captureOutput) {
+                $capturedOutput = @(
+                    $StandardInput | & $script:ResolvedLauncher @Arguments
+                )
+            }
+            else {
+                $StandardInput | & $script:ResolvedLauncher @Arguments
+            }
         }
         finally {
             $OutputEncoding = $previousOutputEncoding
         }
     }
+    elseif ($captureOutput) {
+        $capturedOutput = @(& $script:ResolvedLauncher @Arguments)
+    }
     else {
         & $script:ResolvedLauncher @Arguments
     }
     $exitCode = $LASTEXITCODE
+    if ($captureOutput) {
+        $capturedOutput | ForEach-Object { Write-Host $_ }
+        $outputText = $capturedOutput -join "`n"
+        if (-not $outputText.Contains($ExpectedOutput)) {
+            throw "$Name output did not contain '$ExpectedOutput'."
+        }
+    }
     if ($exitCode -ne $ExpectedExitCode) {
         throw (
             "$Name returned launcher exit code $exitCode; " +
@@ -145,12 +167,34 @@ try {
         ) `
         -ExpectedExitCode 37
 
+    Invoke-LauncherStep -Name 'Run sandbox user through ConPTY' `
+        -Arguments @(
+            'run',
+            '--user',
+            $SandboxUser,
+            '--credential-mode',
+            'stored',
+            '--test-credential-tag',
+            $testCredentialTag,
+            '--working-directory',
+            $env:SystemRoot,
+            '--terminal',
+            '--',
+            $commandPrompt,
+            '/d',
+            '/c',
+            'echo conpty-user=%USERNAME% & exit 41'
+        ) `
+        -ExpectedExitCode 41 `
+        -ExpectedOutput "conpty-user=$SandboxUser"
+
     Write-Host "`nAcceptance test passed:"
     Write-Host '  - Credential was written to Windows Credential Manager.'
     Write-Host '  - Credential was read back by the launcher.'
     Write-Host '  - Windows authenticated the sandbox user.'
-    Write-Host '  - cmd.exe token SID matched that user.'
+    Write-Host '  - Direct cmd.exe and the ConPTY helper used the checked sandbox token.'
     Write-Host '  - cmd.exe returned the checked sentinel code.'
+    Write-Host '  - ConPTY returned sandbox-user output through the current terminal.'
 }
 finally {
     Invoke-LauncherStep -Name 'Remove tagged test credential' -Arguments @(

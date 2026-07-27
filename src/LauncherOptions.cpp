@@ -64,7 +64,7 @@ void PrintUsage()
                   L" [--password-stdin]\n"
                << L"  launch-as.exe status --user <local-user>\n"
                << L"  launch-as.exe forget --user <local-user>\n"
-               << L"  launch-as.exe run --user <local-user>"
+               << L"  launch-as.exe [run] --user <local-user>"
                   L" [--credential-mode <auto|stored|prompt>]"
                   L" [--working-directory <directory>] [--new-console|--terminal]"
                   L" -- <absolute-executable> [arguments...]\n";
@@ -81,15 +81,13 @@ std::optional<Options> ParseOptions(std::span<wchar_t*> arguments)
         return std::nullopt;
     }
 
-    const auto command = ParseCommand(arguments[1]);
-    if (!command)
-    {
-        return std::nullopt;
-    }
+    const auto parsedCommand = ParseCommand(arguments[1]);
+    const Command command = parsedCommand.value_or(Command::Run);
+    const std::size_t firstOptionIndex = parsedCommand ? 2 : 1;
 
-    Options options {.command = *command};
+    Options options {.command = command};
     bool processArgumentsStarted = false;
-    for (std::size_t index = 2; index < arguments.size(); ++index)
+    for (std::size_t index = firstOptionIndex; index < arguments.size(); ++index)
     {
         const std::wstring_view name(arguments[index]);
         if (name == L"--")
@@ -190,7 +188,7 @@ std::optional<Options> ParseOptions(std::span<wchar_t*> arguments)
             return std::nullopt;
         }
     }
-    if (*command == Command::Run)
+    if (command == Command::Run)
     {
         if (options.passwordFromStdin || !processArgumentsStarted ||
             options.processArguments.empty())
@@ -202,7 +200,7 @@ std::optional<Options> ParseOptions(std::span<wchar_t*> arguments)
     }
     else if (processArgumentsStarted || options.credentialModeSpecified ||
              !options.workingDirectory.empty() || options.launchModeSpecified ||
-             (options.passwordFromStdin && *command != Command::Register))
+             (options.passwordFromStdin && command != Command::Register))
     {
         return std::nullopt;
     }

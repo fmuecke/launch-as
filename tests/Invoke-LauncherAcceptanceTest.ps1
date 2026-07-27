@@ -150,7 +150,6 @@ try {
     $commandPrompt = Join-Path $env:SystemRoot 'System32\cmd.exe'
     Invoke-LauncherStep -Name 'Retrieve credential and run user process' `
         -Arguments @(
-            'run',
             '--user',
             $TargetUser,
             '--credential-mode',
@@ -169,7 +168,6 @@ try {
 
     Invoke-LauncherStep -Name 'Run target user through ConPTY' `
         -Arguments @(
-            'run',
             '--user',
             $TargetUser,
             '--credential-mode',

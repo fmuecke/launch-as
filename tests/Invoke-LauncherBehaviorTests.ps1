@@ -435,6 +435,17 @@ $null = Invoke-Launcher `
 $null = Invoke-Launcher `
     -Name 'Relative executable is rejected before credential access' `
     -Arguments @(
+    '--user',
+    $TargetUser,
+    '--',
+    'cmd.exe'
+) `
+    -ExpectedExitCodes 1 `
+    -ExpectedOutput 'Executable is not an existing absolute file'
+
+$null = Invoke-Launcher `
+    -Name 'Explicit run subcommand remains supported' `
+    -Arguments @(
     'run',
     '--user',
     $TargetUser,

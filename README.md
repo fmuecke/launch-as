@@ -41,13 +41,15 @@ The launcher requires an absolute executable path. Everything after `--` is
 passed to that executable as a separate argument:
 
 ```powershell
-.\launch-as.exe run `
+.\launch-as.exe `
     --user RestrictedUser `
     --working-directory C:\dev\project `
     --new-console `
     -- C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe `
         -NoExit
 ```
+
+The  `run` subcommand is optional optional.
 
 The default credential mode is `auto`: a stored credential is used when
 available. If it is missing, Windows Credential UI opens with a Remember
@@ -60,8 +62,8 @@ and returns a distinct missing-credential exit code. Use
 `--credential-mode prompt` for an ephemeral run that ignores Credential Manager,
 prompts through Windows Credential UI, and never saves the password.
 
-`run` creates the process suspended, verifies its token SID, resumes it, waits,
-and returns the child process exit code. `--new-console` opens a separate
+The launcher creates the process suspended, verifies its token SID, resumes it,
+waits, and returns the child process exit code. `--new-console` opens a separate
 interactive console window. `--terminal` hosts an interactive process through
 Windows ConPTY and relays it through the launcher's existing terminal pane.
 The two options are mutually exclusive; omit both for an unattended command.
@@ -94,7 +96,7 @@ For example, this starts a nested PowerShell session in the current
 Windows Terminal or VS Code terminal pane:
 
 ```powershell
-.\launch-as.exe run `
+.\launch-as.exe `
     --user RestrictedUser `
     --working-directory C:\dev\project `
     --terminal `
@@ -164,7 +166,7 @@ or modify accounts and does not require elevation.
 
 The test opens Windows Credential UI once for the target user's password,
 validates it, stores it under a unique `test:` credential target, confirms that
-Credential Manager can return it, and invokes `run` first with
+Credential Manager can return it, and invokes the launcher first with
 `cmd.exe /c exit 37` and then through ConPTY with a second sentinel code. For
 the direct run it verifies the suspended command token; for ConPTY it verifies
 the suspended target-side helper, which starts `cmd.exe` with its inherited

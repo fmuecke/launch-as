@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Florian Mücke
-# SPDX-License-Identifier: MIT
-# Part of claude-win-sandbox: https://github.com/fmuecke/claude-win-sandbox
+# SPDX-License-Identifier: GPL-3.0-only
+# Project: https://github.com/fmuecke/launch-as
 
 [CmdletBinding()]
 param(
@@ -10,11 +10,11 @@ param(
 
     [Parameter()]
     [ValidateNotNullOrEmpty()]
-    [string] $ExpectedVersion = '0.5.0',
+    [string] $ExpectedVersion = '0.3.0',
 
     [Parameter()]
     [ValidateNotNullOrEmpty()]
-    [string] $SandboxUser = 'ClaudeSandbox',
+    [string] $TargetUser = 'LaunchAsTest',
 
     [Parameter(Mandatory)]
     [ValidateSet('Visible', 'Hidden')]
@@ -109,13 +109,13 @@ if (-not (Test-Path -LiteralPath $script:ResolvedLauncher -PathType Leaf)) {
 }
 
 $localUser = Get-LocalUser `
-    -Name $SandboxUser `
+    -Name $TargetUser `
     -ErrorAction SilentlyContinue
 $hasInstalledAccountFixture =
 $null -ne $localUser -and $localUser.Enabled
 if (-not $hasInstalledAccountFixture) {
     Write-Host (
-        "[SKIP] Installed-account checks: local user '$SandboxUser' " +
+        "[SKIP] Installed-account checks: local user '$TargetUser' " +
         'is missing or disabled.'
     )
 }
@@ -143,7 +143,7 @@ $null = Invoke-Launcher `
 
 $null = Invoke-Launcher `
     -Name 'Caller cannot supply account domain syntax' `
-    -Arguments @('status', '--user', ".\$SandboxUser") `
+    -Arguments @('status', '--user', ".\$TargetUser") `
     -ExpectedExitCodes 2 `
     -ExpectedOutput 'Usage:'
 
@@ -152,7 +152,7 @@ $null = Invoke-Launcher `
     -Arguments @(
     'register',
     '--user',
-    $SandboxUser,
+    $TargetUser,
     '--password',
     'not-a-real-password'
 ) `
@@ -164,7 +164,7 @@ $null = Invoke-Launcher `
     -Arguments @(
     'status',
     '--user',
-    $SandboxUser,
+    $TargetUser,
     '--password-stdin'
 ) `
     -ExpectedExitCodes 2 `
@@ -175,7 +175,7 @@ $null = Invoke-Launcher `
     -Arguments @(
     'register',
     '--user',
-    $SandboxUser,
+    $TargetUser,
     '--password-stdin',
     '--password-stdin'
 ) `
@@ -187,7 +187,7 @@ $null = Invoke-Launcher `
     -Arguments @(
     'status',
     '--user',
-    $SandboxUser,
+    $TargetUser,
     '--credential-mode',
     'stored'
 ) `
@@ -199,7 +199,7 @@ $null = Invoke-Launcher `
     -Arguments @(
     'run',
     '--user',
-    $SandboxUser,
+    $TargetUser,
     '--credential-mode',
     'unknown',
     '--',
@@ -213,7 +213,7 @@ $null = Invoke-Launcher `
     -Arguments @(
     'run',
     '--user',
-    $SandboxUser,
+    $TargetUser,
     '--credential-mode',
     'auto',
     '--credential-mode',
@@ -229,7 +229,7 @@ $null = Invoke-Launcher `
     -Arguments @(
         'status',
         '--user',
-        $SandboxUser,
+        $TargetUser,
         '--terminal'
     ) `
     -ExpectedExitCodes 2 `
@@ -240,7 +240,7 @@ $null = Invoke-Launcher `
     -Arguments @(
         'run',
         '--user',
-        $SandboxUser,
+        $TargetUser,
         '--terminal',
         '--terminal',
         '--',
@@ -254,7 +254,7 @@ $null = Invoke-Launcher `
     -Arguments @(
         'run',
         '--user',
-        $SandboxUser,
+        $TargetUser,
         '--terminal',
         '--new-console',
         '--',
@@ -268,7 +268,7 @@ $null = Invoke-Launcher `
     -Arguments @(
     'status',
     '--user',
-    $SandboxUser,
+    $TargetUser,
     '--test-credential-tag',
     'invalid:tag'
 ) `
@@ -280,7 +280,7 @@ $null = Invoke-Launcher `
     -Arguments @(
     'status',
     '--user',
-    $SandboxUser,
+    $TargetUser,
     '--test-credential-tag',
     ''
 ) `
@@ -292,7 +292,7 @@ $null = Invoke-Launcher `
     -Arguments @(
     'status',
     '--user',
-    $SandboxUser,
+    $TargetUser,
     '--test-credential-tag',
     'first',
     '--test-credential-tag',
@@ -306,7 +306,7 @@ $null = Invoke-Launcher `
     -Arguments @(
     'run',
     '--user',
-    $SandboxUser,
+    $TargetUser,
     'C:\missing.exe'
 ) `
     -ExpectedExitCodes 2 `
@@ -317,7 +317,7 @@ $null = Invoke-Launcher `
     -Arguments @(
     'status',
     '--user',
-    $SandboxUser,
+    $TargetUser,
     '--',
     'C:\missing.exe'
 ) `
@@ -350,7 +350,7 @@ if ($hasInstalledAccountFixture) {
         -Arguments @(
         'register',
         '--user',
-        $SandboxUser,
+        $TargetUser,
         '--password-stdin',
         '--test-credential-tag',
         $stdinCredentialTag
@@ -364,18 +364,18 @@ if ($hasInstalledAccountFixture) {
         -Arguments @(
         'status',
         '--user',
-        $SandboxUser,
+        $TargetUser,
         '--test-credential-tag',
         $stdinCredentialTag
     ) `
         -ExpectedExitCodes 3 `
-        -ExpectedOutput 'No launcher credential'
+        -ExpectedOutput 'No launch-as credential'
 
     $status = Invoke-Launcher `
         -Name 'Existing local account resolves and credential status is read' `
-        -Arguments @('status', '--user', $SandboxUser) `
+        -Arguments @('status', '--user', $TargetUser) `
         -ExpectedExitCodes @(0, 3) `
-        -ExpectedOutput 'launcher credential'
+        -ExpectedOutput 'launch-as credential'
 
     $behaviorCredentialTag =
     'behavior-' + [Guid]::NewGuid().ToString('N')
@@ -384,30 +384,30 @@ if ($hasInstalledAccountFixture) {
         -Arguments @(
         'status',
         '--user',
-        $SandboxUser,
+        $TargetUser,
         '--test-credential-tag',
         $behaviorCredentialTag
     ) `
         -ExpectedExitCodes 3 `
-        -ExpectedOutput 'No launcher credential'
+        -ExpectedOutput 'No launch-as credential'
 
     $null = Invoke-Launcher `
         -Name 'Tagged credential cleanup is idempotent' `
         -Arguments @(
         'forget',
         '--user',
-        $SandboxUser,
+        $TargetUser,
         '--test-credential-tag',
         $behaviorCredentialTag
     ) `
         -ExpectedExitCodes 0 `
-        -ExpectedOutput 'No launcher credential'
+        -ExpectedOutput 'No launch-as credential'
 
     $statusAfterTaggedCleanup = Invoke-Launcher `
         -Name 'Tagged cleanup leaves production credential unchanged' `
-        -Arguments @('status', '--user', $SandboxUser) `
+        -Arguments @('status', '--user', $TargetUser) `
         -ExpectedExitCodes @(0, 3) `
-        -ExpectedOutput 'launcher credential'
+        -ExpectedOutput 'launch-as credential'
     Assert-Equal `
         -Name 'Production credential status after tagged cleanup' `
         -Actual $statusAfterTaggedCleanup.ExitCode `
@@ -416,7 +416,7 @@ if ($hasInstalledAccountFixture) {
 
 $missingRoot = Join-Path `
 ([System.IO.Path]::GetPathRoot($script:ResolvedLauncher)) `
-('claude-win-sandbox-test-missing-' + [Guid]::NewGuid().ToString('N'))
+('launch-as-test-missing-' + [Guid]::NewGuid().ToString('N'))
 $missingExecutable = Join-Path $missingRoot 'missing.exe'
 $null = Invoke-Launcher `
     -Name 'Internal pseudoconsole host accepts cursor inheritance' `
@@ -437,7 +437,7 @@ $null = Invoke-Launcher `
     -Arguments @(
     'run',
     '--user',
-    $SandboxUser,
+    $TargetUser,
     '--',
     'cmd.exe'
 ) `
@@ -449,7 +449,7 @@ $null = Invoke-Launcher `
     -Arguments @(
     'run',
     '--user',
-    $SandboxUser,
+    $TargetUser,
     '--working-directory',
     [System.IO.Path]::GetPathRoot($script:ResolvedLauncher),
     '--',
@@ -464,7 +464,7 @@ $null = Invoke-Launcher `
     -Arguments @(
     'run',
     '--user',
-    $SandboxUser,
+    $TargetUser,
     '--working-directory',
     $missingRoot,
     '--',
@@ -483,7 +483,7 @@ if ($hasInstalledAccountFixture) {
             -Arguments @(
             'run',
             '--user',
-            $SandboxUser,
+            $TargetUser,
             '--credential-mode',
             'stored',
             '--working-directory',
@@ -503,7 +503,7 @@ if ($hasInstalledAccountFixture) {
             -Arguments @(
             'run',
             '--user',
-            $SandboxUser,
+            $TargetUser,
             '--credential-mode',
             'stored',
             '--working-directory',
@@ -515,7 +515,7 @@ if ($hasInstalledAccountFixture) {
             'exit 37'
         ) `
             -ExpectedExitCodes 3 `
-            -ExpectedOutput 'No stored launcher credential'
+            -ExpectedOutput 'No stored launch-as credential'
     }
 }
 
@@ -533,11 +533,19 @@ Assert-Equal `
 Assert-Equal `
     -Name 'File description metadata' `
     -Actual $version.FileDescription `
-    -Expected 'Claude Sandbox Launcher'
+    -Expected 'launch-as alternate-user launcher'
+Assert-Equal `
+    -Name 'Product name metadata' `
+    -Actual $version.ProductName `
+    -Expected 'launch-as'
+Assert-Equal `
+    -Name 'Internal name metadata' `
+    -Actual $version.InternalName `
+    -Expected 'launch-as'
 Assert-Equal `
     -Name 'Original filename metadata' `
     -Actual $version.OriginalFilename `
-    -Expected 'ClaudeSandboxLauncher.exe'
+    -Expected 'launch-as.exe'
 Assert-Equal `
     -Name 'Copyright metadata' `
     -Actual $version.LegalCopyright `

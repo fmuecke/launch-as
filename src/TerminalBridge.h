@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Florian Mücke
-// SPDX-License-Identifier: MIT
-// Part of claude-win-sandbox: https://github.com/fmuecke/claude-win-sandbox
+// SPDX-License-Identifier: GPL-3.0-only
+// Project: https://github.com/fmuecke/launch-as
 
 #pragma once
 
@@ -10,7 +10,7 @@
 #include <string>
 #include <thread>
 
-namespace sandbox_launcher
+namespace launch_as
 {
 
 class TerminalBridge final
@@ -59,4 +59,4 @@ class TerminalBridge final
     std::jthread outputRelay_;
 };
 
-} // namespace sandbox_launcher
+} // namespace launch_as

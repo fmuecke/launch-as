@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Florian Mücke
-// SPDX-License-Identifier: MIT
-// Part of claude-win-sandbox: https://github.com/fmuecke/claude-win-sandbox
+// SPDX-License-Identifier: GPL-3.0-only
+// Project: https://github.com/fmuecke/launch-as
 
 #include "CredentialInput.h"
 
-#include "SandboxProcess.h"
+#include "LaunchProcess.h"
 #include "Win32Support.h"
 
 #include <Windows.h>
@@ -19,7 +19,7 @@
 #include <vector>
 #include <wincred.h>
 
-namespace sandbox_launcher
+namespace launch_as
 {
 namespace
 {
@@ -173,7 +173,7 @@ CredentialPromptResult PromptForPassword(
                                  L". The launcher will reject administrative accounts.";
     CREDUI_INFOW uiInfo {};
     uiInfo.cbSize = sizeof(uiInfo);
-    uiInfo.pszCaptionText = L"Claude Sandbox";
+    uiInfo.pszCaptionText = L"launch-as";
     uiInfo.pszMessageText = message.c_str();
 
     ULONG authenticationPackage = 0;
@@ -323,4 +323,4 @@ bool ReadPasswordFromStandardInput(SecretBuffer& password)
     return true;
 }
 
-} // namespace sandbox_launcher
+} // namespace launch_as

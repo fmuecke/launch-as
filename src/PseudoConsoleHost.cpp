@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Florian Mücke
-// SPDX-License-Identifier: MIT
-// Part of claude-win-sandbox: https://github.com/fmuecke/claude-win-sandbox
+// SPDX-License-Identifier: GPL-3.0-only
+// Project: https://github.com/fmuecke/launch-as
 
 #include "PseudoConsoleHost.h"
 
+#include "LaunchProcess.h"
 #include "PseudoConsoleSession.h"
-#include "SandboxProcess.h"
 #include "Win32Support.h"
 #include "WindowsCommandLine.h"
 
@@ -20,7 +20,7 @@
 #include <string_view>
 #include <vector>
 
-namespace sandbox_launcher
+namespace launch_as
 {
 namespace
 {
@@ -208,4 +208,4 @@ std::vector<std::wstring> BuildPseudoConsoleHostArguments(
     return arguments;
 }
 
-} // namespace sandbox_launcher
+} // namespace launch_as

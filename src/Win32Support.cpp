@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: 2026 Florian Mücke
-// SPDX-License-Identifier: MIT
-// Part of claude-win-sandbox: https://github.com/fmuecke/claude-win-sandbox
+// SPDX-License-Identifier: GPL-3.0-only
+// Project: https://github.com/fmuecke/launch-as
 
 #include "Win32Support.h"
 
 #include <string>
 
-namespace sandbox_launcher
+namespace launch_as
 {
 namespace
 {
@@ -60,4 +60,4 @@ std::wstring FormatWindowsError(DWORD error)
     return message + L" (" + std::to_wstring(error) + L")";
 }
 
-} // namespace sandbox_launcher
+} // namespace launch_as

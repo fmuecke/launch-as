@@ -1,6 +1,22 @@
 # SPDX-FileCopyrightText: 2026 Florian Mücke
-# SPDX-License-Identifier: MIT
-# Part of claude-win-sandbox: https://github.com/fmuecke/claude-win-sandbox
+# SPDX-License-Identifier: GPL-3.0-only
+# Project: https://github.com/fmuecke/launch-as
+
+cmake_minimum_required(VERSION 3.25)
+
+project(
+    launch_as
+    VERSION 0.3.0
+    LANGUAGES CXX RC
+)
+
+set(LAUNCH_AS_VERSION_TWEAK 0)
+
+if(NOT WIN32)
+    message(FATAL_ERROR "launch-as supports Windows only.")
+endif()
+
+include(CTest)
 
 configure_file(
     resources/LauncherVersion.rc.in
@@ -8,20 +24,20 @@ configure_file(
     @ONLY
 )
 
-add_executable(ClaudeSandboxLauncher
+add_executable(launch_as
     src/CredentialInput.cpp
     src/CredentialInput.h
     src/Credentials.cpp
     src/Credentials.h
-    src/ClaudeSandboxLauncher.cpp
+    src/launch_as.cpp
     src/LauncherOptions.cpp
     src/LauncherOptions.h
     src/PseudoConsoleHost.cpp
     src/PseudoConsoleHost.h
     src/PseudoConsoleSession.cpp
     src/PseudoConsoleSession.h
-    src/SandboxProcess.cpp
-    src/SandboxProcess.h
+    src/LaunchProcess.cpp
+    src/LaunchProcess.h
     src/TerminalBridge.cpp
     src/TerminalBridge.h
     src/Win32Support.cpp
@@ -31,7 +47,7 @@ add_executable(ClaudeSandboxLauncher
     "${CMAKE_CURRENT_BINARY_DIR}/LauncherVersion.rc"
 )
 
-function(configure_native_target target)
+function(configure_launch_as_target target)
     target_compile_features(${target} PRIVATE cxx_std_23)
 
     if(MSVC)
@@ -63,19 +79,22 @@ function(configure_native_target target)
     )
 endfunction()
 
-target_link_libraries(ClaudeSandboxLauncher PRIVATE
+target_link_libraries(launch_as PRIVATE
     Advapi32
     Credui
     Ole32
 )
 
-configure_native_target(ClaudeSandboxLauncher)
+configure_launch_as_target(launch_as)
+set_target_properties(launch_as PROPERTIES
+    OUTPUT_NAME "launch-as"
+)
 
 if(BUILD_TESTING)
     add_executable(LauncherArgvProbe
         tests/ArgvProbe.cpp
     )
-    configure_native_target(LauncherArgvProbe)
+    configure_launch_as_target(LauncherArgvProbe)
 
     add_executable(LauncherCommandLineTests
         tests/CommandLineTests.cpp
@@ -85,7 +104,7 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests"
     )
-    configure_native_target(LauncherCommandLineTests)
+    configure_launch_as_target(LauncherCommandLineTests)
 
     add_test(
         NAME launcher.command_line
@@ -106,7 +125,7 @@ if(BUILD_TESTING)
     target_include_directories(LauncherPseudoConsoleTests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
     )
-    configure_native_target(LauncherPseudoConsoleTests)
+    configure_launch_as_target(LauncherPseudoConsoleTests)
     target_link_libraries(LauncherPseudoConsoleTests PRIVATE
         Advapi32
         Ole32
@@ -116,7 +135,7 @@ if(BUILD_TESTING)
         NAME launcher.pseudoconsole
         COMMAND
             "$<TARGET_FILE:LauncherPseudoConsoleTests>"
-            "$<TARGET_FILE:ClaudeSandboxLauncher>"
+            "$<TARGET_FILE:launch_as>"
     )
     set_tests_properties(launcher.pseudoconsole PROPERTIES
         LABELS "launcher;integration;terminal"
@@ -140,7 +159,7 @@ if(BUILD_TESTING)
             -File
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/Invoke-LauncherBehaviorTests.ps1"
             -LauncherPath
-            "$<TARGET_FILE:ClaudeSandboxLauncher>"
+            "$<TARGET_FILE:launch_as>"
             -ExpectedVersion
             "${PROJECT_VERSION}"
             -ExpectedTestCredentialTagVisibility
@@ -150,22 +169,4 @@ if(BUILD_TESTING)
         LABELS "launcher;behavior"
     )
 
-    add_test(
-        NAME launcher.version_consistency
-        COMMAND
-            "${POWERSHELL_EXECUTABLE}"
-            -NoLogo
-            -NoProfile
-            -NonInteractive
-            -ExecutionPolicy Bypass
-            -File
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Test-ProjectVersion.ps1"
-            -RepoRoot
-            "${PROJECT_SOURCE_DIR}"
-            -ExpectedVersion
-            "${PROJECT_VERSION}"
-    )
-    set_tests_properties(launcher.version_consistency PROPERTIES
-        LABELS "launcher;version"
-    )
 endif()

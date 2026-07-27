@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Florian Mücke
-// SPDX-License-Identifier: MIT
-// Part of claude-win-sandbox: https://github.com/fmuecke/claude-win-sandbox
+// SPDX-License-Identifier: GPL-3.0-only
+// Project: https://github.com/fmuecke/launch-as
 
 #include "Credentials.h"
 
 #include "CredentialInput.h"
-#include "SandboxProcess.h"
+#include "LaunchProcess.h"
 #include "Win32Support.h"
 
 #include <Lmcons.h>
@@ -19,12 +19,12 @@
 #include <string_view>
 #include <wincred.h>
 
-namespace sandbox_launcher
+namespace launch_as
 {
 namespace
 {
 
-constexpr std::wstring_view CredentialPrefix = L"claude-win-sandbox: ";
+constexpr std::wstring_view CredentialPrefix = L"launch-as: ";
 constexpr std::size_t MaximumPasswordCharacters = 512;
 
 class CredentialBuffer final
@@ -222,7 +222,7 @@ ExitCode CredentialStatus(const AccountIdentity& account)
     const CredentialReadResult result = ReadCredential(account, credential);
     if (result == CredentialReadResult::NotFound)
     {
-        std::wcout << L"No launcher credential is registered for " << account.qualifiedUsername
+        std::wcout << L"No launch-as credential is registered for " << account.qualifiedUsername
                    << L".\n";
         return ExitCredentialMissing;
     }
@@ -231,7 +231,7 @@ ExitCode CredentialStatus(const AccountIdentity& account)
         return ExitFailure;
     }
 
-    std::wcout << L"A launcher credential is registered for " << account.qualifiedUsername
+    std::wcout << L"A launch-as credential is registered for " << account.qualifiedUsername
                << L".\n";
     return ExitSuccess;
 }
@@ -274,10 +274,10 @@ StoredCredentialResult LoadStoredPassword(const AccountIdentity& account, Secret
 bool SaveCredential(const AccountIdentity& account, const SecretBuffer& password)
 {
     std::wstring target = CredentialTarget(account);
-    std::wstring comment = L"claude-win-sandbox launcher credential";
+    std::wstring comment = L"launch-as credential";
     if (!account.testCredentialTag.empty())
     {
-        comment = L"claude-win-sandbox test credential: " + account.testCredentialTag;
+        comment = L"launch-as test credential: " + account.testCredentialTag;
     }
     CREDENTIALW credential {};
     credential.Type = CRED_TYPE_GENERIC;
@@ -302,7 +302,7 @@ ExitCode ForgetCredential(const AccountIdentity& account)
     const std::wstring target = CredentialTarget(account);
     if (CredDeleteW(target.c_str(), CRED_TYPE_GENERIC, 0))
     {
-        std::wcout << L"Removed the launcher credential for " << account.qualifiedUsername
+        std::wcout << L"Removed the launch-as credential for " << account.qualifiedUsername
                    << L".\n";
         return ExitSuccess;
     }
@@ -310,7 +310,7 @@ ExitCode ForgetCredential(const AccountIdentity& account)
     const DWORD error = GetLastError();
     if (error == ERROR_NOT_FOUND)
     {
-        std::wcout << L"No launcher credential was registered for " << account.qualifiedUsername
+        std::wcout << L"No launch-as credential was registered for " << account.qualifiedUsername
                    << L".\n";
         return ExitSuccess;
     }
@@ -319,4 +319,4 @@ ExitCode ForgetCredential(const AccountIdentity& account)
     return ExitFailure;
 }
 
-} // namespace sandbox_launcher
+} // namespace launch_as

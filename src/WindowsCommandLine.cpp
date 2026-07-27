@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: 2026 Florian Mücke
-// SPDX-License-Identifier: MIT
-// Part of claude-win-sandbox: https://github.com/fmuecke/claude-win-sandbox
+// SPDX-License-Identifier: GPL-3.0-only
+// Project: https://github.com/fmuecke/launch-as
 
 #include "WindowsCommandLine.h"
 
 #include <cstddef>
 
-namespace sandbox_launcher
+namespace launch_as
 {
 
 std::wstring QuoteWindowsCommandLineArgument(std::wstring_view argument)
@@ -60,4 +60,4 @@ std::wstring BuildWindowsCommandLine(
     return commandLine;
 }
 
-} // namespace sandbox_launcher
+} // namespace launch_as

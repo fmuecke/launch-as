@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Florian Mücke
-// SPDX-License-Identifier: MIT
-// Part of claude-win-sandbox: https://github.com/fmuecke/claude-win-sandbox
+// SPDX-License-Identifier: GPL-3.0-only
+// Project: https://github.com/fmuecke/launch-as
 
 #include "TerminalBridge.h"
 
@@ -15,7 +15,7 @@
 #include <utility>
 #include <vector>
 
-namespace sandbox_launcher
+namespace launch_as
 {
 namespace
 {
@@ -136,7 +136,7 @@ enum class PipeDirection
         return false;
     }
 
-    pipeName = L"\\\\.\\pipe\\ClaudeSandboxLauncher-";
+    pipeName = L"\\\\.\\pipe\\launch-as-";
     pipeName += identifierText.data();
     pipeName += L"-";
     pipeName += purpose;
@@ -446,7 +446,7 @@ void TerminalBridge::Stop() noexcept
         if (WaitForSingleObject(outputCompleteEvent_.get(), OutputDrainGraceMilliseconds) !=
             WAIT_OBJECT_0)
         {
-            // A sandbox process can retain a duplicate of its output client. Stop the
+            // A target process can retain a duplicate of its output client. Stop the
             // relay after the grace period instead of waiting indefinitely for EOF.
             outputRelay_.request_stop();
             CancelSynchronousIo(outputRelay_.native_handle());
@@ -565,4 +565,4 @@ void TerminalBridge::RestoreTerminal() noexcept
     }
 }
 
-} // namespace sandbox_launcher
+} // namespace launch_as

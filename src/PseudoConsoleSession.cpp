@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Florian Mücke
-// SPDX-License-Identifier: MIT
-// Part of claude-win-sandbox: https://github.com/fmuecke/claude-win-sandbox
+// SPDX-License-Identifier: GPL-3.0-only
+// Project: https://github.com/fmuecke/launch-as
 
 #include "PseudoConsoleSession.h"
 
@@ -11,7 +11,7 @@
 #include <string>
 #include <utility>
 
-namespace sandbox_launcher
+namespace launch_as
 {
 namespace
 {
@@ -433,4 +433,4 @@ void PseudoConsoleSession::ClosePseudoConsole() noexcept
     }
 }
 
-} // namespace sandbox_launcher
+} // namespace launch_as

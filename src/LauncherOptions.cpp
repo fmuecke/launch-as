@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Florian Mücke
-// SPDX-License-Identifier: MIT
-// Part of claude-win-sandbox: https://github.com/fmuecke/claude-win-sandbox
+// SPDX-License-Identifier: GPL-3.0-only
+// Project: https://github.com/fmuecke/launch-as
 
 #include "LauncherOptions.h"
 
@@ -10,7 +10,7 @@
 #include <optional>
 #include <string_view>
 
-namespace sandbox_launcher
+namespace launch_as
 {
 namespace
 {
@@ -60,11 +60,11 @@ constexpr std::size_t MaximumTestCredentialTagCharacters = 64;
 void PrintUsage()
 {
     std::wcerr << L"Usage:\n"
-               << L"  ClaudeSandboxLauncher.exe register --user <local-user>"
+               << L"  launch-as.exe register --user <local-user>"
                   L" [--password-stdin]\n"
-               << L"  ClaudeSandboxLauncher.exe status --user <local-user>\n"
-               << L"  ClaudeSandboxLauncher.exe forget --user <local-user>\n"
-               << L"  ClaudeSandboxLauncher.exe run --user <local-user>"
+               << L"  launch-as.exe status --user <local-user>\n"
+               << L"  launch-as.exe forget --user <local-user>\n"
+               << L"  launch-as.exe run --user <local-user>"
                   L" [--credential-mode <auto|stored|prompt>]"
                   L" [--working-directory <directory>] [--new-console|--terminal]"
                   L" -- <absolute-executable> [arguments...]\n";
@@ -209,4 +209,4 @@ std::optional<Options> ParseOptions(std::span<wchar_t*> arguments)
     return options;
 }
 
-} // namespace sandbox_launcher
+} // namespace launch_as

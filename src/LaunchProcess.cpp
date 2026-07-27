@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Florian Mücke
-// SPDX-License-Identifier: MIT
-// Part of claude-win-sandbox: https://github.com/fmuecke/claude-win-sandbox
+// SPDX-License-Identifier: GPL-3.0-only
+// Project: https://github.com/fmuecke/launch-as
 
-#include "SandboxProcess.h"
+#include "LaunchProcess.h"
 
 #include "CredentialInput.h"
 #include "Credentials.h"
@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 
-namespace sandbox_launcher
+namespace launch_as
 {
 namespace
 {
@@ -122,7 +122,7 @@ class LocalBuffer final
         }
         if (mode == CredentialMode::Stored)
         {
-            std::wcerr << L"No stored launcher credential exists for " << account.qualifiedUsername
+            std::wcerr << L"No stored launch-as credential exists for " << account.qualifiedUsername
                        << L". Register one first or use " << L"--credential-mode auto.\n";
             return ExitCredentialMissing;
         }
@@ -281,7 +281,7 @@ bool ValidateRunPaths(const Options& options)
     return true;
 }
 
-ExitCode RunSandboxProcess(const AccountIdentity& account, const Options& options)
+ExitCode RunProcessAsUser(const AccountIdentity& account, const Options& options)
 {
     STARTUPINFOW standardStartupInfo {};
     standardStartupInfo.cb = sizeof(standardStartupInfo);
@@ -494,4 +494,4 @@ ExitCode RunSandboxProcess(const AccountIdentity& account, const Options& option
     return childExitCode;
 }
 
-} // namespace sandbox_launcher
+} // namespace launch_as

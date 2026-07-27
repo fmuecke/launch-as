@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Florian Mücke
-// SPDX-License-Identifier: MIT
-// Part of claude-win-sandbox: https://github.com/fmuecke/claude-win-sandbox
+// SPDX-License-Identifier: GPL-3.0-only
+// Project: https://github.com/fmuecke/launch-as
 
 #pragma once
 
@@ -10,7 +10,7 @@
 #include <optional>
 #include <string>
 
-namespace sandbox_launcher
+namespace launch_as
 {
 
 struct AccountIdentity
@@ -24,6 +24,6 @@ struct AccountIdentity
 [[nodiscard]] std::optional<AccountIdentity> ResolveLocalAccount(const std::wstring& username);
 [[nodiscard]] bool ValidateNonAdministrativeToken(HANDLE token, const AccountIdentity& account);
 [[nodiscard]] bool ValidateRunPaths(const Options& options);
-[[nodiscard]] ExitCode RunSandboxProcess(const AccountIdentity& account, const Options& options);
+[[nodiscard]] ExitCode RunProcessAsUser(const AccountIdentity& account, const Options& options);
 
-} // namespace sandbox_launcher
+} // namespace launch_as

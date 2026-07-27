@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Florian Mücke
-// SPDX-License-Identifier: MIT
-// Part of claude-win-sandbox: https://github.com/fmuecke/claude-win-sandbox
+// SPDX-License-Identifier: GPL-3.0-only
+// Project: https://github.com/fmuecke/launch-as
 
 #include "CommandLineTestArguments.h"
 #include "WindowsCommandLine.h"
@@ -63,18 +63,16 @@ int wmain(int argc, wchar_t* argv[])
         return 1;
     }
 
-    if (!ExpectEqual(
-            sandbox_launcher::QuoteWindowsCommandLineArgument(L""), L"\"\"", L"empty argument") ||
-        !ExpectEqual(sandbox_launcher::QuoteWindowsCommandLineArgument(L"plain"),
-            L"plain",
-            L"plain argument") ||
-        !ExpectEqual(sandbox_launcher::QuoteWindowsCommandLineArgument(L"with space"),
+    if (!ExpectEqual(launch_as::QuoteWindowsCommandLineArgument(L""), L"\"\"", L"empty argument") ||
+        !ExpectEqual(
+            launch_as::QuoteWindowsCommandLineArgument(L"plain"), L"plain", L"plain argument") ||
+        !ExpectEqual(launch_as::QuoteWindowsCommandLineArgument(L"with space"),
             L"\"with space\"",
             L"spaced argument") ||
-        !ExpectEqual(sandbox_launcher::QuoteWindowsCommandLineArgument(L"quote\"inside"),
+        !ExpectEqual(launch_as::QuoteWindowsCommandLineArgument(L"quote\"inside"),
             L"\"quote\\\"inside\"",
             L"embedded quote") ||
-        !ExpectEqual(sandbox_launcher::QuoteWindowsCommandLineArgument(L"trailing slash\\"),
+        !ExpectEqual(launch_as::QuoteWindowsCommandLineArgument(L"trailing slash\\"),
             L"\"trailing slash\\\\\"",
             L"trailing backslash"))
     {
@@ -94,8 +92,7 @@ int wmain(int argc, wchar_t* argv[])
     {
         arguments.emplace_back(argument);
     }
-    std::wstring commandLine =
-        sandbox_launcher::BuildWindowsCommandLine(probePath.native(), arguments);
+    std::wstring commandLine = launch_as::BuildWindowsCommandLine(probePath.native(), arguments);
     std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
     mutableCommandLine.push_back(L'\0');
 

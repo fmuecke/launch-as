@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: 2026 Florian Mücke
-// SPDX-License-Identifier: MIT
-// Part of claude-win-sandbox: https://github.com/fmuecke/claude-win-sandbox
+// SPDX-License-Identifier: GPL-3.0-only
+// Project: https://github.com/fmuecke/launch-as
 
 #pragma code_page(65001)
 #include <windows.h>
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,@CLAUDE_WIN_SANDBOX_VERSION_TWEAK@
- PRODUCTVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,@CLAUDE_WIN_SANDBOX_VERSION_TWEAK@
+ FILEVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,@LAUNCH_AS_VERSION_TWEAK@
+ PRODUCTVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,@LAUNCH_AS_VERSION_TWEAK@
  FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
 #ifdef _DEBUG
  FILEFLAGS VS_FF_DEBUG
@@ -23,12 +23,12 @@ BEGIN
         BLOCK "040904B0"
         BEGIN
             VALUE "CompanyName", "Florian Mücke\0"
-            VALUE "FileDescription", "Claude Sandbox Launcher\0"
+            VALUE "FileDescription", "launch-as alternate-user launcher\0"
             VALUE "FileVersion", "@PROJECT_VERSION@\0"
-            VALUE "InternalName", "ClaudeSandboxLauncher\0"
+            VALUE "InternalName", "launch-as\0"
             VALUE "LegalCopyright", "Copyright (c) 2026 Florian Mücke\0"
-            VALUE "OriginalFilename", "ClaudeSandboxLauncher.exe\0"
-            VALUE "ProductName", "claude-win-sandbox\0"
+            VALUE "OriginalFilename", "launch-as.exe\0"
+            VALUE "ProductName", "launch-as\0"
             VALUE "ProductVersion", "@PROJECT_VERSION@\0"
         END
     END

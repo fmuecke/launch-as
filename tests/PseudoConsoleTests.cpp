@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Florian Mücke
-// SPDX-License-Identifier: MIT
-// Part of claude-win-sandbox: https://github.com/fmuecke/claude-win-sandbox
+// SPDX-License-Identifier: GPL-3.0-only
+// Project: https://github.com/fmuecke/launch-as
 
 #include "TerminalBridge.h"
 #include "Win32Support.h"
@@ -17,10 +17,10 @@
 namespace
 {
 
-using sandbox_launcher::BuildWindowsCommandLine;
-using sandbox_launcher::FormatWindowsError;
-using sandbox_launcher::TerminalBridge;
-using sandbox_launcher::UniqueHandle;
+using launch_as::BuildWindowsCommandLine;
+using launch_as::FormatWindowsError;
+using launch_as::TerminalBridge;
+using launch_as::UniqueHandle;
 
 constexpr DWORD ProcessTimeoutMilliseconds = 10'000;
 constexpr auto BridgeStopTimeout = std::chrono::seconds(2);
@@ -37,7 +37,7 @@ constexpr auto BridgeStopTimeout = std::chrono::seconds(2);
     return std::filesystem::path(std::wstring(systemDirectory.data(), characters)) / L"cmd.exe";
 }
 
-[[nodiscard]] bool VerifySandboxReceivesOnlyPipeClients()
+[[nodiscard]] bool VerifyTargetReceivesOnlyPipeClients()
 {
     STARTUPINFOW startupInformation {};
     startupInformation.cb = sizeof(startupInformation);
@@ -50,34 +50,34 @@ constexpr auto BridgeStopTimeout = std::chrono::seconds(2);
         return false;
     }
 
-    const std::array<HANDLE, 2> sandboxHandles {
+    const std::array<HANDLE, 2> targetHandles {
         startupInformation.hStdInput, startupInformation.hStdOutput
     };
-    for (const HANDLE handle : sandboxHandles)
+    for (const HANDLE handle : targetHandles)
     {
         DWORD flags = 0;
         if (!GetNamedPipeInfo(handle, &flags, nullptr, nullptr, nullptr))
         {
-            std::wcerr << L"Could not inspect a sandbox terminal-pipe endpoint: "
+            std::wcerr << L"Could not inspect a target terminal-pipe endpoint: "
                        << FormatWindowsError(GetLastError()) << L"\n";
             return false;
         }
         if ((flags & PIPE_SERVER_END) != 0)
         {
-            std::wcerr << L"The sandbox received a terminal-pipe server endpoint.\n";
+            std::wcerr << L"The target received a terminal-pipe server endpoint.\n";
             return false;
         }
         if (ImpersonateNamedPipeClient(handle))
         {
             RevertToSelf();
-            std::wcerr << L"A sandbox terminal-pipe endpoint could impersonate its peer.\n";
+            std::wcerr << L"A target terminal-pipe endpoint could impersonate its peer.\n";
             return false;
         }
 
         DWORD handleFlags = 0;
         if (!GetHandleInformation(handle, &handleFlags) || (handleFlags & HANDLE_FLAG_INHERIT) != 0)
         {
-            std::wcerr << L"A sandbox terminal-pipe client was inheritable outside the "
+            std::wcerr << L"A target terminal-pipe client was inheritable outside the "
                           L"process-creation window.\n";
             return false;
         }
@@ -88,7 +88,7 @@ constexpr auto BridgeStopTimeout = std::chrono::seconds(2);
         std::wcerr << error << L"\n";
         return false;
     }
-    for (const HANDLE handle : sandboxHandles)
+    for (const HANDLE handle : targetHandles)
     {
         DWORD handleFlags = 0;
         if (!GetHandleInformation(handle, &handleFlags) || (handleFlags & HANDLE_FLAG_INHERIT) == 0)
@@ -103,7 +103,7 @@ constexpr auto BridgeStopTimeout = std::chrono::seconds(2);
         std::wcerr << error << L"\n";
         return false;
     }
-    for (const HANDLE handle : sandboxHandles)
+    for (const HANDLE handle : targetHandles)
     {
         DWORD handleFlags = 0;
         if (!GetHandleInformation(handle, &handleFlags) || (handleFlags & HANDLE_FLAG_INHERIT) != 0)
@@ -134,7 +134,7 @@ int wmain(int argumentCount, wchar_t* arguments[])
         std::wcerr << L"The launcher or cmd.exe path is invalid.\n";
         return 1;
     }
-    if (!VerifySandboxReceivesOnlyPipeClients())
+    if (!VerifyTargetReceivesOnlyPipeClients())
     {
         return 1;
     }
@@ -219,7 +219,7 @@ int wmain(int argumentCount, wchar_t* arguments[])
         TerminateProcess(processInformation.hProcess, 1);
         CloseHandle(processInformation.hProcess);
         CloseHandle(processInformation.hThread);
-        std::wcerr << L"The parent retained a sandbox terminal-pipe client after process "
+        std::wcerr << L"The parent retained a target terminal-pipe client after process "
                       L"creation.\n";
         return 1;
     }

@@ -1,18 +1,18 @@
 // SPDX-FileCopyrightText: 2026 Florian Mücke
-// SPDX-License-Identifier: MIT
-// Part of claude-win-sandbox: https://github.com/fmuecke/claude-win-sandbox
+// SPDX-License-Identifier: GPL-3.0-only
+// Project: https://github.com/fmuecke/launch-as
 
 #include "Credentials.h"
+#include "LaunchProcess.h"
 #include "LauncherOptions.h"
 #include "PseudoConsoleHost.h"
-#include "SandboxProcess.h"
 
 #include <cstddef>
 #include <span>
 
 int wmain(int argc, wchar_t* argv[])
 {
-    using namespace sandbox_launcher;
+    using namespace launch_as;
 
     const std::span arguments(argv, static_cast<std::size_t>(argc));
     if (IsPseudoConsoleHostInvocation(arguments))
@@ -46,7 +46,7 @@ int wmain(int argc, wchar_t* argv[])
                                               : RegisterCredential(*account);
         break;
     case Command::Run:
-        exitCode = RunSandboxProcess(*account, *options);
+        exitCode = RunProcessAsUser(*account, *options);
         break;
     case Command::Status:
         exitCode = CredentialStatus(*account);

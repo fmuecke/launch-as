@@ -71,35 +71,44 @@ enum class PipeDirection
     HANDLE rawToken = nullptr;
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &rawToken))
     {
+        const DWORD tokenError = GetLastError();
         error = L"Could not open the launcher token for terminal-pipe security: " +
-                FormatWindowsError(GetLastError());
+                FormatWindowsError(tokenError);
         return false;
     }
     UniqueHandle token(rawToken);
 
     DWORD tokenBytes = 0;
     GetTokenInformation(token.get(), TokenUser, nullptr, 0, &tokenBytes);
-    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || tokenBytes == 0)
+    const DWORD tokenSizeError = GetLastError();
+    if (tokenSizeError != ERROR_INSUFFICIENT_BUFFER || tokenBytes == 0)
     {
         error = L"Could not size the launcher identity for terminal-pipe security: " +
-                FormatWindowsError(GetLastError());
+                FormatWindowsError(tokenSizeError);
         return false;
     }
 
     std::vector<std::byte> tokenStorage(tokenBytes);
     if (!GetTokenInformation(token.get(), TokenUser, tokenStorage.data(), tokenBytes, &tokenBytes))
     {
+        const DWORD tokenReadError = GetLastError();
         error = L"Could not read the launcher identity for terminal-pipe security: " +
-                FormatWindowsError(GetLastError());
+                FormatWindowsError(tokenReadError);
         return false;
     }
 
     const auto* tokenUser = reinterpret_cast<const TOKEN_USER*>(tokenStorage.data());
     wchar_t* rawSid = nullptr;
-    if (!IsValidSid(tokenUser->User.Sid) || !ConvertSidToStringSidW(tokenUser->User.Sid, &rawSid))
+    if (!IsValidSid(tokenUser->User.Sid))
     {
+        error = L"The launcher token contains an invalid SID.";
+        return false;
+    }
+    if (!ConvertSidToStringSidW(tokenUser->User.Sid, &rawSid))
+    {
+        const DWORD sidError = GetLastError();
         error = L"Could not format the launcher identity for terminal-pipe security: " +
-                FormatWindowsError(GetLastError());
+                FormatWindowsError(sidError);
         return false;
     }
     std::unique_ptr<wchar_t, LocalFreeDeleter> sid(rawSid);
@@ -110,7 +119,8 @@ enum class PipeDirection
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
             securityDefinition.c_str(), SDDL_REVISION_1, &rawDescriptor, nullptr))
     {
-        error = L"Could not create terminal-pipe security: " + FormatWindowsError(GetLastError());
+        const DWORD descriptorError = GetLastError();
+        error = L"Could not create terminal-pipe security: " + FormatWindowsError(descriptorError);
         return false;
     }
     descriptor.reset(rawDescriptor);
@@ -170,8 +180,9 @@ enum class PipeDirection
         &serverSecurity);
     if (rawServer == INVALID_HANDLE_VALUE)
     {
+        const DWORD serverError = GetLastError();
         error = L"Could not create the terminal " + std::wstring(purpose) + L" server: " +
-                FormatWindowsError(GetLastError());
+                FormatWindowsError(serverError);
         return false;
     }
     UniqueHandle server(rawServer);
@@ -192,17 +203,22 @@ enum class PipeDirection
         nullptr);
     if (rawClient == INVALID_HANDLE_VALUE)
     {
+        const DWORD clientError = GetLastError();
         error = L"Could not connect the terminal " + std::wstring(purpose) + L" client: " +
-                FormatWindowsError(GetLastError());
+                FormatWindowsError(clientError);
         return false;
     }
     UniqueHandle client(rawClient);
 
-    if (!ConnectNamedPipe(server.get(), nullptr) && GetLastError() != ERROR_PIPE_CONNECTED)
+    if (!ConnectNamedPipe(server.get(), nullptr))
     {
-        error = L"Could not connect the terminal " + std::wstring(purpose) + L" server: " +
-                FormatWindowsError(GetLastError());
-        return false;
+        const DWORD connectError = GetLastError();
+        if (connectError != ERROR_PIPE_CONNECTED)
+        {
+            error = L"Could not connect the terminal " + std::wstring(purpose) + L" server: " +
+                    FormatWindowsError(connectError);
+            return false;
+        }
     }
 
     parentEndpoint = std::move(server);
@@ -268,8 +284,9 @@ bool TerminalBridge::Initialize(STARTUPINFOW& childStartupInformation, std::wstr
     outputCompleteEvent_.reset(CreateEventW(nullptr, TRUE, FALSE, nullptr));
     if (!outputCompleteEvent_)
     {
+        const DWORD eventError = GetLastError();
         error = L"Could not create the terminal output completion event: " +
-                FormatWindowsError(GetLastError());
+                FormatWindowsError(eventError);
         return false;
     }
 
@@ -316,8 +333,9 @@ bool TerminalBridge::PrepareChildProcessCreation(std::wstring& error)
 
     if (!SetHandleInformation(childInputRead_.get(), HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT))
     {
+        const DWORD inheritanceError = GetLastError();
         error = L"Could not enable inheritance for the terminal input client: " +
-                FormatWindowsError(GetLastError());
+                FormatWindowsError(inheritanceError);
         return false;
     }
     if (!SetHandleInformation(childOutputWrite_.get(), HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT))
@@ -395,8 +413,9 @@ bool TerminalBridge::Start(std::wstring& error)
             FALSE,
             DUPLICATE_SAME_ACCESS))
     {
+        const DWORD duplicateError = GetLastError();
         error =
-            L"Could not duplicate the terminal input bridge: " + FormatWindowsError(GetLastError());
+            L"Could not duplicate the terminal input bridge: " + FormatWindowsError(duplicateError);
         RestoreTerminal();
         return false;
     }
@@ -495,7 +514,8 @@ bool TerminalBridge::ConfigureTerminal(std::wstring& error)
                                 ENABLE_VIRTUAL_TERMINAL_INPUT;
         if (!SetConsoleMode(parentInput_, inputMode))
         {
-            error = L"Could not configure terminal input: " + FormatWindowsError(GetLastError());
+            const DWORD modeError = GetLastError();
+            error = L"Could not configure terminal input: " + FormatWindowsError(modeError);
             return false;
         }
         inputModeChanged_ = true;
@@ -505,8 +525,9 @@ bool TerminalBridge::ConfigureTerminal(std::wstring& error)
         {
             if (!SetConsoleCP(CP_UTF8))
             {
+                const DWORD codePageError = GetLastError();
                 error = L"Could not configure UTF-8 terminal input: " +
-                        FormatWindowsError(GetLastError());
+                        FormatWindowsError(codePageError);
                 RestoreTerminal();
                 return false;
             }
@@ -519,7 +540,8 @@ bool TerminalBridge::ConfigureTerminal(std::wstring& error)
         if (!SetConsoleMode(
                 parentOutput_, originalOutputMode_ | ENABLE_VIRTUAL_TERMINAL_PROCESSING))
         {
-            error = L"Could not configure terminal output: " + FormatWindowsError(GetLastError());
+            const DWORD modeError = GetLastError();
+            error = L"Could not configure terminal output: " + FormatWindowsError(modeError);
             RestoreTerminal();
             return false;
         }
@@ -530,8 +552,9 @@ bool TerminalBridge::ConfigureTerminal(std::wstring& error)
         {
             if (!SetConsoleOutputCP(CP_UTF8))
             {
+                const DWORD codePageError = GetLastError();
                 error = L"Could not configure UTF-8 terminal output: " +
-                        FormatWindowsError(GetLastError());
+                        FormatWindowsError(codePageError);
                 RestoreTerminal();
                 return false;
             }

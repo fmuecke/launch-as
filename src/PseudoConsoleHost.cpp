@@ -131,8 +131,9 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
             pseudoConsole.startupInfo(),
             &processInformation))
     {
+        const DWORD processError = GetLastError();
         std::wcerr << L"Could not start the pseudoconsole child: "
-                   << FormatWindowsError(GetLastError()) << L"\n";
+                   << FormatWindowsError(processError) << L"\n";
         return ExitFailure;
     }
     UniqueHandle process(processInformation.hProcess);
@@ -151,9 +152,17 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
     const DWORD waitResult = WaitForSingleObject(process.get(), INFINITE);
     if (waitResult != WAIT_OBJECT_0)
     {
+        const DWORD waitError = waitResult == WAIT_FAILED ? GetLastError() : ERROR_SUCCESS;
         pseudoConsole.StopRelays();
-        std::wcerr << L"Could not wait for the pseudoconsole child: "
-                   << FormatWindowsError(GetLastError()) << L"\n";
+        if (waitResult == WAIT_FAILED)
+        {
+            std::wcerr << L"Could not wait for the pseudoconsole child: "
+                       << FormatWindowsError(waitError) << L"\n";
+        }
+        else
+        {
+            std::wcerr << L"Unexpected pseudoconsole child wait result: " << waitResult << L"\n";
+        }
         return ExitFailure;
     }
     pseudoConsole.StopRelays();
@@ -161,8 +170,9 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
     DWORD childExitCode = 0;
     if (!GetExitCodeProcess(process.get(), &childExitCode))
     {
+        const DWORD exitCodeError = GetLastError();
         std::wcerr << L"Could not read the pseudoconsole child exit code: "
-                   << FormatWindowsError(GetLastError()) << L"\n";
+                   << FormatWindowsError(exitCodeError) << L"\n";
         return ExitFailure;
     }
     return childExitCode;
@@ -177,7 +187,8 @@ std::filesystem::path GetLauncherExecutablePath(std::wstring& error)
             GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
         if (characters == 0)
         {
-            error = L"Could not resolve the launcher path: " + FormatWindowsError(GetLastError());
+            const DWORD pathError = GetLastError();
+            error = L"Could not resolve the launcher path: " + FormatWindowsError(pathError);
             return {};
         }
         if (characters < path.size())

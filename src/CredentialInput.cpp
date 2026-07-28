@@ -117,8 +117,9 @@ class SensitiveBytes final
             password.data(),
             &passwordCharacters))
     {
+        const DWORD unpackError = GetLastError();
         std::wcerr << L"Could not unpack the supplied credential: "
-                   << FormatWindowsError(GetLastError()) << L"\n";
+                   << FormatWindowsError(unpackError) << L"\n";
         return CredentialPromptResult::Error;
     }
 
@@ -153,10 +154,11 @@ CredentialPromptResult PromptForPassword(
     DWORD inputBufferBytes = 0;
     CredPackAuthenticationBufferW(
         0, inputUsername.data(), emptyPassword.data(), nullptr, &inputBufferBytes);
-    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || inputBufferBytes == 0)
+    const DWORD inputBufferError = GetLastError();
+    if (inputBufferError != ERROR_INSUFFICIENT_BUFFER || inputBufferBytes == 0)
     {
         std::wcerr << L"Could not prepare Windows Credential UI: "
-                   << FormatWindowsError(GetLastError()) << L"\n";
+                   << FormatWindowsError(inputBufferError) << L"\n";
         return CredentialPromptResult::Error;
     }
 
@@ -164,8 +166,9 @@ CredentialPromptResult PromptForPassword(
     if (!CredPackAuthenticationBufferW(
             0, inputUsername.data(), emptyPassword.data(), inputBuffer.data(), &inputBufferBytes))
     {
-        std::wcerr << L"Could not prepare Windows Credential UI: "
-                   << FormatWindowsError(GetLastError()) << L"\n";
+        const DWORD packError = GetLastError();
+        std::wcerr << L"Could not prepare Windows Credential UI: " << FormatWindowsError(packError)
+                   << L"\n";
         return CredentialPromptResult::Error;
     }
 

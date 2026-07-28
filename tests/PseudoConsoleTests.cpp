@@ -58,8 +58,9 @@ constexpr auto BridgeStopTimeout = std::chrono::seconds(2);
         DWORD flags = 0;
         if (!GetNamedPipeInfo(handle, &flags, nullptr, nullptr, nullptr))
         {
+            const DWORD pipeInfoError = GetLastError();
             std::wcerr << L"Could not inspect a target terminal-pipe endpoint: "
-                       << FormatWindowsError(GetLastError()) << L"\n";
+                       << FormatWindowsError(pipeInfoError) << L"\n";
             return false;
         }
         if ((flags & PIPE_SERVER_END) != 0)
@@ -171,8 +172,9 @@ int wmain(int argumentCount, wchar_t* arguments[])
             FALSE,
             DUPLICATE_SAME_ACCESS))
     {
+        const DWORD duplicateError = GetLastError();
         std::wcerr << L"Could not retain a test output client: "
-                   << FormatWindowsError(GetLastError()) << L"\n";
+                   << FormatWindowsError(duplicateError) << L"\n";
         return 1;
     }
     UniqueHandle retainedOutputClient(rawRetainedOutputClient);

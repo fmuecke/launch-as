@@ -51,18 +51,20 @@ class LocalBuffer final
     HANDLE rawToken = nullptr;
     if (!OpenProcessToken(process, TOKEN_QUERY, &rawToken))
     {
-        std::wcerr << L"Could not open the child process token: "
-                   << FormatWindowsError(GetLastError()) << L"\n";
+        const DWORD tokenError = GetLastError();
+        std::wcerr << L"Could not open the child process token: " << FormatWindowsError(tokenError)
+                   << L"\n";
         return false;
     }
     UniqueHandle token(rawToken);
 
     DWORD tokenInformationBytes = 0;
     GetTokenInformation(token.get(), TokenUser, nullptr, 0, &tokenInformationBytes);
-    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || tokenInformationBytes == 0)
+    const DWORD tokenSizeError = GetLastError();
+    if (tokenSizeError != ERROR_INSUFFICIENT_BUFFER || tokenInformationBytes == 0)
     {
         std::wcerr << L"Could not size the child process identity: "
-                   << FormatWindowsError(GetLastError()) << L"\n";
+                   << FormatWindowsError(tokenSizeError) << L"\n";
         return false;
     }
 
@@ -73,8 +75,9 @@ class LocalBuffer final
             tokenInformationBytes,
             &tokenInformationBytes))
     {
+        const DWORD tokenInformationError = GetLastError();
         std::wcerr << L"Could not read the child process identity: "
-                   << FormatWindowsError(GetLastError()) << L"\n";
+                   << FormatWindowsError(tokenInformationError) << L"\n";
         return false;
     }
 
@@ -88,8 +91,9 @@ class LocalBuffer final
     wchar_t* rawSid = nullptr;
     if (!ConvertSidToStringSidW(tokenUser->User.Sid, &rawSid))
     {
-        std::wcerr << L"Could not format the child process SID: "
-                   << FormatWindowsError(GetLastError()) << L"\n";
+        const DWORD sidError = GetLastError();
+        std::wcerr << L"Could not format the child process SID: " << FormatWindowsError(sidError)
+                   << L"\n";
         return false;
     }
     LocalBuffer sidBuffer(rawSid);
@@ -152,8 +156,9 @@ std::optional<AccountIdentity> ResolveLocalAccount(const std::wstring& username)
     DWORD computerNameCharacters = static_cast<DWORD>(computerName.size());
     if (!GetComputerNameW(computerName.data(), &computerNameCharacters))
     {
+        const DWORD nameError = GetLastError();
         std::wcerr << L"Could not resolve the local computer name: "
-                   << FormatWindowsError(GetLastError()) << L"\n";
+                   << FormatWindowsError(nameError) << L"\n";
         return std::nullopt;
     }
     const std::wstring lookupName =
@@ -164,11 +169,12 @@ std::optional<AccountIdentity> ResolveLocalAccount(const std::wstring& username)
     SID_NAME_USE sidType {};
     LookupAccountNameW(
         nullptr, lookupName.c_str(), nullptr, &sidBytes, nullptr, &domainCharacters, &sidType);
+    const DWORD lookupError2 = GetLastError();
 
-    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || sidBytes == 0 || domainCharacters == 0)
+    if (lookupError2 != ERROR_INSUFFICIENT_BUFFER || sidBytes == 0 || domainCharacters == 0)
     {
         std::wcerr << L"Could not resolve local account '" << qualifiedUsername << L"': "
-                   << FormatWindowsError(GetLastError()) << L"\n";
+                   << FormatWindowsError(lookupError2) << L"\n";
         return std::nullopt;
     }
 
@@ -182,8 +188,9 @@ std::optional<AccountIdentity> ResolveLocalAccount(const std::wstring& username)
             &domainCharacters,
             &sidType))
     {
+        const DWORD lookupError = GetLastError();
         std::wcerr << L"Could not resolve local account '" << qualifiedUsername << L"': "
-                   << FormatWindowsError(GetLastError()) << L"\n";
+                   << FormatWindowsError(lookupError) << L"\n";
         return std::nullopt;
     }
     if (sidType != SidTypeUser || !IsValidSid(sid.data()))
@@ -196,8 +203,9 @@ std::optional<AccountIdentity> ResolveLocalAccount(const std::wstring& username)
     wchar_t* rawSid = nullptr;
     if (!ConvertSidToStringSidW(sid.data(), &rawSid))
     {
+        const DWORD convertError = GetLastError();
         std::wcerr << L"Could not format SID for '" << qualifiedUsername << L"': "
-                   << FormatWindowsError(GetLastError()) << L"\n";
+                   << FormatWindowsError(convertError) << L"\n";
         return std::nullopt;
     }
     LocalBuffer sidBuffer(rawSid);
@@ -486,8 +494,9 @@ ExitCode RunProcessAsUser(const AccountIdentity& account, const Options& options
     DWORD childExitCode = 0;
     if (!GetExitCodeProcess(process.get(), &childExitCode))
     {
-        std::wcerr << L"Could not read the child process exit code: "
-                   << FormatWindowsError(GetLastError()) << L"\n";
+        const DWORD err = GetLastError();
+        std::wcerr << L"Could not read the child process exit code: " << FormatWindowsError(err)
+                   << L"\n";
         return ExitFailure;
     }
 

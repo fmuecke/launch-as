@@ -34,3 +34,10 @@ Recent commits use short, imperative summaries, e.g. `Add secure same-pane ConPT
 ## General Implementation Guidelines
 
 Keep implementations simple and maintainable. Aim for working, easy-to-review code that is good enough for its purpose rather than clever or highly generalized machinery. This matters especially for security-sensitive setup, ACL, firewall, and teardown code: less complexity means fewer threat vectors and fewer mistakes.
+
+## Win32 Error Handling
+
+Capture `GetLastError()` into a local `DWORD` immediately after the specific
+Win32 API call that requires it. Do this before formatting or logging the
+error, cleanup, or any other API call; never pass a delayed `GetLastError()`
+directly to `FormatWindowsError` or another helper.

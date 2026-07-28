@@ -66,7 +66,8 @@ void PrintUsage()
                << L"  launch-as.exe forget --user <local-user>\n"
                << L"  launch-as.exe [run] --user <local-user>"
                   L" [--credential-mode <auto|stored|prompt>]"
-                  L" [--working-directory <directory>] [--new-console|--terminal]"
+                  L" [--working-directory <directory>]"
+                  L" [--auto|--new-console|--terminal]"
                   L" -- <absolute-executable> [arguments...]\n";
 #ifndef NDEBUG
     std::wcerr << L"Credential commands used by tests also accept:"
@@ -100,14 +101,21 @@ std::optional<Options> ParseOptions(std::span<wchar_t*> arguments)
             }
             break;
         }
-        if (name == L"--new-console" || name == L"--terminal")
+        if (name == L"--auto" || name == L"--new-console" || name == L"--terminal")
         {
             if (options.launchModeSpecified)
             {
                 return std::nullopt;
             }
-            options.launchMode =
-                name == L"--new-console" ? LaunchMode::NewConsole : LaunchMode::Terminal;
+            if (name == L"--auto")
+            {
+                options.launchMode = LaunchMode::Auto;
+            }
+            else
+            {
+                options.launchMode =
+                    name == L"--new-console" ? LaunchMode::NewConsole : LaunchMode::Terminal;
+            }
             options.launchModeSpecified = true;
             continue;
         }

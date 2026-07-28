@@ -51,7 +51,7 @@ function Invoke-Launcher {
             $OutputEncoding = [Text.UTF8Encoding]::new($false)
             $nativeOutput = @(
                 $StandardInput |
-                    & $script:ResolvedLauncher @Arguments 2>&1
+                & $script:ResolvedLauncher @Arguments 2>&1
             )
         }
         finally {
@@ -127,9 +127,9 @@ $usageResult = Invoke-Launcher `
     -ExpectedOutput 'Usage:'
 
 $testCredentialTagIsVisible =
-    $usageResult.Output.Contains('--test-credential-tag')
+$usageResult.Output.Contains('--test-credential-tag')
 $expectedTestCredentialTagIsVisible =
-    $ExpectedTestCredentialTagVisibility -eq 'Visible'
+$ExpectedTestCredentialTagVisibility -eq 'Visible'
 Assert-Equal `
     -Name "Test credential option is $($ExpectedTestCredentialTagVisibility.ToLower())" `
     -Actual $testCredentialTagIsVisible `
@@ -138,20 +138,20 @@ Assert-Equal `
 Assert-Equal `
     -Name 'Startup header includes the copyright notice' `
     -Actual $usageResult.Output.Contains(
-        'Copyright (C) 2026 Florian Mücke'
-    ) `
+    'Copyright (C) 2026 Florian Mücke'
+) `
     -Expected $true
 Assert-Equal `
     -Name 'Startup header includes the product version' `
     -Actual $usageResult.Output.Contains(
-        "launch-as v$ExpectedVersion - "
-    ) `
+    "launch-as v$ExpectedVersion - "
+) `
     -Expected $true
 Assert-Equal `
     -Name 'Startup header includes the warranty disclaimer' `
     -Actual $usageResult.Output.Contains(
-        'This program comes with ABSOLUTELY NO WARRANTY.'
-    ) `
+    'This program comes with ABSOLUTELY NO WARRANTY.'
+) `
     -Expected $true
 $null = Invoke-Launcher `
     -Name 'Unknown command reports usage' `
@@ -243,41 +243,54 @@ $null = Invoke-Launcher `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
-    -Name 'Terminal mode is accepted only by run' `
+    -Name 'Launch modes are accepted only by run' `
     -Arguments @(
-        'status',
-        '--user',
-        $TargetUser,
-        '--terminal'
-    ) `
+    'status',
+    '--user',
+    $TargetUser,
+    '--auto'
+) `
     -ExpectedExitCodes 2 `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
-    -Name 'Duplicate terminal modes are rejected' `
+    -Name 'Explicit auto mode is accepted by run' `
     -Arguments @(
-        'run',
-        '--user',
-        $TargetUser,
-        '--terminal',
-        '--terminal',
-        '--',
-        'C:\missing.exe'
-    ) `
+    'run',
+    '--user',
+    $TargetUser,
+    '--auto',
+    '--',
+    'C:\missing.exe'
+) `
+    -ExpectedExitCodes 1 `
+    -ExpectedOutput 'Executable is not an existing absolute file'
+
+$null = Invoke-Launcher `
+    -Name 'Duplicate launch modes are rejected' `
+    -Arguments @(
+    'run',
+    '--user',
+    $TargetUser,
+    '--auto',
+    '--auto',
+    '--',
+    'C:\missing.exe'
+) `
     -ExpectedExitCodes 2 `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
-    -Name 'Terminal and new-console modes are mutually exclusive' `
+    -Name 'Auto and terminal modes are mutually exclusive' `
     -Arguments @(
-        'run',
-        '--user',
-        $TargetUser,
-        '--terminal',
-        '--new-console',
-        '--',
-        'C:\missing.exe'
-    ) `
+    'run',
+    '--user',
+    $TargetUser,
+    '--auto',
+    '--terminal',
+    '--',
+    'C:\missing.exe'
+) `
     -ExpectedExitCodes 2 `
     -ExpectedOutput 'Usage:'
 
@@ -463,8 +476,8 @@ $validInvocationResult = Invoke-Launcher `
 Assert-Equal `
     -Name 'Valid command lines do not print the usage header' `
     -Actual $validInvocationResult.Output.Contains(
-        'This program comes with ABSOLUTELY NO WARRANTY.'
-    ) `
+    'This program comes with ABSOLUTELY NO WARRANTY.'
+) `
     -Expected $false
 
 $null = Invoke-Launcher `

@@ -39,7 +39,7 @@ enum class CredentialMode
 
 enum class LaunchMode
 {
-    Default,
+    Auto,
     NewConsole,
     Terminal
 };
@@ -56,7 +56,7 @@ struct Options
     std::filesystem::path workingDirectory;
     std::filesystem::path executablePath;
     std::vector<std::wstring> processArguments;
-    LaunchMode launchMode = LaunchMode::Default;
+    LaunchMode launchMode = LaunchMode::Auto;
     bool launchModeSpecified = false;
 };
 

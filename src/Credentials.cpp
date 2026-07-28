@@ -95,8 +95,9 @@ enum class CredentialReadResult
             LOGON32_PROVIDER_DEFAULT,
             &rawToken))
     {
+        const DWORD logonError = GetLastError();
         std::wcerr << L"Windows rejected the credential for '" << account.qualifiedUsername
-                   << L"': " << FormatWindowsError(GetLastError()) << L"\n";
+                   << L"': " << FormatWindowsError(logonError) << L"\n";
         return false;
     }
     UniqueHandle token(rawToken);
@@ -290,8 +291,8 @@ bool SaveCredential(const AccountIdentity& account, const SecretBuffer& password
 
     if (!CredWriteW(&credential, 0))
     {
-        std::wcerr << L"Could not store credential: " << FormatWindowsError(GetLastError())
-                   << L"\n";
+        const DWORD writeError = GetLastError();
+        std::wcerr << L"Could not store credential: " << FormatWindowsError(writeError) << L"\n";
         return false;
     }
     return true;

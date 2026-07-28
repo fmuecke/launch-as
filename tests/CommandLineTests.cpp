@@ -110,7 +110,8 @@ int wmain(int argc, wchar_t* argv[])
             &startupInfo,
             &processInfo))
     {
-        std::wcerr << L"Could not start argv probe: " << GetLastError() << L"\n";
+        const DWORD createError = GetLastError();
+        std::wcerr << L"Could not start argv probe: " << createError << L"\n";
         return 1;
     }
 
@@ -125,14 +126,23 @@ int wmain(int argc, wchar_t* argv[])
     }
     if (waitResult != WAIT_OBJECT_0)
     {
-        std::wcerr << L"Could not wait for argv probe: " << GetLastError() << L"\n";
+        if (waitResult == WAIT_FAILED)
+        {
+            const DWORD waitError = GetLastError();
+            std::wcerr << L"Could not wait for argv probe: " << waitError << L"\n";
+        }
+        else
+        {
+            std::wcerr << L"Unexpected argv probe wait result: " << waitResult << L"\n";
+        }
         return 1;
     }
 
     DWORD exitCode = 0;
     if (!GetExitCodeProcess(process.get(), &exitCode))
     {
-        std::wcerr << L"Could not read argv probe exit code: " << GetLastError() << L"\n";
+        const DWORD exitCodeError = GetLastError();
+        std::wcerr << L"Could not read argv probe exit code: " << exitCodeError << L"\n";
         return 1;
     }
     if (exitCode != 0)

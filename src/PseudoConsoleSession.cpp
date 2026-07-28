@@ -113,8 +113,9 @@ bool PseudoConsoleSession::Initialize(COORD terminalSize, bool inheritCursor, st
     outputCompleteEvent_.reset(CreateEventW(nullptr, TRUE, FALSE, nullptr));
     if (!outputCompleteEvent_)
     {
+        const DWORD eventError = GetLastError();
         error = L"Could not create the pseudoconsole output completion event: " +
-                FormatWindowsError(GetLastError());
+                FormatWindowsError(eventError);
         return false;
     }
 
@@ -125,8 +126,8 @@ bool PseudoConsoleSession::Initialize(COORD terminalSize, bool inheritCursor, st
     HANDLE rawInputWrite = nullptr;
     if (!CreatePipe(&rawPseudoInput, &rawInputWrite, nullptr, 0))
     {
-        error =
-            L"Could not create the pseudoconsole input pipe: " + FormatWindowsError(GetLastError());
+        const DWORD pipeError = GetLastError();
+        error = L"Could not create the pseudoconsole input pipe: " + FormatWindowsError(pipeError);
         return false;
     }
     UniqueHandle pseudoInput(rawPseudoInput);
@@ -136,8 +137,8 @@ bool PseudoConsoleSession::Initialize(COORD terminalSize, bool inheritCursor, st
     HANDLE rawPseudoOutput = nullptr;
     if (!CreatePipe(&rawOutputRead, &rawPseudoOutput, nullptr, 0))
     {
-        error = L"Could not create the pseudoconsole output pipe: " +
-                FormatWindowsError(GetLastError());
+        const DWORD pipeError = GetLastError();
+        error = L"Could not create the pseudoconsole output pipe: " + FormatWindowsError(pipeError);
         return false;
     }
     outputRead_.reset(rawOutputRead);
@@ -155,10 +156,11 @@ bool PseudoConsoleSession::Initialize(COORD terminalSize, bool inheritCursor, st
 
     SIZE_T attributeListBytes = 0;
     InitializeProcThreadAttributeList(nullptr, 1, 0, &attributeListBytes);
+    const DWORD attributeListSizeError = GetLastError();
     if (attributeListBytes == 0)
     {
         error = L"Could not size the pseudoconsole process attributes: " +
-                FormatWindowsError(GetLastError());
+                FormatWindowsError(attributeListSizeError);
         return false;
     }
 
@@ -172,8 +174,9 @@ bool PseudoConsoleSession::Initialize(COORD terminalSize, bool inheritCursor, st
         reinterpret_cast<PPROC_THREAD_ATTRIBUTE_LIST>(attributeListStorage_.data());
     if (!InitializeProcThreadAttributeList(startupInfo_.lpAttributeList, 1, 0, &attributeListBytes))
     {
+        const DWORD attributeListError = GetLastError();
         error = L"Could not initialize the pseudoconsole process attributes: " +
-                FormatWindowsError(GetLastError());
+                FormatWindowsError(attributeListError);
         startupInfo_.lpAttributeList = nullptr;
         return false;
     }
@@ -185,8 +188,9 @@ bool PseudoConsoleSession::Initialize(COORD terminalSize, bool inheritCursor, st
             nullptr,
             nullptr))
     {
+        const DWORD attributeError = GetLastError();
         error = L"Could not attach the pseudoconsole process attribute: " +
-                FormatWindowsError(GetLastError());
+                FormatWindowsError(attributeError);
         return false;
     }
     return true;
@@ -216,8 +220,9 @@ bool PseudoConsoleSession::StartRelays(std::wstring& error)
             FALSE,
             DUPLICATE_SAME_ACCESS))
     {
+        const DWORD duplicateError = GetLastError();
         error = L"Could not duplicate the pseudoconsole input pipe: " +
-                FormatWindowsError(GetLastError());
+                FormatWindowsError(duplicateError);
         RestoreTerminal();
         return false;
     }
@@ -308,8 +313,8 @@ bool PseudoConsoleSession::LoadApi(std::wstring& error)
     const HMODULE kernel = GetModuleHandleW(L"kernel32.dll");
     if (kernel == nullptr)
     {
-        error =
-            L"Could not load the Windows pseudoconsole API: " + FormatWindowsError(GetLastError());
+        const DWORD moduleError = GetLastError();
+        error = L"Could not load the Windows pseudoconsole API: " + FormatWindowsError(moduleError);
         return false;
     }
 
@@ -354,7 +359,8 @@ bool PseudoConsoleSession::ConfigureTerminal(std::wstring& error)
                                 ENABLE_VIRTUAL_TERMINAL_INPUT;
         if (!SetConsoleMode(parentInput_, inputMode))
         {
-            error = L"Could not configure terminal input: " + FormatWindowsError(GetLastError());
+            const DWORD modeError = GetLastError();
+            error = L"Could not configure terminal input: " + FormatWindowsError(modeError);
             return false;
         }
         inputModeChanged_ = true;
@@ -364,8 +370,9 @@ bool PseudoConsoleSession::ConfigureTerminal(std::wstring& error)
         {
             if (!SetConsoleCP(CP_UTF8))
             {
+                const DWORD codePageError = GetLastError();
                 error = L"Could not configure UTF-8 terminal input: " +
-                        FormatWindowsError(GetLastError());
+                        FormatWindowsError(codePageError);
                 RestoreTerminal();
                 return false;
             }
@@ -378,7 +385,8 @@ bool PseudoConsoleSession::ConfigureTerminal(std::wstring& error)
         if (!SetConsoleMode(
                 parentOutput_, originalOutputMode_ | ENABLE_VIRTUAL_TERMINAL_PROCESSING))
         {
-            error = L"Could not configure terminal output: " + FormatWindowsError(GetLastError());
+            const DWORD modeError = GetLastError();
+            error = L"Could not configure terminal output: " + FormatWindowsError(modeError);
             RestoreTerminal();
             return false;
         }
@@ -389,8 +397,9 @@ bool PseudoConsoleSession::ConfigureTerminal(std::wstring& error)
         {
             if (!SetConsoleOutputCP(CP_UTF8))
             {
+                const DWORD codePageError = GetLastError();
                 error = L"Could not configure UTF-8 terminal output: " +
-                        FormatWindowsError(GetLastError());
+                        FormatWindowsError(codePageError);
                 RestoreTerminal();
                 return false;
             }

@@ -403,23 +403,7 @@ bool TerminalBridge::Start(std::wstring& error)
         return false;
     }
 
-    HANDLE rawInputRelayWrite = nullptr;
-    const HANDLE currentProcess = GetCurrentProcess();
-    if (!DuplicateHandle(currentProcess,
-            inputWrite_.get(),
-            currentProcess,
-            &rawInputRelayWrite,
-            0,
-            FALSE,
-            DUPLICATE_SAME_ACCESS))
-    {
-        const DWORD duplicateError = GetLastError();
-        error =
-            L"Could not duplicate the terminal input bridge: " + FormatWindowsError(duplicateError);
-        RestoreTerminal();
-        return false;
-    }
-    UniqueHandle inputRelayWrite(rawInputRelayWrite);
+    UniqueHandle inputRelayWrite(std::exchange(inputWrite_, {}));
 
     started_ = true;
     try

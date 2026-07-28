@@ -10,6 +10,7 @@
 #include "WindowsCommandLine.h"
 
 #include <Windows.h>
+#include <array>
 #include <cstddef>
 #include <cwchar>
 #include <filesystem>
@@ -149,7 +150,33 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
         return ExitFailure;
     }
 
-    const DWORD waitResult = WaitForSingleObject(process.get(), INFINITE);
+    const std::array<HANDLE, 2> waitHandles {
+        process.get(), pseudoConsole.inputRelayCompleteEvent()
+    };
+    const DWORD waitResult = WaitForMultipleObjects(
+        static_cast<DWORD>(waitHandles.size()), waitHandles.data(), FALSE, INFINITE);
+    if (waitResult == WAIT_OBJECT_0 + 1)
+    {
+        const BOOL terminated = TerminateProcess(process.get(), ExitCancelled);
+        const DWORD terminationError = terminated ? ERROR_SUCCESS : GetLastError();
+        const DWORD terminationWait =
+            WaitForSingleObject(process.get(), ProcessTerminationTimeoutMilliseconds);
+        pseudoConsole.StopRelays();
+        if (terminationWait != WAIT_OBJECT_0)
+        {
+            if (!terminated)
+            {
+                std::wcerr << L"Could not terminate the disconnected pseudoconsole child: "
+                           << FormatWindowsError(terminationError) << L"\n";
+            }
+            else
+            {
+                std::wcerr << L"The disconnected pseudoconsole child did not terminate in time.\n";
+            }
+            return ExitFailure;
+        }
+        return ExitCancelled;
+    }
     if (waitResult != WAIT_OBJECT_0)
     {
         const DWORD waitError = waitResult == WAIT_FAILED ? GetLastError() : ERROR_SUCCESS;

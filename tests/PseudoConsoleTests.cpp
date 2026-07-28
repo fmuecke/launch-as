@@ -153,11 +153,40 @@ int wmain(int argumentCount, wchar_t* arguments[])
     };
     std::wstring commandLine = BuildWindowsCommandLine(launcherPath.native(), helperArguments);
 
+    HANDLE rawTerminalInputRead = nullptr;
+    HANDLE rawTerminalInputWrite = nullptr;
+    if (!CreatePipe(&rawTerminalInputRead, &rawTerminalInputWrite, nullptr, 0))
+    {
+        const DWORD pipeError = GetLastError();
+        std::wcerr << L"Could not create the simulated terminal input: "
+                   << FormatWindowsError(pipeError) << L"\n";
+        return 1;
+    }
+    UniqueHandle terminalInputRead(rawTerminalInputRead);
+    UniqueHandle terminalInputWrite(rawTerminalInputWrite);
+
+    const HANDLE originalInput = GetStdHandle(STD_INPUT_HANDLE);
+    if (!SetStdHandle(STD_INPUT_HANDLE, terminalInputRead.get()))
+    {
+        const DWORD inputError = GetLastError();
+        std::wcerr << L"Could not install the simulated terminal input: "
+                   << FormatWindowsError(inputError) << L"\n";
+        return 1;
+    }
+
     STARTUPINFOW startupInformation {};
     startupInformation.cb = sizeof(startupInformation);
     TerminalBridge terminalBridge;
     std::wstring terminalError;
-    if (!terminalBridge.Initialize(startupInformation, terminalError))
+    const bool terminalInitialized = terminalBridge.Initialize(startupInformation, terminalError);
+    if (!SetStdHandle(STD_INPUT_HANDLE, originalInput))
+    {
+        const DWORD inputError = GetLastError();
+        std::wcerr << L"Could not restore the test process input: "
+                   << FormatWindowsError(inputError) << L"\n";
+        return 1;
+    }
+    if (!terminalInitialized)
     {
         std::wcerr << terminalError << L"\n";
         return 1;

@@ -110,6 +110,15 @@ bool PseudoConsoleSession::Initialize(COORD terminalSize, bool inheritCursor, st
         return false;
     }
 
+    inputRelayCompleteEvent_.reset(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+    if (!inputRelayCompleteEvent_)
+    {
+        const DWORD eventError = GetLastError();
+        error = L"Could not create the pseudoconsole input completion event: " +
+                FormatWindowsError(eventError);
+        return false;
+    }
+
     outputCompleteEvent_.reset(CreateEventW(nullptr, TRUE, FALSE, nullptr));
     if (!outputCompleteEvent_)
     {
@@ -198,6 +207,11 @@ bool PseudoConsoleSession::Initialize(COORD terminalSize, bool inheritCursor, st
 
 STARTUPINFOW* PseudoConsoleSession::startupInfo() noexcept { return &startupInfo_.StartupInfo; }
 
+HANDLE PseudoConsoleSession::inputRelayCompleteEvent() const noexcept
+{
+    return inputRelayCompleteEvent_.get();
+}
+
 bool PseudoConsoleSession::StartRelays(std::wstring& error)
 {
     if (pseudoConsole_ == nullptr || !inputWrite_ || !outputRead_)
@@ -210,30 +224,19 @@ bool PseudoConsoleSession::StartRelays(std::wstring& error)
         return false;
     }
 
-    HANDLE rawInputRelayWrite = nullptr;
-    const HANDLE currentProcess = GetCurrentProcess();
-    if (!DuplicateHandle(currentProcess,
-            inputWrite_.get(),
-            currentProcess,
-            &rawInputRelayWrite,
-            0,
-            FALSE,
-            DUPLICATE_SAME_ACCESS))
-    {
-        const DWORD duplicateError = GetLastError();
-        error = L"Could not duplicate the pseudoconsole input pipe: " +
-                FormatWindowsError(duplicateError);
-        RestoreTerminal();
-        return false;
-    }
-    UniqueHandle inputRelayWrite(rawInputRelayWrite);
+    UniqueHandle inputRelayWrite(std::exchange(inputWrite_, {}));
 
     relaysStarted_ = true;
     try
     {
         inputRelay_ = std::jthread(
-            [source = parentInput_, destination = std::move(inputRelayWrite)]() noexcept
-            { RelayInput(source, destination.get()); });
+            [source = parentInput_,
+                destination = std::move(inputRelayWrite),
+                completionEvent = inputRelayCompleteEvent_.get()]() noexcept
+            {
+                RelayInput(source, destination.get());
+                SetEvent(completionEvent);
+            });
 
         UniqueHandle outputRead(std::exchange(outputRead_, {}));
         outputRelay_ = std::jthread(

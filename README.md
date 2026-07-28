@@ -113,7 +113,9 @@ Windows Terminal or VS Code terminal pane:
 The original shell remains the configuring user's process. The nested shell and
 all processes it starts use the target identity. Exiting the nested shell
 returns control to the original shell; closing its pseudoconsole terminates any
-clients that remain attached after the root process exits.
+clients that remain attached after the root process exits. Closing the host
+terminal also tears down the helper and its pseudoconsole session instead of
+leaving the target processes running without a terminal.
 
 Terminal mode requires Windows 10 version 1809 or newer. Its APIs are resolved
 dynamically and the launcher returns a clear error on unsupported systems.

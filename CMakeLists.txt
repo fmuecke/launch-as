@@ -176,6 +176,33 @@ if(BUILD_TESTING)
         TIMEOUT 15
     )
 
+    add_executable(LauncherTerminalDisconnectTests
+        tests/TerminalDisconnectTests.cpp
+        src/TerminalBridge.cpp
+        src/Win32Support.cpp
+        src/WindowsCommandLine.cpp
+    )
+    target_include_directories(LauncherTerminalDisconnectTests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    configure_launch_as_target(LauncherTerminalDisconnectTests)
+    target_link_libraries(LauncherTerminalDisconnectTests PRIVATE
+        Advapi32
+        Ole32
+    )
+
+    add_test(
+        NAME launcher.terminal_disconnect
+        COMMAND
+            "$<TARGET_FILE:LauncherTerminalDisconnectTests>"
+            "$<TARGET_FILE:launch_as>"
+    )
+    set_tests_properties(launcher.terminal_disconnect PROPERTIES
+        LABELS "launcher;integration;terminal"
+        PASS_REGULAR_EXPRESSION "Terminal disconnect stopped the interactive helper"
+        TIMEOUT 15
+    )
+
     find_program(
         POWERSHELL_EXECUTABLE
         NAMES pwsh powershell

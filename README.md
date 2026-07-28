@@ -37,8 +37,10 @@ clear it when possible.
 
 ## Run a process
 
-The launcher requires an absolute executable path. Everything after `--` is
-passed to that executable as a separate argument:
+The launcher requires an absolute executable path. `--working-directory` is
+optional; when omitted, the launched process inherits the launcher's current
+working directory. Everything after `--` is passed to that executable as a
+separate argument:
 
 ```powershell
 .\launch-as.exe `
@@ -52,10 +54,10 @@ passed to that executable as a separate argument:
 The  `run` subcommand is optional optional.
 
 The default credential mode is `auto`: a stored credential is used when
-available. If it is missing, Windows Credential UI opens with a Remember
-checkbox. If a stored password has become stale, the launcher requests its
-replacement. The replacement is stored only when requested and only after the
-suspended child token has been verified.
+available. If it is missing, Windows Credential UI opens with an unchecked
+Remember checkbox. If a stored password has become stale, the launcher requests
+its replacement. The replacement is stored only when requested and only after
+the suspended child token has been verified.
 
 Use `--credential-mode stored` for unattended execution; it never displays UI
 and returns a distinct missing-credential exit code. Use

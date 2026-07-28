@@ -128,7 +128,8 @@ class LocalBuffer final
         }
     }
 
-    persistPromptedCredential = mode == CredentialMode::Auto;
+    // The Credential UI checkbox is opt-in: do not preselect saving the password.
+    persistPromptedCredential = false;
     const CredentialPromptResult promptResult = PromptForPassword(
         account, password, mode == CredentialMode::Auto, persistPromptedCredential);
     if (promptResult == CredentialPromptResult::Cancelled)
@@ -394,7 +395,8 @@ ExitCode RunProcessAsUser(const AccountIdentity& account, const Options& options
                    << L" was rejected. Enter its current password.\n";
         password.clear();
         fromStoredCredential = false;
-        persistPromptedCredential = true;
+        // A replacement stored credential also requires an explicit opt-in to save.
+        persistPromptedCredential = false;
         const CredentialPromptResult promptResult =
             PromptForPassword(account, password, true, persistPromptedCredential);
         if (promptResult == CredentialPromptResult::Cancelled)

@@ -67,7 +67,7 @@ void PrintUsage()
                << L"  launch-as.exe [run] --user <local-user>"
                   L" [--credential-mode <auto|stored|prompt>]"
                   L" [--working-directory <directory>]"
-                  L" [--auto|--new-console|--terminal]"
+                  L" [--terminal]"
                   L" -- <absolute-executable> [arguments...]\n";
 #ifndef NDEBUG
     std::wcerr << L"Credential commands used by tests also accept:"
@@ -101,22 +101,13 @@ std::optional<Options> ParseOptions(std::span<wchar_t*> arguments)
             }
             break;
         }
-        if (name == L"--auto" || name == L"--new-console" || name == L"--terminal")
+        if (name == L"--terminal")
         {
-            if (options.launchModeSpecified)
+            if (options.terminal)
             {
                 return std::nullopt;
             }
-            if (name == L"--auto")
-            {
-                options.launchMode = LaunchMode::Auto;
-            }
-            else
-            {
-                options.launchMode =
-                    name == L"--new-console" ? LaunchMode::NewConsole : LaunchMode::Terminal;
-            }
-            options.launchModeSpecified = true;
+            options.terminal = true;
             continue;
         }
         if (name == L"--password-stdin")
@@ -208,7 +199,7 @@ std::optional<Options> ParseOptions(std::span<wchar_t*> arguments)
         options.processArguments.erase(options.processArguments.begin());
     }
     else if (processArgumentsStarted || options.credentialModeSpecified ||
-             !options.workingDirectory.empty() || options.launchModeSpecified ||
+             !options.workingDirectory.empty() || options.terminal ||
              (options.passwordFromStdin && command != Command::Register))
     {
         return std::nullopt;

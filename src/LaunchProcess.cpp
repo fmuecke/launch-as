@@ -300,12 +300,7 @@ ExitCode RunProcessAsUser(const AccountIdentity& account, const Options& options
     const std::vector<std::wstring>* processArguments = &options.processArguments;
     TerminalBridge terminalBridge;
 
-    if (options.launchMode == LaunchMode::NewConsole)
-    {
-        standardStartupInfo.lpDesktop = const_cast<wchar_t*>(L"winsta0\\default");
-        creationFlags |= CREATE_NEW_CONSOLE;
-    }
-    else if (options.launchMode == LaunchMode::Terminal)
+    if (options.terminal)
     {
         creationFlags |= CREATE_NO_WINDOW;
 
@@ -352,7 +347,7 @@ ExitCode RunProcessAsUser(const AccountIdentity& account, const Options& options
         std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
         mutableCommandLine.push_back(L'\0');
 
-        if (options.launchMode == LaunchMode::Terminal)
+        if (options.terminal)
         {
             std::wstring terminalError;
             if (!terminalBridge.PrepareChildProcessCreation(terminalError))
@@ -376,7 +371,7 @@ ExitCode RunProcessAsUser(const AccountIdentity& account, const Options& options
             &standardStartupInfo,
             &processInfo);
         launchError = created ? ERROR_SUCCESS : GetLastError();
-        if (options.launchMode == LaunchMode::Terminal)
+        if (options.terminal)
         {
             std::wstring terminalError;
             if (!terminalBridge.CompleteChildProcessCreation(created != FALSE, terminalError))
@@ -451,7 +446,7 @@ ExitCode RunProcessAsUser(const AccountIdentity& account, const Options& options
     }
     password.clear();
 
-    if (options.launchMode == LaunchMode::Terminal)
+    if (options.terminal)
     {
         std::wcout << L"Starting terminal session as " << account.qualifiedUsername
                    << L". Output in this pane is controlled by that session until it exits.\n";

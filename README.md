@@ -43,15 +43,14 @@ working directory. Everything after `--` is passed to that executable as a
 separate argument:
 
 ```powershell
-.\launch-as.exe `
-    --user RestrictedUser `
-    --working-directory C:\dev\project `
-    --new-console `
-    -- C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe `
-        -NoExit
+    .\launch-as.exe `
+        --user RestrictedUser `
+        --working-directory C:\dev\project `
+        -- C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe `
+            -NoExit
 ```
 
-The  `run` subcommand is optional optional.
+The `run` subcommand is optional.
 
 The default credential mode is `auto`: a stored credential is used when
 available. If it is missing, Windows Credential UI opens with an unchecked
@@ -65,10 +64,15 @@ and returns a distinct missing-credential exit code. Use
 prompts through Windows Credential UI, and never saves the password.
 
 The launcher creates the process suspended, verifies its token SID, resumes it,
-waits, and returns the child process exit code. `--new-console` opens a separate
-interactive console window. `--terminal` hosts an interactive process through
-Windows ConPTY and relays it through the launcher's existing terminal pane.
-The two options are mutually exclusive; omit both for an unattended command.
+waits, and returns the child process exit code. By default,
+`CreateProcessWithLogonW` gives a console application a new console window. Use
+`--terminal` to host an interactive process through Windows ConPTY and relay it
+through the launcher's existing terminal pane instead.
+
+When a shortcut or Explorer starts `launch-as` on Windows 11 version 24H2 or
+later, the embedded manifest prevents Windows from allocating a console for the
+launcher itself. Earlier Windows versions still allocate that launcher console.
+
 The credential and local password buffers are zeroed after identity verification
 and optional persistence, before the child is resumed and before the wait begins.
 Registration and process creation fail closed when the target token contains

@@ -28,6 +28,11 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/LauncherVersion.h"
     @ONLY
 )
+configure_file(
+    resources/Launcher.manifest
+    "${CMAKE_CURRENT_BINARY_DIR}/Launcher.manifest"
+    COPYONLY
+)
 
 add_executable(launch_as
     src/CredentialInput.cpp
@@ -92,6 +97,11 @@ target_link_libraries(launch_as PRIVATE
     Credui
     Ole32
 )
+if(MSVC)
+    target_link_options(launch_as PRIVATE
+        "/MANIFESTINPUT:${CMAKE_CURRENT_BINARY_DIR}/Launcher.manifest"
+    )
+endif()
 
 configure_launch_as_target(launch_as)
 set_target_properties(launch_as PROPERTIES
@@ -121,6 +131,21 @@ if(BUILD_TESTING)
             "$<TARGET_FILE:LauncherArgvProbe>"
     )
     set_tests_properties(launcher.command_line PROPERTIES
+        LABELS "launcher;unit"
+    )
+
+    add_executable(LauncherManifestTests
+        tests/ManifestTests.cpp
+    )
+    configure_launch_as_target(LauncherManifestTests)
+
+    add_test(
+        NAME launcher.manifest
+        COMMAND
+            "$<TARGET_FILE:LauncherManifestTests>"
+            "$<TARGET_FILE:launch_as>"
+    )
+    set_tests_properties(launcher.manifest PROPERTIES
         LABELS "launcher;unit"
     )
 

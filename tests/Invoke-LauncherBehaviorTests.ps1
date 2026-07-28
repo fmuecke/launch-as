@@ -243,23 +243,23 @@ $null = Invoke-Launcher `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
-    -Name 'Launch modes are accepted only by run' `
+    -Name 'Terminal mode is accepted only by run' `
     -Arguments @(
     'status',
     '--user',
     $TargetUser,
-    '--auto'
+    '--terminal'
 ) `
     -ExpectedExitCodes 2 `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
-    -Name 'Explicit auto mode is accepted by run' `
+    -Name 'Terminal mode is accepted by run' `
     -Arguments @(
     'run',
     '--user',
     $TargetUser,
-    '--auto',
+    '--terminal',
     '--',
     'C:\missing.exe'
 ) `
@@ -267,12 +267,11 @@ $null = Invoke-Launcher `
     -ExpectedOutput 'Executable is not an existing absolute file'
 
 $null = Invoke-Launcher `
-    -Name 'Duplicate launch modes are rejected' `
+    -Name 'Removed auto option is rejected' `
     -Arguments @(
     'run',
     '--user',
     $TargetUser,
-    '--auto',
     '--auto',
     '--',
     'C:\missing.exe'
@@ -281,13 +280,12 @@ $null = Invoke-Launcher `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
-    -Name 'Auto and terminal modes are mutually exclusive' `
+    -Name 'Removed new-console option is rejected' `
     -Arguments @(
     'run',
     '--user',
     $TargetUser,
-    '--auto',
-    '--terminal',
+    '--new-console',
     '--',
     'C:\missing.exe'
 ) `

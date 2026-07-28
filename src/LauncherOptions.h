@@ -37,13 +37,6 @@ enum class CredentialMode
     Prompt
 };
 
-enum class LaunchMode
-{
-    Auto,
-    NewConsole,
-    Terminal
-};
-
 struct Options
 {
     Command command;
@@ -56,8 +49,7 @@ struct Options
     std::filesystem::path workingDirectory;
     std::filesystem::path executablePath;
     std::vector<std::wstring> processArguments;
-    LaunchMode launchMode = LaunchMode::Auto;
-    bool launchModeSpecified = false;
+    bool terminal = false;
 };
 
 void PrintUsage();

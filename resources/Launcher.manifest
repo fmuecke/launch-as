@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+SPDX-FileCopyrightText: 2026 Florian Mücke
+SPDX-License-Identifier: GPL-3.0-only
+Project: https://github.com/fmuecke/launch-as
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+    <application>
+        <windowsSettings>
+            <consoleAllocationPolicy xmlns="http://schemas.microsoft.com/SMI/2024/WindowsSettings">detached</consoleAllocationPolicy>
+        </windowsSettings>
+    </application>
+</assembly>

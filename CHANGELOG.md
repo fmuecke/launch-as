@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Changed: Using standard Win32 codes to reduce collisions with pass-through child exit codes.
+
 ## [0.3.1] - 2026-07-29
 
 - Changed: Nonzero child exit codes now include the corresponding Windows

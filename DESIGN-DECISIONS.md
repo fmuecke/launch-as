@@ -74,6 +74,16 @@ waits, and returns the child process exit code. By default,
 `--terminal` to host an interactive process through Windows ConPTY and relay it
 through the launcher's existing terminal pane instead.
 
+## Exit codes
+
+A launched child's exit code is returned unchanged. Launcher-generated outcomes
+use these Win32 values: `1` (`ERROR_INVALID_FUNCTION`) for a general failure,
+`87` (`ERROR_INVALID_PARAMETER`) for invalid usage, `1326`
+(`ERROR_LOGON_FAILURE`) when `--credential-mode stored` has no saved credential,
+and `1223` (`ERROR_CANCELLED`) when an operation is cancelled. A child can also
+return any of these values, so an exit code alone cannot always identify whether
+the launcher or the child produced it.
+
 When a shortcut or Explorer starts `launch-as` on Windows 11 version 24H2 or
 later, the embedded manifest prevents Windows from allocating a console for the
 launcher itself. Earlier Windows versions still allocate that launcher console.

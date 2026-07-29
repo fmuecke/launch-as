@@ -123,7 +123,7 @@ if (-not $hasInstalledAccountFixture) {
 $usageResult = Invoke-Launcher `
     -Name 'No arguments reports usage' `
     -Arguments @() `
-    -ExpectedExitCodes 2 `
+    -ExpectedExitCodes 87 `
     -ExpectedOutput 'Usage:'
 
 $testCredentialTagIsVisible =
@@ -156,13 +156,13 @@ Assert-Equal `
 $null = Invoke-Launcher `
     -Name 'Unknown command reports usage' `
     -Arguments @('not-a-command') `
-    -ExpectedExitCodes 2 `
+    -ExpectedExitCodes 87 `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
     -Name 'Caller cannot supply account domain syntax' `
     -Arguments @('status', '--user', ".\$TargetUser") `
-    -ExpectedExitCodes 2 `
+    -ExpectedExitCodes 87 `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
@@ -174,7 +174,7 @@ $null = Invoke-Launcher `
     '--password',
     'not-a-real-password'
 ) `
-    -ExpectedExitCodes 2 `
+    -ExpectedExitCodes 87 `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
@@ -185,7 +185,7 @@ $null = Invoke-Launcher `
     $TargetUser,
     '--password-stdin'
 ) `
-    -ExpectedExitCodes 2 `
+    -ExpectedExitCodes 87 `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
@@ -197,7 +197,7 @@ $null = Invoke-Launcher `
     '--password-stdin',
     '--password-stdin'
 ) `
-    -ExpectedExitCodes 2 `
+    -ExpectedExitCodes 87 `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
@@ -209,7 +209,7 @@ $null = Invoke-Launcher `
     '--credential-mode',
     'stored'
 ) `
-    -ExpectedExitCodes 2 `
+    -ExpectedExitCodes 87 `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
@@ -223,7 +223,7 @@ $null = Invoke-Launcher `
     '--',
     'C:\missing.exe'
 ) `
-    -ExpectedExitCodes 2 `
+    -ExpectedExitCodes 87 `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
@@ -239,7 +239,7 @@ $null = Invoke-Launcher `
     '--',
     'C:\missing.exe'
 ) `
-    -ExpectedExitCodes 2 `
+    -ExpectedExitCodes 87 `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
@@ -250,7 +250,7 @@ $null = Invoke-Launcher `
     $TargetUser,
     '--terminal'
 ) `
-    -ExpectedExitCodes 2 `
+    -ExpectedExitCodes 87 `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
@@ -276,7 +276,7 @@ $null = Invoke-Launcher `
     '--',
     'C:\missing.exe'
 ) `
-    -ExpectedExitCodes 2 `
+    -ExpectedExitCodes 87 `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
@@ -289,7 +289,7 @@ $null = Invoke-Launcher `
     '--',
     'C:\missing.exe'
 ) `
-    -ExpectedExitCodes 2 `
+    -ExpectedExitCodes 87 `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
@@ -301,7 +301,7 @@ $null = Invoke-Launcher `
     '--test-credential-tag',
     'invalid:tag'
 ) `
-    -ExpectedExitCodes 2 `
+    -ExpectedExitCodes 87 `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
@@ -313,7 +313,7 @@ $null = Invoke-Launcher `
     '--test-credential-tag',
     ''
 ) `
-    -ExpectedExitCodes 2 `
+    -ExpectedExitCodes 87 `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
@@ -327,7 +327,7 @@ $null = Invoke-Launcher `
     '--test-credential-tag',
     'second'
 ) `
-    -ExpectedExitCodes 2 `
+    -ExpectedExitCodes 87 `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
@@ -338,7 +338,7 @@ $null = Invoke-Launcher `
     $TargetUser,
     'C:\missing.exe'
 ) `
-    -ExpectedExitCodes 2 `
+    -ExpectedExitCodes 87 `
     -ExpectedOutput 'Usage:'
 
 $null = Invoke-Launcher `
@@ -350,7 +350,7 @@ $null = Invoke-Launcher `
     '--',
     'C:\missing.exe'
 ) `
-    -ExpectedExitCodes 2 `
+    -ExpectedExitCodes 87 `
     -ExpectedOutput 'Usage:'
 
 $missingUser = '__L' + [Guid]::NewGuid().ToString('N').Substring(0, 12)
@@ -397,13 +397,13 @@ if ($hasInstalledAccountFixture) {
         '--test-credential-tag',
         $stdinCredentialTag
     ) `
-        -ExpectedExitCodes 3 `
+        -ExpectedExitCodes 1326 `
         -ExpectedOutput 'No launch-as credential'
 
     $status = Invoke-Launcher `
         -Name 'Existing local account resolves and credential status is read' `
         -Arguments @('status', '--user', $TargetUser) `
-        -ExpectedExitCodes @(0, 3) `
+        -ExpectedExitCodes @(0, 1326) `
         -ExpectedOutput 'launch-as credential'
 
     $behaviorCredentialTag =
@@ -417,7 +417,7 @@ if ($hasInstalledAccountFixture) {
         '--test-credential-tag',
         $behaviorCredentialTag
     ) `
-        -ExpectedExitCodes 3 `
+        -ExpectedExitCodes 1326 `
         -ExpectedOutput 'No launch-as credential'
 
     $null = Invoke-Launcher `
@@ -435,7 +435,7 @@ if ($hasInstalledAccountFixture) {
     $statusAfterTaggedCleanup = Invoke-Launcher `
         -Name 'Tagged cleanup leaves production credential unchanged' `
         -Arguments @('status', '--user', $TargetUser) `
-        -ExpectedExitCodes @(0, 3) `
+        -ExpectedExitCodes @(0, 1326) `
         -ExpectedOutput 'launch-as credential'
     Assert-Equal `
         -Name 'Production credential status after tagged cleanup' `
@@ -560,7 +560,7 @@ if ($hasInstalledAccountFixture) {
             '/c',
             'exit 37'
         ) `
-            -ExpectedExitCodes 3 `
+            -ExpectedExitCodes 1326 `
             -ExpectedOutput 'No stored launch-as credential'
     }
 }

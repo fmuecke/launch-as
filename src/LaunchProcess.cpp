@@ -496,7 +496,37 @@ ExitCode RunProcessAsUser(const AccountIdentity& account, const Options& options
     }
 
     std::wcout << L"Process as " << account.qualifiedUsername << L" exited with code "
-               << childExitCode << L".\n";
+               << childExitCode << L"";
+
+    if (childExitCode != ExitSuccess)
+    {
+        wchar_t* rawMessage = nullptr;
+        const DWORD length =
+            FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+                               FORMAT_MESSAGE_IGNORE_INSERTS,
+                nullptr,
+                childExitCode,
+                MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                reinterpret_cast<wchar_t*>(&rawMessage),
+                0,
+                nullptr);
+        LocalBuffer messageBuffer(rawMessage);
+
+        if (length == 0 || rawMessage == nullptr)
+        {
+            std::wcout << L".\n";
+        }
+        else
+        {
+            std::wstring message(rawMessage, length);
+            while (!message.empty() &&
+                   (message.back() == L'\r' || message.back() == L'\n' || message.back() == L' '))
+            {
+                message.pop_back();
+            }
+            std::wcout << L": " << message << "\n";
+        }
+    }
     return childExitCode;
 }
 

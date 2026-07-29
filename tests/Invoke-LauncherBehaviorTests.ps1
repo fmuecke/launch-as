@@ -10,7 +10,7 @@ param(
 
     [Parameter()]
     [ValidateNotNullOrEmpty()]
-    [string] $ExpectedVersion = '0.3.0',
+    [string] $ExpectedVersion = '0.3.1',
 
     [Parameter()]
     [ValidateNotNullOrEmpty()]

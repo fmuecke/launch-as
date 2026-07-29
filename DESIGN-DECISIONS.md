@@ -3,7 +3,12 @@
 `launch-as` is a Windows C++ launcher that runs a caller-selected executable as
 a different local standard user with `CreateProcessWithLogonW`. It can store
 the target account's password as a generic credential in the current Windows
-user's Credential Manager.
+user’s Credential Manager.
+
+The caller is a trusted regular Windows user who uses the launcher to run tools
+such as agents in separate restricted local identities. This is a
+least-privilege tool, not an elevation mechanism: it never launches programs as
+Administrator and rejects administrative target accounts.
 
 The credential is scoped to the Windows user who registers it. Any process
 running as that user can request the same generic credential, so this removes

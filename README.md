@@ -8,6 +8,11 @@ target account's password in the current user's Windows Credential Manager, and
 can host the launched program right inside your existing terminal pane through
 ConPTY — so a nested shell under another identity feels like a normal tab.
 
+**Scope:** `launch-as` is for a trusted regular Windows user who wants to run
+tools such as coding agents in separate restricted local identities. It is not
+an elevation tool: it never launches a program as Administrator and rejects
+administrative target accounts.
+
 ```powershell
 # Store the target account's password once
 .\launch-as.exe register --user RestrictedUser
@@ -69,7 +74,8 @@ installed Visual C++ Redistributable.
 
 See **[DESIGN-DECISIONS.md](DESIGN-DECISIONS.md)** for the complete reference: every CLI option, the
 credential and security model, the ConPTY / named-pipe terminal bridge, and the
-build and acceptance test details.
+build and acceptance test details. See [CHANGELOG.md](CHANGELOG.md) for release
+notes.
 
 ## License
 

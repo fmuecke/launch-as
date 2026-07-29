@@ -524,7 +524,7 @@ ExitCode RunProcessAsUser(const AccountIdentity& account, const Options& options
             {
                 message.pop_back();
             }
-            std::wcout << L": " << message << "\n";
+            std::wcout << L" (corresponding Win32 error: " << message << ").\n";
         }
     }
     return childExitCode;

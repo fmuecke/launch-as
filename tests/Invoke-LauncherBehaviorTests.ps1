@@ -397,13 +397,13 @@ if ($hasInstalledAccountFixture) {
         '--test-credential-tag',
         $stdinCredentialTag
     ) `
-        -ExpectedExitCodes 1326 `
+        -ExpectedExitCodes 1168 `
         -ExpectedOutput 'No launch-as credential'
 
     $status = Invoke-Launcher `
         -Name 'Existing local account resolves and credential status is read' `
         -Arguments @('status', '--user', $TargetUser) `
-        -ExpectedExitCodes @(0, 1326) `
+        -ExpectedExitCodes @(0, 1168) `
         -ExpectedOutput 'launch-as credential'
 
     $behaviorCredentialTag =
@@ -417,7 +417,7 @@ if ($hasInstalledAccountFixture) {
         '--test-credential-tag',
         $behaviorCredentialTag
     ) `
-        -ExpectedExitCodes 1326 `
+        -ExpectedExitCodes 1168 `
         -ExpectedOutput 'No launch-as credential'
 
     $null = Invoke-Launcher `
@@ -435,7 +435,7 @@ if ($hasInstalledAccountFixture) {
     $statusAfterTaggedCleanup = Invoke-Launcher `
         -Name 'Tagged cleanup leaves production credential unchanged' `
         -Arguments @('status', '--user', $TargetUser) `
-        -ExpectedExitCodes @(0, 1326) `
+        -ExpectedExitCodes @(0, 1168) `
         -ExpectedOutput 'launch-as credential'
     Assert-Equal `
         -Name 'Production credential status after tagged cleanup' `
@@ -560,7 +560,7 @@ if ($hasInstalledAccountFixture) {
             '/c',
             'exit 37'
         ) `
-            -ExpectedExitCodes 1326 `
+            -ExpectedExitCodes 1168 `
             -ExpectedOutput 'No stored launch-as credential'
     }
 }

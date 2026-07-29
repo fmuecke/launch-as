@@ -78,8 +78,8 @@ through the launcher's existing terminal pane instead.
 
 A launched child's exit code is returned unchanged. Launcher-generated outcomes
 use these Win32 values: `1` (`ERROR_INVALID_FUNCTION`) for a general failure,
-`87` (`ERROR_INVALID_PARAMETER`) for invalid usage, `1326`
-(`ERROR_LOGON_FAILURE`) when `--credential-mode stored` has no saved credential,
+`87` (`ERROR_INVALID_PARAMETER`) for invalid usage, `1168`
+(`ERROR_NOT_FOUND`) when `--credential-mode stored` has no saved credential,
 and `1223` (`ERROR_CANCELLED`) when an operation is cancelled. A child can also
 return any of these values, so an exit code alone cannot always identify whether
 the launcher or the child produced it.

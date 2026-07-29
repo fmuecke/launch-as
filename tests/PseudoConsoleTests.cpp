@@ -25,18 +25,6 @@ using launch_as::UniqueHandle;
 constexpr DWORD ProcessTimeoutMilliseconds = 10'000;
 constexpr auto BridgeStopTimeout = std::chrono::seconds(2);
 
-[[nodiscard]] std::filesystem::path GetCommandPromptPath()
-{
-    std::array<wchar_t, MAX_PATH> systemDirectory {};
-    const UINT characters =
-        GetSystemDirectoryW(systemDirectory.data(), static_cast<UINT>(systemDirectory.size()));
-    if (characters == 0 || characters >= systemDirectory.size())
-    {
-        return {};
-    }
-    return std::filesystem::path(std::wstring(systemDirectory.data(), characters)) / L"cmd.exe";
-}
-
 [[nodiscard]] bool VerifyTargetReceivesOnlyPipeClients()
 {
     STARTUPINFOW startupInformation {};
@@ -50,8 +38,8 @@ constexpr auto BridgeStopTimeout = std::chrono::seconds(2);
         return false;
     }
 
-    const std::array<HANDLE, 2> targetHandles {
-        startupInformation.hStdInput, startupInformation.hStdOutput
+    const std::array<HANDLE, 3> targetHandles {
+        startupInformation.hStdInput, startupInformation.hStdOutput, startupInformation.hStdError
     };
     for (const HANDLE handle : targetHandles)
     {
@@ -121,18 +109,18 @@ constexpr auto BridgeStopTimeout = std::chrono::seconds(2);
 
 int wmain(int argumentCount, wchar_t* arguments[])
 {
-    if (argumentCount != 2)
+    if (argumentCount != 3)
     {
-        std::wcerr << L"Expected the launcher path.\n";
+        std::wcerr << L"Expected the launcher and terminal-size probe paths.\n";
         return 1;
     }
 
     const std::filesystem::path launcherPath(arguments[1]);
-    const std::filesystem::path commandPrompt = GetCommandPromptPath();
+    const std::filesystem::path terminalSizeProbe(arguments[2]);
     if (!launcherPath.is_absolute() || !std::filesystem::is_regular_file(launcherPath) ||
-        commandPrompt.empty())
+        !terminalSizeProbe.is_absolute() || !std::filesystem::is_regular_file(terminalSizeProbe))
     {
-        std::wcerr << L"The launcher or cmd.exe path is invalid.\n";
+        std::wcerr << L"The launcher or terminal-size probe path is invalid.\n";
         return 1;
     }
     if (!VerifyTargetReceivesOnlyPipeClients())
@@ -146,10 +134,9 @@ int wmain(int argumentCount, wchar_t* arguments[])
         L"120",
         L"30",
         L"--",
-        commandPrompt.native(),
-        L"/d",
-        L"/c",
-        L"(for /L %i in (1,1,256) do @echo conpty-smoke-%i)"
+        terminalSizeProbe.native(),
+        L"91",
+        L"27"
     };
     std::wstring commandLine = BuildWindowsCommandLine(launcherPath.native(), helperArguments);
 
@@ -245,7 +232,8 @@ int wmain(int argumentCount, wchar_t* arguments[])
     }
     DWORD inheritedHandleFlags = 0;
     if (GetHandleInformation(startupInformation.hStdInput, &inheritedHandleFlags) ||
-        GetHandleInformation(startupInformation.hStdOutput, &inheritedHandleFlags))
+        GetHandleInformation(startupInformation.hStdOutput, &inheritedHandleFlags) ||
+        GetHandleInformation(startupInformation.hStdError, &inheritedHandleFlags))
     {
         TerminateProcess(processInformation.hProcess, 1);
         CloseHandle(processInformation.hProcess);
@@ -261,6 +249,14 @@ int wmain(int argumentCount, wchar_t* arguments[])
         TerminateProcess(process.get(), 1);
         WaitForSingleObject(process.get(), ProcessTimeoutMilliseconds);
         std::wcerr << terminalError << L"\n";
+        return 1;
+    }
+    if (!terminalBridge.SendResize(COORD {91, 27}))
+    {
+        TerminateProcess(process.get(), 1);
+        WaitForSingleObject(process.get(), ProcessTimeoutMilliseconds);
+        terminalBridge.Stop();
+        std::wcerr << L"Could not send the test terminal size.\n";
         return 1;
     }
 

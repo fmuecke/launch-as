@@ -30,6 +30,21 @@ namespace
     return true;
 }
 
+[[nodiscard]] bool ReadAll(HANDLE source, std::byte* data, DWORD bytes) noexcept
+{
+    DWORD bytesRead = 0;
+    while (bytesRead < bytes)
+    {
+        DWORD read = 0;
+        if (!ReadFile(source, data + bytesRead, bytes - bytesRead, &read, nullptr) || read == 0)
+        {
+            return false;
+        }
+        bytesRead += read;
+    }
+    return true;
+}
+
 } // namespace
 
 bool IsUsableHandle(HANDLE handle) noexcept
@@ -74,6 +89,30 @@ void RelayOutput(HANDLE source, HANDLE destination, std::stop_token stopToken) n
             destinationAvailable = WriteAll(destination, buffer.data(), bytesRead);
         }
     }
+}
+
+bool WriteTerminalSize(HANDLE destination, COORD size) noexcept
+{
+    if (size.X <= 0 || size.Y <= 0)
+    {
+        return false;
+    }
+    return WriteAll(
+        destination, reinterpret_cast<const std::byte*>(&size), static_cast<DWORD>(sizeof(size)));
+}
+
+bool ReadTerminalSize(HANDLE source, COORD& size) noexcept
+{
+    COORD receivedSize {};
+    if (!ReadAll(source,
+            reinterpret_cast<std::byte*>(&receivedSize),
+            static_cast<DWORD>(sizeof(receivedSize))) ||
+        receivedSize.X <= 0 || receivedSize.Y <= 0)
+    {
+        return false;
+    }
+    size = receivedSize;
+    return true;
 }
 
 COORD CurrentTerminalSize(HANDLE output) noexcept

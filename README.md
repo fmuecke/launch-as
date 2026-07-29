@@ -49,7 +49,8 @@ the convenience of your normal terminal.
 - **Flexible credential modes** — `auto` (prompt if missing), `stored`
   (unattended, never shows UI), and `prompt` (ephemeral, never saved).
 - **Terminal mode (`--terminal`)** hosts an interactive process through ConPTY in
-  your current terminal pane instead of spawning a separate console window.
+  your current terminal pane, follows pane resizing, and avoids a separate
+  console window.
 - **Safe by construction** — refuses administrative target accounts, verifies the
   child's token SID before resuming it, and zeroes password buffers after use.
 

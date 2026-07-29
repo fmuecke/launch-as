@@ -19,6 +19,8 @@ inline constexpr DWORD OutputDrainGraceMilliseconds = 250;
 void RelayInput(HANDLE source, HANDLE destination) noexcept;
 void RelayOutput(
     HANDLE source, HANDLE destination, std::stop_token stopToken = std::stop_token {}) noexcept;
+[[nodiscard]] bool WriteTerminalSize(HANDLE destination, COORD size) noexcept;
+[[nodiscard]] bool ReadTerminalSize(HANDLE source, COORD& size) noexcept;
 [[nodiscard]] COORD CurrentTerminalSize(HANDLE output) noexcept;
 [[nodiscard]] bool SupportsTerminalCursorInheritance(HANDLE input, HANDLE output) noexcept;
 

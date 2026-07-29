@@ -12,8 +12,11 @@
 #include <Windows.h>
 #include <array>
 #include <cstddef>
+#include <cstdio>
 #include <cwchar>
+#include <fcntl.h>
 #include <filesystem>
+#include <io.h>
 #include <iostream>
 #include <limits>
 #include <span>
@@ -30,6 +33,54 @@ constexpr std::wstring_view HostArgument = L"--internal-pseudoconsole-host";
 constexpr std::wstring_view SizeArgument = L"--size";
 constexpr std::wstring_view InheritCursorArgument = L"--inherit-cursor";
 constexpr DWORD ProcessTerminationTimeoutMilliseconds = 5'000;
+
+[[nodiscard]] bool PrepareResizeInput(UniqueHandle& resizeInput, std::wstring& error)
+{
+    const HANDLE inheritedResizeInput = GetStdHandle(STD_ERROR_HANDLE);
+    const HANDLE inheritedOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (!IsUsableHandle(inheritedResizeInput) || !IsUsableHandle(inheritedOutput))
+    {
+        error = L"The pseudoconsole host did not receive usable output and resize handles.";
+        return false;
+    }
+
+    // STARTUPINFO's stderr slot transports the resize pipe. Retain it before _dup2
+    // redirects CRT stderr to stdout, because _dup2 closes the old descriptor.
+    HANDLE rawResizeInput = nullptr;
+    if (!DuplicateHandle(GetCurrentProcess(),
+            inheritedResizeInput,
+            GetCurrentProcess(),
+            &rawResizeInput,
+            0,
+            FALSE,
+            DUPLICATE_SAME_ACCESS))
+    {
+        const DWORD duplicateError = GetLastError();
+        error = L"Could not retain the pseudoconsole resize handle: " +
+                FormatWindowsError(duplicateError);
+        return false;
+    }
+    resizeInput.reset(rawResizeInput);
+
+    if (_dup2(_fileno(stdout), _fileno(stderr)) != 0)
+    {
+        error = L"Could not redirect pseudoconsole host diagnostics.";
+        return false;
+    }
+    if (!SetStdHandle(STD_ERROR_HANDLE, inheritedOutput))
+    {
+        const DWORD redirectError = GetLastError();
+        error = L"Could not redirect the pseudoconsole host error handle: " +
+                FormatWindowsError(redirectError);
+        return false;
+    }
+    if (_setmode(_fileno(stderr), _O_U8TEXT) == -1)
+    {
+        error = L"Could not configure pseudoconsole host diagnostics for UTF-8.";
+        return false;
+    }
+    return true;
+}
 
 [[nodiscard]] bool ParseDimension(const wchar_t* text, SHORT& value) noexcept
 {
@@ -84,6 +135,14 @@ bool IsPseudoConsoleHostInvocation(std::span<wchar_t*> arguments) noexcept
 
 ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
 {
+    UniqueHandle resizeInput;
+    std::wstring streamError;
+    if (!PrepareResizeInput(resizeInput, streamError))
+    {
+        std::wcout << streamError << L"\n";
+        return ExitFailure;
+    }
+
     COORD terminalSize {};
     bool inheritCursor = false;
     std::filesystem::path executable;
@@ -104,7 +163,7 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
 
     PseudoConsoleSession pseudoConsole;
     std::wstring terminalError;
-    if (!pseudoConsole.Initialize(terminalSize, inheritCursor, terminalError))
+    if (!pseudoConsole.Initialize(terminalSize, inheritCursor, resizeInput.get(), terminalError))
     {
         std::wcerr << terminalError << L"\n";
         return ExitFailure;

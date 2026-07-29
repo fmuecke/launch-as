@@ -6,7 +6,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
     launch_as
-    VERSION 0.3.1
+    VERSION 0.3.2
     LANGUAGES CXX RC
 )
 
@@ -116,6 +116,11 @@ if(BUILD_TESTING)
     )
     configure_launch_as_target(LauncherArgvProbe)
 
+    add_executable(LauncherTerminalSizeProbe
+        tests/TerminalSizeProbe.cpp
+    )
+    configure_launch_as_target(LauncherTerminalSizeProbe)
+
     add_executable(LauncherCommandLineTests
         tests/CommandLineTests.cpp
         src/WindowsCommandLine.cpp
@@ -172,6 +177,7 @@ if(BUILD_TESTING)
         COMMAND
             "$<TARGET_FILE:LauncherPseudoConsoleTests>"
             "$<TARGET_FILE:launch_as>"
+            "$<TARGET_FILE:LauncherTerminalSizeProbe>"
     )
     set_tests_properties(launcher.pseudoconsole PROPERTIES
         LABELS "launcher;integration;terminal"

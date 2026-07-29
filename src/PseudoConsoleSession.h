@@ -27,7 +27,8 @@ class PseudoConsoleSession final
     PseudoConsoleSession(PseudoConsoleSession&&) = delete;
     PseudoConsoleSession& operator=(PseudoConsoleSession&&) = delete;
 
-    [[nodiscard]] bool Initialize(COORD terminalSize, bool inheritCursor, std::wstring& error);
+    [[nodiscard]] bool Initialize(
+        COORD terminalSize, bool inheritCursor, HANDLE resizeInput, std::wstring& error);
     [[nodiscard]] STARTUPINFOW* startupInfo() noexcept;
     [[nodiscard]] HANDLE inputRelayCompleteEvent() const noexcept;
     [[nodiscard]] bool StartRelays(std::wstring& error);
@@ -58,8 +59,8 @@ class PseudoConsoleSession final
     UniqueHandle outputCompleteEvent_;
     HANDLE parentInput_ = nullptr;
     HANDLE parentOutput_ = nullptr;
+    HANDLE resizeInput_ = nullptr;
     TerminalMode terminalMode_;
-    bool resizeSupported_ = false;
     bool relaysStarted_ = false;
     std::jthread inputRelay_;
     std::jthread outputRelay_;

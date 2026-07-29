@@ -98,20 +98,23 @@ token.
 required by ConPTY. For terminal mode, the credentialed suspended process is
 therefore a hidden instance of the trusted launcher running as the target
 user. The parent verifies that helper's token and clears the password before
-resuming it. Two one-instance, local named pipes explicitly bridge the caller's
-terminal streams to the hidden helper, avoiding direct use of console handles
-in the no-window process. The regular-user launcher owns both server endpoints;
-the target user receives only preconnected, direction-limited client handles and
-never receives a pipe name. Those client handles are non-inheritable except
-during the individual process-creation call; the parent copies are closed
-immediately after successful creation and inheritance is removed immediately
-after a failed attempt. After the verified helper exits, the parent gives
-buffered output a bounded drain period and then cancels the relay if necessary,
-so a retained target-side output handle cannot keep the launcher alive
-indefinitely. The helper creates the requested process with `CreateProcessW`
-and the ConPTY startup attribute; that child necessarily inherits the
-already-verified target identity. The initial pane dimensions are passed to
-the helper; live resizing is not implemented yet.
+resuming it. Three one-instance, local named pipes carry terminal input, output,
+and one-way resize updates to the hidden helper, avoiding direct use of console
+handles in the no-window process. The regular-user launcher owns all server
+endpoints; the target user receives only preconnected, direction-limited client
+handles and never receives a pipe name. The resize client temporarily occupies
+the helper's standard-error slot during process creation; the trusted helper
+retains it and immediately redirects its diagnostics to the output client.
+Those client handles are non-inheritable except during the individual
+process-creation call; the parent copies are closed immediately after successful
+creation and inheritance is removed immediately after a failed attempt. After
+the verified helper exits, the parent gives buffered output a bounded drain
+period and then cancels the relay if necessary, so a retained target-side output
+handle cannot keep the launcher alive indefinitely. The helper creates the
+requested process with `CreateProcessW` and the ConPTY startup attribute; that
+child necessarily inherits the already-verified target identity. The parent
+monitors the caller's pane dimensions and sends changes over the resize pipe;
+the helper validates them and updates ConPTY with `ResizePseudoConsole`.
 
 For example, this starts a nested PowerShell session in the current
 Windows Terminal or VS Code terminal pane:

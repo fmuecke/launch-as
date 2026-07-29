@@ -5,8 +5,8 @@
 #include "PseudoConsoleSession.h"
 
 #include <Windows.h>
-#include <chrono>
 #include <exception>
+#include <iostream>
 #include <string>
 #include <utility>
 
@@ -24,7 +24,8 @@ PseudoConsoleSession::~PseudoConsoleSession()
     ClosePseudoConsole();
 }
 
-bool PseudoConsoleSession::Initialize(COORD terminalSize, bool inheritCursor, std::wstring& error)
+bool PseudoConsoleSession::Initialize(
+    COORD terminalSize, bool inheritCursor, HANDLE resizeInput, std::wstring& error)
 {
     if (!LoadApi(error))
     {
@@ -33,9 +34,11 @@ bool PseudoConsoleSession::Initialize(COORD terminalSize, bool inheritCursor, st
 
     parentInput_ = GetStdHandle(STD_INPUT_HANDLE);
     parentOutput_ = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (!IsUsableHandle(parentInput_) || !IsUsableHandle(parentOutput_))
+    resizeInput_ = resizeInput;
+    if (!IsUsableHandle(parentInput_) || !IsUsableHandle(parentOutput_) ||
+        !IsUsableHandle(resizeInput_))
     {
-        error = L"Terminal mode requires usable standard input and output handles.";
+        error = L"Terminal mode requires usable input, output, and resize handles.";
         return false;
     }
 
@@ -56,9 +59,6 @@ bool PseudoConsoleSession::Initialize(COORD terminalSize, bool inheritCursor, st
                 FormatWindowsError(eventError);
         return false;
     }
-
-    CONSOLE_SCREEN_BUFFER_INFO terminalInformation {};
-    resizeSupported_ = GetConsoleScreenBufferInfo(parentOutput_, &terminalInformation) != FALSE;
 
     HANDLE rawPseudoInput = nullptr;
     HANDLE rawInputWrite = nullptr;
@@ -143,7 +143,7 @@ HANDLE PseudoConsoleSession::inputRelayCompleteEvent() const noexcept
 
 bool PseudoConsoleSession::StartRelays(std::wstring& error)
 {
-    if (pseudoConsole_ == nullptr || !inputWrite_ || !outputRead_)
+    if (pseudoConsole_ == nullptr || !inputWrite_ || !outputRead_ || !IsUsableHandle(resizeInput_))
     {
         error = L"The pseudoconsole session is not initialized.";
         return false;
@@ -177,24 +177,21 @@ bool PseudoConsoleSession::StartRelays(std::wstring& error)
                 SetEvent(completionEvent);
             });
 
-        if (resizeSupported_)
-        {
-            resizeRelay_ = std::jthread(
-                [this](std::stop_token stopToken) noexcept
+        resizeRelay_ = std::jthread(
+            [this]() noexcept
+            {
+                COORD size {};
+                while (ReadTerminalSize(resizeInput_, size))
                 {
-                    COORD previousSize = CurrentTerminalSize(parentOutput_);
-                    while (!stopToken.stop_requested())
+                    const HRESULT resizeResult = api_.resize(pseudoConsole_, size);
+                    if (FAILED(resizeResult))
                     {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-                        const COORD size = CurrentTerminalSize(parentOutput_);
-                        if (size.X != previousSize.X || size.Y != previousSize.Y)
-                        {
-                            api_.resize(pseudoConsole_, size);
-                            previousSize = size;
-                        }
+                        std::wcerr << L"Could not resize the Windows pseudoconsole: "
+                                   << FormatWindowsError(HRESULT_CODE(resizeResult)) << L"\n";
+                        return;
                     }
-                });
-        }
+                }
+            });
     }
     catch (const std::exception&)
     {
@@ -212,9 +209,9 @@ void PseudoConsoleSession::StopRelays() noexcept
         return;
     }
 
-    resizeRelay_.request_stop();
     if (resizeRelay_.joinable())
     {
+        CancelSynchronousIo(resizeRelay_.native_handle());
         resizeRelay_.join();
     }
 

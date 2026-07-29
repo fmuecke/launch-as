@@ -6,6 +6,7 @@
 
 #include <Windows.h>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <exception>
 #include <memory>
@@ -253,16 +254,27 @@ bool TerminalBridge::Initialize(STARTUPINFOW& childStartupInformation, std::wstr
         return false;
     }
 
+    if (!CreateTerminalPipePair(L"resize",
+            PipeDirection::ParentWrites,
+            static_cast<PSECURITY_DESCRIPTOR>(pipeSecurity.get()),
+            resizeWrite_,
+            childResizeRead_,
+            error))
+    {
+        return false;
+    }
+
     childStartupInformation.dwFlags |= STARTF_USESTDHANDLES;
     childStartupInformation.hStdInput = childInputRead_.get();
     childStartupInformation.hStdOutput = childOutputWrite_.get();
-    childStartupInformation.hStdError = childOutputWrite_.get();
+    childStartupInformation.hStdError = childResizeRead_.get();
     return true;
 }
 
 bool TerminalBridge::PrepareChildProcessCreation(std::wstring& error)
 {
-    if (!childInputRead_ || !childOutputWrite_ || childHandlesInheritable_ || childProcessCreated_)
+    if (!childInputRead_ || !childOutputWrite_ || !childResizeRead_ || childHandlesInheritable_ ||
+        childProcessCreated_)
     {
         error = L"The terminal bridge is not ready for child-process creation.";
         return false;
@@ -281,7 +293,20 @@ bool TerminalBridge::PrepareChildProcessCreation(std::wstring& error)
         SetHandleInformation(childInputRead_.get(), HANDLE_FLAG_INHERIT, 0);
         childInputRead_.reset();
         childOutputWrite_.reset();
+        childResizeRead_.reset();
         error = L"Could not enable inheritance for the terminal output client: " +
+                FormatWindowsError(inheritanceError);
+        return false;
+    }
+    if (!SetHandleInformation(childResizeRead_.get(), HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT))
+    {
+        const DWORD inheritanceError = GetLastError();
+        SetHandleInformation(childInputRead_.get(), HANDLE_FLAG_INHERIT, 0);
+        SetHandleInformation(childOutputWrite_.get(), HANDLE_FLAG_INHERIT, 0);
+        childInputRead_.reset();
+        childOutputWrite_.reset();
+        childResizeRead_.reset();
+        error = L"Could not enable inheritance for the terminal resize client: " +
                 FormatWindowsError(inheritanceError);
         return false;
     }
@@ -303,6 +328,7 @@ bool TerminalBridge::CompleteChildProcessCreation(bool processCreated, std::wstr
     {
         childInputRead_.reset();
         childOutputWrite_.reset();
+        childResizeRead_.reset();
         childProcessCreated_ = true;
         return true;
     }
@@ -317,10 +343,19 @@ bool TerminalBridge::CompleteChildProcessCreation(bool processCreated, std::wstr
     {
         inheritanceError = GetLastError();
     }
+    if (!SetHandleInformation(childResizeRead_.get(), HANDLE_FLAG_INHERIT, 0))
+    {
+        const DWORD resizeInheritanceError = GetLastError();
+        if (inheritanceError == ERROR_SUCCESS)
+        {
+            inheritanceError = resizeInheritanceError;
+        }
+    }
     if (inheritanceError != ERROR_SUCCESS)
     {
         childInputRead_.reset();
         childOutputWrite_.reset();
+        childResizeRead_.reset();
         error = L"Could not disable inheritance for the terminal clients: " +
                 FormatWindowsError(inheritanceError);
         return false;
@@ -330,13 +365,22 @@ bool TerminalBridge::CompleteChildProcessCreation(bool processCreated, std::wstr
 
 bool TerminalBridge::Start(std::wstring& error)
 {
-    if (!childProcessCreated_ || childHandlesInheritable_ || !inputWrite_ || !outputRead_)
+    if (!childProcessCreated_ || childHandlesInheritable_ || !inputWrite_ || !outputRead_ ||
+        !resizeWrite_)
     {
         error = L"The terminal bridge is not initialized.";
         return false;
     }
     if (!terminalMode_.Configure(parentInput_, parentOutput_, error))
     {
+        return false;
+    }
+
+    const COORD initialSize = terminalSize();
+    if (!SendResize(initialSize))
+    {
+        terminalMode_.Restore();
+        error = L"Could not send the initial terminal size to the pseudoconsole host.";
         return false;
     }
 
@@ -357,6 +401,21 @@ bool TerminalBridge::Start(std::wstring& error)
                 RelayOutput(source, destination, stopToken);
                 SetEvent(completionEvent);
             });
+
+        resizeRelay_ = std::jthread(
+            [this, previousSize = initialSize](std::stop_token stopToken) mutable noexcept
+            {
+                while (!stopToken.stop_requested())
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                    const COORD size = terminalSize();
+                    if ((size.X != previousSize.X || size.Y != previousSize.Y) && !SendResize(size))
+                    {
+                        return;
+                    }
+                    previousSize = size;
+                }
+            });
     }
     catch (const std::exception&)
     {
@@ -373,6 +432,14 @@ void TerminalBridge::Stop() noexcept
     {
         return;
     }
+
+    resizeRelay_.request_stop();
+    if (resizeRelay_.joinable())
+    {
+        CancelSynchronousIo(resizeRelay_.native_handle());
+        resizeRelay_.join();
+    }
+    resizeWrite_.reset();
 
     if (inputRelay_.joinable())
     {
@@ -399,6 +466,11 @@ void TerminalBridge::Stop() noexcept
 
     terminalMode_.Restore();
     started_ = false;
+}
+
+bool TerminalBridge::SendResize(COORD size) noexcept
+{
+    return resizeWrite_ && WriteTerminalSize(resizeWrite_.get(), size);
 }
 
 COORD TerminalBridge::terminalSize() const noexcept { return CurrentTerminalSize(parentOutput_); }

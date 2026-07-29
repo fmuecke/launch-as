@@ -31,14 +31,17 @@ class TerminalBridge final
     [[nodiscard]] bool Start(std::wstring& error);
     void Stop() noexcept;
 
+    [[nodiscard]] bool SendResize(COORD size) noexcept;
     [[nodiscard]] COORD terminalSize() const noexcept;
     [[nodiscard]] bool supportsCursorInheritance() const noexcept;
 
   private:
     UniqueHandle childInputRead_;
     UniqueHandle childOutputWrite_;
+    UniqueHandle childResizeRead_;
     UniqueHandle inputWrite_;
     UniqueHandle outputRead_;
+    UniqueHandle resizeWrite_;
     UniqueHandle outputCompleteEvent_;
     HANDLE parentInput_ = nullptr;
     HANDLE parentOutput_ = nullptr;
@@ -48,6 +51,7 @@ class TerminalBridge final
     bool started_ = false;
     std::jthread inputRelay_;
     std::jthread outputRelay_;
+    std::jthread resizeRelay_;
 };
 
 } // namespace launch_as

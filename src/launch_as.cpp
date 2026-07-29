@@ -41,13 +41,13 @@ int wmain(int argc, wchar_t* argv[])
 {
     using namespace launch_as;
 
+    ConfigureUserFacingOutput();
+
     const std::span arguments(argv, static_cast<std::size_t>(argc));
     if (IsPseudoConsoleHostInvocation(arguments))
     {
         return static_cast<int>(RunPseudoConsoleHost(arguments));
     }
-
-    ConfigureUserFacingOutput();
 
     const auto options = ParseOptions(arguments);
     if (!options)

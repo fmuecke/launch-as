@@ -20,9 +20,6 @@ namespace launch_as
 namespace
 {
 
-constexpr COORD DefaultTerminalSize {120, 30};
-constexpr DWORD RelayBufferBytes = 16 * 1024;
-constexpr DWORD OutputDrainGraceMilliseconds = 250;
 constexpr DWORD PipeMode =
     PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS;
 
@@ -44,27 +41,6 @@ enum class PipeDirection
     ParentWrites,
     ParentReads
 };
-
-[[nodiscard]] bool IsUsableHandle(HANDLE handle) noexcept
-{
-    return handle != nullptr && handle != INVALID_HANDLE_VALUE;
-}
-
-[[nodiscard]] bool WriteAll(HANDLE destination, const std::byte* data, DWORD bytes) noexcept
-{
-    DWORD bytesWritten = 0;
-    while (bytesWritten < bytes)
-    {
-        DWORD written = 0;
-        if (!WriteFile(destination, data + bytesWritten, bytes - bytesWritten, &written, nullptr) ||
-            written == 0)
-        {
-            return false;
-        }
-        bytesWritten += written;
-    }
-    return true;
-}
 
 [[nodiscard]] bool CreatePipeSecurityDescriptor(UniqueLocalMemory& descriptor, std::wstring& error)
 {
@@ -226,45 +202,6 @@ enum class PipeDirection
     return true;
 }
 
-void RelayInput(HANDLE source, HANDLE destination) noexcept
-{
-    std::array<std::byte, RelayBufferBytes> buffer {};
-    for (;;)
-    {
-        DWORD bytesRead = 0;
-        if (!ReadFile(
-                source, buffer.data(), static_cast<DWORD>(buffer.size()), &bytesRead, nullptr) ||
-            bytesRead == 0)
-        {
-            return;
-        }
-        if (!WriteAll(destination, buffer.data(), bytesRead))
-        {
-            return;
-        }
-    }
-}
-
-void RelayOutput(HANDLE source, HANDLE destination, std::stop_token stopToken) noexcept
-{
-    std::array<std::byte, RelayBufferBytes> buffer {};
-    bool destinationAvailable = true;
-    while (!stopToken.stop_requested())
-    {
-        DWORD bytesRead = 0;
-        if (!ReadFile(
-                source, buffer.data(), static_cast<DWORD>(buffer.size()), &bytesRead, nullptr) ||
-            bytesRead == 0)
-        {
-            return;
-        }
-        if (destinationAvailable)
-        {
-            destinationAvailable = WriteAll(destination, buffer.data(), bytesRead);
-        }
-    }
-}
-
 } // namespace
 
 TerminalBridge::~TerminalBridge() { Stop(); }
@@ -398,7 +335,7 @@ bool TerminalBridge::Start(std::wstring& error)
         error = L"The terminal bridge is not initialized.";
         return false;
     }
-    if (!ConfigureTerminal(error))
+    if (!terminalMode_.Configure(parentInput_, parentOutput_, error))
     {
         return false;
     }
@@ -460,116 +397,15 @@ void TerminalBridge::Stop() noexcept
     }
     outputRead_.reset();
 
-    RestoreTerminal();
+    terminalMode_.Restore();
     started_ = false;
 }
 
-COORD TerminalBridge::terminalSize() const noexcept
-{
-    CONSOLE_SCREEN_BUFFER_INFO information {};
-    if (!IsUsableHandle(parentOutput_) || !GetConsoleScreenBufferInfo(parentOutput_, &information))
-    {
-        return DefaultTerminalSize;
-    }
-
-    const SHORT width = information.srWindow.Right - information.srWindow.Left + 1;
-    const SHORT height = information.srWindow.Bottom - information.srWindow.Top + 1;
-    if (width <= 0 || height <= 0)
-    {
-        return DefaultTerminalSize;
-    }
-    return COORD {width, height};
-}
+COORD TerminalBridge::terminalSize() const noexcept { return CurrentTerminalSize(parentOutput_); }
 
 bool TerminalBridge::supportsCursorInheritance() const noexcept
 {
-    DWORD inputMode = 0;
-    DWORD outputMode = 0;
-    return IsUsableHandle(parentInput_) && IsUsableHandle(parentOutput_) &&
-           GetConsoleMode(parentInput_, &inputMode) && GetConsoleMode(parentOutput_, &outputMode);
-}
-
-bool TerminalBridge::ConfigureTerminal(std::wstring& error)
-{
-    if (GetConsoleMode(parentInput_, &originalInputMode_))
-    {
-        const DWORD inputMode = (originalInputMode_ & ~(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT |
-                                                          ENABLE_PROCESSED_INPUT)) |
-                                ENABLE_VIRTUAL_TERMINAL_INPUT;
-        if (!SetConsoleMode(parentInput_, inputMode))
-        {
-            const DWORD modeError = GetLastError();
-            error = L"Could not configure terminal input: " + FormatWindowsError(modeError);
-            return false;
-        }
-        inputModeChanged_ = true;
-
-        originalInputCodePage_ = GetConsoleCP();
-        if (originalInputCodePage_ != 0 && originalInputCodePage_ != CP_UTF8)
-        {
-            if (!SetConsoleCP(CP_UTF8))
-            {
-                const DWORD codePageError = GetLastError();
-                error = L"Could not configure UTF-8 terminal input: " +
-                        FormatWindowsError(codePageError);
-                RestoreTerminal();
-                return false;
-            }
-            inputCodePageChanged_ = true;
-        }
-    }
-
-    if (GetConsoleMode(parentOutput_, &originalOutputMode_))
-    {
-        if (!SetConsoleMode(
-                parentOutput_, originalOutputMode_ | ENABLE_VIRTUAL_TERMINAL_PROCESSING))
-        {
-            const DWORD modeError = GetLastError();
-            error = L"Could not configure terminal output: " + FormatWindowsError(modeError);
-            RestoreTerminal();
-            return false;
-        }
-        outputModeChanged_ = true;
-
-        originalOutputCodePage_ = GetConsoleOutputCP();
-        if (originalOutputCodePage_ != 0 && originalOutputCodePage_ != CP_UTF8)
-        {
-            if (!SetConsoleOutputCP(CP_UTF8))
-            {
-                const DWORD codePageError = GetLastError();
-                error = L"Could not configure UTF-8 terminal output: " +
-                        FormatWindowsError(codePageError);
-                RestoreTerminal();
-                return false;
-            }
-            outputCodePageChanged_ = true;
-        }
-    }
-    return true;
-}
-
-void TerminalBridge::RestoreTerminal() noexcept
-{
-    if (outputCodePageChanged_)
-    {
-        SetConsoleOutputCP(originalOutputCodePage_);
-        outputCodePageChanged_ = false;
-    }
-    if (inputCodePageChanged_)
-    {
-        SetConsoleCP(originalInputCodePage_);
-        inputCodePageChanged_ = false;
-    }
-    if (outputModeChanged_)
-    {
-        SetConsoleMode(parentOutput_, originalOutputMode_);
-        outputModeChanged_ = false;
-    }
-    if (inputModeChanged_)
-    {
-        SetConsoleMode(parentInput_, originalInputMode_);
-        inputModeChanged_ = false;
-    }
+    return SupportsTerminalCursorInheritance(parentInput_, parentOutput_);
 }
 
 } // namespace launch_as

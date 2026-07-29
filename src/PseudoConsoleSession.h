@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "TerminalIO.h"
 #include "Win32Support.h"
 
 #include <Windows.h>
@@ -45,9 +46,6 @@ class PseudoConsoleSession final
     };
 
     [[nodiscard]] bool LoadApi(std::wstring& error);
-    [[nodiscard]] COORD CurrentTerminalSize() const noexcept;
-    [[nodiscard]] bool ConfigureTerminal(std::wstring& error);
-    void RestoreTerminal() noexcept;
     void ClosePseudoConsole() noexcept;
 
     Api api_;
@@ -60,14 +58,7 @@ class PseudoConsoleSession final
     UniqueHandle outputCompleteEvent_;
     HANDLE parentInput_ = nullptr;
     HANDLE parentOutput_ = nullptr;
-    DWORD originalInputMode_ = 0;
-    DWORD originalOutputMode_ = 0;
-    UINT originalInputCodePage_ = 0;
-    UINT originalOutputCodePage_ = 0;
-    bool inputModeChanged_ = false;
-    bool outputModeChanged_ = false;
-    bool inputCodePageChanged_ = false;
-    bool outputCodePageChanged_ = false;
+    TerminalMode terminalMode_;
     bool resizeSupported_ = false;
     bool relaysStarted_ = false;
     std::jthread inputRelay_;

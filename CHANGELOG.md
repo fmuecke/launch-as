@@ -2,12 +2,13 @@
 
 ## Unreleased
 
+- Changed: Clarified that the returned error code messages are only corresponding win32 codes
 - Changed: Using standard Win32 codes to reduce collisions with pass-through child exit codes.
+- Fixed: UTF-8 output configuration now runs before internal pseudoconsole-host dispatch.
 
 ## [0.3.1] - 2026-07-29
 
-- Changed: Nonzero child exit codes now include the corresponding Windows
-  message.
+- Changed: Nonzero child exit codes now include the corresponding Windows message.
 - Changed: `--terminal` is the sole current-pane option.
 - Changed: Saving a prompted credential is opt-in.
 - Fixed: Closing the host terminal now ends the related `--terminal` session.

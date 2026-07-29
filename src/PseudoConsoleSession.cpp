@@ -5,7 +5,6 @@
 #include "PseudoConsoleSession.h"
 
 #include <Windows.h>
-#include <array>
 #include <chrono>
 #include <exception>
 #include <string>
@@ -13,76 +12,6 @@
 
 namespace launch_as
 {
-namespace
-{
-
-constexpr COORD DefaultTerminalSize {120, 30};
-constexpr DWORD RelayBufferBytes = 16 * 1024;
-constexpr DWORD OutputDrainGraceMilliseconds = 250;
-
-[[nodiscard]] bool IsUsableHandle(HANDLE handle) noexcept
-{
-    return handle != nullptr && handle != INVALID_HANDLE_VALUE;
-}
-
-[[nodiscard]] bool WriteAll(HANDLE destination, const std::byte* data, DWORD bytes) noexcept
-{
-    DWORD bytesWritten = 0;
-    while (bytesWritten < bytes)
-    {
-        DWORD written = 0;
-        if (!WriteFile(destination, data + bytesWritten, bytes - bytesWritten, &written, nullptr) ||
-            written == 0)
-        {
-            return false;
-        }
-        bytesWritten += written;
-    }
-    return true;
-}
-
-void RelayInput(HANDLE source, HANDLE destination) noexcept
-{
-    std::array<std::byte, RelayBufferBytes> buffer {};
-    for (;;)
-    {
-        DWORD bytesRead = 0;
-        if (!ReadFile(
-                source, buffer.data(), static_cast<DWORD>(buffer.size()), &bytesRead, nullptr) ||
-            bytesRead == 0)
-        {
-            return;
-        }
-
-        if (!WriteAll(destination, buffer.data(), bytesRead))
-        {
-            return;
-        }
-    }
-}
-
-void RelayOutput(HANDLE source, HANDLE destination) noexcept
-{
-    std::array<std::byte, RelayBufferBytes> buffer {};
-    bool destinationAvailable = true;
-    for (;;)
-    {
-        DWORD bytesRead = 0;
-        if (!ReadFile(
-                source, buffer.data(), static_cast<DWORD>(buffer.size()), &bytesRead, nullptr) ||
-            bytesRead == 0)
-        {
-            return;
-        }
-
-        if (destinationAvailable)
-        {
-            destinationAvailable = WriteAll(destination, buffer.data(), bytesRead);
-        }
-    }
-}
-
-} // namespace
 
 PseudoConsoleSession::~PseudoConsoleSession()
 {
@@ -219,7 +148,7 @@ bool PseudoConsoleSession::StartRelays(std::wstring& error)
         error = L"The pseudoconsole session is not initialized.";
         return false;
     }
-    if (!ConfigureTerminal(error))
+    if (!terminalMode_.Configure(parentInput_, parentOutput_, error))
     {
         return false;
     }
@@ -253,11 +182,11 @@ bool PseudoConsoleSession::StartRelays(std::wstring& error)
             resizeRelay_ = std::jthread(
                 [this](std::stop_token stopToken) noexcept
                 {
-                    COORD previousSize = CurrentTerminalSize();
+                    COORD previousSize = CurrentTerminalSize(parentOutput_);
                     while (!stopToken.stop_requested())
                     {
                         std::this_thread::sleep_for(std::chrono::milliseconds(200));
-                        const COORD size = CurrentTerminalSize();
+                        const COORD size = CurrentTerminalSize(parentOutput_);
                         if (size.X != previousSize.X || size.Y != previousSize.Y)
                         {
                             api_.resize(pseudoConsole_, size);
@@ -307,7 +236,7 @@ void PseudoConsoleSession::StopRelays() noexcept
         outputRelay_.join();
     }
 
-    RestoreTerminal();
+    terminalMode_.Restore();
     relaysStarted_ = false;
 }
 
@@ -334,106 +263,6 @@ bool PseudoConsoleSession::LoadApi(std::wstring& error)
         return false;
     }
     return true;
-}
-
-COORD PseudoConsoleSession::CurrentTerminalSize() const noexcept
-{
-    CONSOLE_SCREEN_BUFFER_INFO information {};
-    if (!IsUsableHandle(parentOutput_) || !GetConsoleScreenBufferInfo(parentOutput_, &information))
-    {
-        return DefaultTerminalSize;
-    }
-
-    const SHORT width = information.srWindow.Right - information.srWindow.Left + 1;
-    const SHORT height = information.srWindow.Bottom - information.srWindow.Top + 1;
-    if (width <= 0 || height <= 0)
-    {
-        return DefaultTerminalSize;
-    }
-    return COORD {width, height};
-}
-
-bool PseudoConsoleSession::ConfigureTerminal(std::wstring& error)
-{
-    if (GetConsoleMode(parentInput_, &originalInputMode_))
-    {
-        const DWORD inputMode = (originalInputMode_ & ~(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT |
-                                                          ENABLE_PROCESSED_INPUT)) |
-                                ENABLE_VIRTUAL_TERMINAL_INPUT;
-        if (!SetConsoleMode(parentInput_, inputMode))
-        {
-            const DWORD modeError = GetLastError();
-            error = L"Could not configure terminal input: " + FormatWindowsError(modeError);
-            return false;
-        }
-        inputModeChanged_ = true;
-
-        originalInputCodePage_ = GetConsoleCP();
-        if (originalInputCodePage_ != 0 && originalInputCodePage_ != CP_UTF8)
-        {
-            if (!SetConsoleCP(CP_UTF8))
-            {
-                const DWORD codePageError = GetLastError();
-                error = L"Could not configure UTF-8 terminal input: " +
-                        FormatWindowsError(codePageError);
-                RestoreTerminal();
-                return false;
-            }
-            inputCodePageChanged_ = true;
-        }
-    }
-
-    if (GetConsoleMode(parentOutput_, &originalOutputMode_))
-    {
-        if (!SetConsoleMode(
-                parentOutput_, originalOutputMode_ | ENABLE_VIRTUAL_TERMINAL_PROCESSING))
-        {
-            const DWORD modeError = GetLastError();
-            error = L"Could not configure terminal output: " + FormatWindowsError(modeError);
-            RestoreTerminal();
-            return false;
-        }
-        outputModeChanged_ = true;
-
-        originalOutputCodePage_ = GetConsoleOutputCP();
-        if (originalOutputCodePage_ != 0 && originalOutputCodePage_ != CP_UTF8)
-        {
-            if (!SetConsoleOutputCP(CP_UTF8))
-            {
-                const DWORD codePageError = GetLastError();
-                error = L"Could not configure UTF-8 terminal output: " +
-                        FormatWindowsError(codePageError);
-                RestoreTerminal();
-                return false;
-            }
-            outputCodePageChanged_ = true;
-        }
-    }
-    return true;
-}
-
-void PseudoConsoleSession::RestoreTerminal() noexcept
-{
-    if (outputCodePageChanged_)
-    {
-        SetConsoleOutputCP(originalOutputCodePage_);
-        outputCodePageChanged_ = false;
-    }
-    if (inputCodePageChanged_)
-    {
-        SetConsoleCP(originalInputCodePage_);
-        inputCodePageChanged_ = false;
-    }
-    if (outputModeChanged_)
-    {
-        SetConsoleMode(parentOutput_, originalOutputMode_);
-        outputModeChanged_ = false;
-    }
-    if (inputModeChanged_)
-    {
-        SetConsoleMode(parentInput_, originalInputMode_);
-        inputModeChanged_ = false;
-    }
 }
 
 void PseudoConsoleSession::ClosePseudoConsole() noexcept

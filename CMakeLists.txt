@@ -50,6 +50,8 @@ add_executable(launch_as
     src/LaunchProcess.h
     src/TerminalBridge.cpp
     src/TerminalBridge.h
+    src/TerminalIO.cpp
+    src/TerminalIO.h
     src/Win32Support.cpp
     src/Win32Support.h
     src/WindowsCommandLine.cpp
@@ -152,6 +154,7 @@ if(BUILD_TESTING)
     add_executable(LauncherPseudoConsoleTests
         tests/PseudoConsoleTests.cpp
         src/TerminalBridge.cpp
+        src/TerminalIO.cpp
         src/Win32Support.cpp
         src/WindowsCommandLine.cpp
     )
@@ -179,6 +182,7 @@ if(BUILD_TESTING)
     add_executable(LauncherTerminalDisconnectTests
         tests/TerminalDisconnectTests.cpp
         src/TerminalBridge.cpp
+        src/TerminalIO.cpp
         src/Win32Support.cpp
         src/WindowsCommandLine.cpp
     )

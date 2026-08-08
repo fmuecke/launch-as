@@ -53,12 +53,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "CMake configure failed with exit code $LASTEXITCODE."
 }
 
-$buildDescription = if ($RunTests) {
-    'launch-as and test targets'
-}
-else {
-    'launch-as'
-}
+$buildDescription = 'all configured targets'
 Write-Host "Building $buildDescription ($Configuration)"
 $buildArguments = @(
     '--build'
@@ -66,9 +61,6 @@ $buildArguments = @(
     '--config'
     $Configuration
 )
-if (-not $RunTests) {
-    $buildArguments += @('--target', 'launch_as')
-}
 & cmake @buildArguments
 if ($LASTEXITCODE -ne 0) {
     throw "CMake build failed with exit code $LASTEXITCODE."

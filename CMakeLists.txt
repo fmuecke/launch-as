@@ -70,6 +70,7 @@ function(configure_launch_as_target target)
             /std:c++latest
             /W4
             /WX
+            /EHsc
             /permissive-
             /sdl
             /utf-8
@@ -110,7 +111,210 @@ set_target_properties(launch_as PROPERTIES
     OUTPUT_NAME "launch-as"
 )
 
+add_executable(launch_as_broker
+    src/BrokerAccountProvisioner.cpp
+    src/BrokerAccountProvisioner.h
+    src/BrokerCredentialStore.cpp
+    src/BrokerCredentialStore.h
+    src/BrokerDataDirectory.cpp
+    src/BrokerDataDirectory.h
+    src/BrokerPassword.cpp
+    src/BrokerPassword.h
+    src/BrokerRegistration.cpp
+    src/BrokerRegistration.h
+    src/BrokerServiceInstaller.cpp
+    src/BrokerServiceInstaller.h
+    src/BrokerPipeServer.cpp
+    src/BrokerPipeServer.h
+    src/BrokerProtocol.cpp
+    src/BrokerProtocol.h
+    src/BrokerService.cpp
+    src/Win32Support.cpp
+    src/Win32Support.h
+)
+target_link_libraries(launch_as_broker PRIVATE
+    Advapi32
+    Bcrypt
+    Crypt32
+    Netapi32
+    Ole32
+    Shell32
+)
+configure_launch_as_target(launch_as_broker)
+set_target_properties(launch_as_broker PROPERTIES
+    OUTPUT_NAME "launch-as-broker"
+)
+
 if(BUILD_TESTING)
+    add_executable(LauncherBrokerProtocolTests
+        tests/BrokerProtocolTests.cpp
+        src/BrokerProtocol.cpp
+        src/BrokerProtocol.h
+    )
+    target_include_directories(LauncherBrokerProtocolTests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    configure_launch_as_target(LauncherBrokerProtocolTests)
+
+    add_test(
+        NAME launcher.broker_protocol
+        COMMAND "$<TARGET_FILE:LauncherBrokerProtocolTests>"
+    )
+    set_tests_properties(launcher.broker_protocol PROPERTIES
+        LABELS "broker;unit"
+    )
+
+    add_executable(LauncherBrokerPipeTests
+        tests/BrokerPipeTests.cpp
+        src/BrokerPipeServer.cpp
+        src/BrokerPipeServer.h
+        src/BrokerProtocol.cpp
+        src/Win32Support.cpp
+    )
+    target_include_directories(LauncherBrokerPipeTests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(LauncherBrokerPipeTests PRIVATE
+        Advapi32
+    )
+    configure_launch_as_target(LauncherBrokerPipeTests)
+
+    add_test(
+        NAME launcher.broker_pipe
+        COMMAND "$<TARGET_FILE:LauncherBrokerPipeTests>"
+    )
+    set_tests_properties(launcher.broker_pipe PROPERTIES
+        LABELS "broker;integration"
+    )
+
+    add_executable(LauncherBrokerCommandTests
+        tests/BrokerCommandTests.cpp
+        src/BrokerPipeServer.cpp
+        src/BrokerPipeServer.h
+        src/BrokerProtocol.cpp
+        src/BrokerProtocol.h
+        src/Win32Support.cpp
+    )
+    target_include_directories(LauncherBrokerCommandTests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(LauncherBrokerCommandTests PRIVATE
+        Advapi32
+    )
+    configure_launch_as_target(LauncherBrokerCommandTests)
+
+    add_test(
+        NAME launcher.broker_command
+        COMMAND
+            "$<TARGET_FILE:LauncherBrokerCommandTests>"
+            "$<TARGET_FILE:launch_as_broker>"
+    )
+    set_tests_properties(launcher.broker_command PROPERTIES
+        LABELS "broker;integration"
+    )
+
+    add_executable(LauncherBrokerCredentialStoreTests
+        tests/BrokerCredentialStoreTests.cpp
+        src/BrokerCredentialStore.cpp
+        src/BrokerCredentialStore.h
+    )
+    target_include_directories(LauncherBrokerCredentialStoreTests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(LauncherBrokerCredentialStoreTests PRIVATE
+        Crypt32
+    )
+    configure_launch_as_target(LauncherBrokerCredentialStoreTests)
+
+    add_test(
+        NAME launcher.broker_credential_store
+        COMMAND "$<TARGET_FILE:LauncherBrokerCredentialStoreTests>"
+    )
+    set_tests_properties(launcher.broker_credential_store PROPERTIES
+        LABELS "broker;integration"
+    )
+
+    add_executable(LauncherBrokerPasswordTests
+        tests/BrokerPasswordTests.cpp
+        src/BrokerCredentialStore.cpp
+        src/BrokerCredentialStore.h
+        src/BrokerPassword.cpp
+        src/BrokerPassword.h
+    )
+    target_include_directories(LauncherBrokerPasswordTests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(LauncherBrokerPasswordTests PRIVATE
+        Bcrypt
+        Crypt32
+    )
+    configure_launch_as_target(LauncherBrokerPasswordTests)
+
+    add_test(
+        NAME launcher.broker_password
+        COMMAND "$<TARGET_FILE:LauncherBrokerPasswordTests>"
+    )
+    set_tests_properties(launcher.broker_password PROPERTIES
+        LABELS "broker;unit"
+    )
+
+    add_executable(LauncherBrokerDataDirectoryTests
+        tests/BrokerDataDirectoryTests.cpp
+        src/BrokerDataDirectory.cpp
+        src/BrokerDataDirectory.h
+    )
+    target_include_directories(LauncherBrokerDataDirectoryTests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(LauncherBrokerDataDirectoryTests PRIVATE
+        Advapi32
+    )
+    configure_launch_as_target(LauncherBrokerDataDirectoryTests)
+
+    add_test(
+        NAME launcher.broker_data_directory
+        COMMAND "$<TARGET_FILE:LauncherBrokerDataDirectoryTests>"
+    )
+    set_tests_properties(launcher.broker_data_directory PROPERTIES
+        LABELS "broker;integration"
+    )
+
+    add_executable(LauncherBrokerAccountProvisioningTests
+        tests/BrokerAccountProvisioningTests.cpp
+        src/BrokerAccountProvisioner.cpp
+        src/BrokerAccountProvisioner.h
+        src/BrokerCredentialStore.cpp
+        src/BrokerCredentialStore.h
+        src/BrokerPassword.cpp
+        src/BrokerPassword.h
+        src/BrokerRegistration.cpp
+        src/BrokerRegistration.h
+    )
+    target_include_directories(LauncherBrokerAccountProvisioningTests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(LauncherBrokerAccountProvisioningTests PRIVATE
+        Bcrypt
+        Crypt32
+        Netapi32
+    )
+    configure_launch_as_target(LauncherBrokerAccountProvisioningTests)
+
+    add_executable(LauncherBrokerServiceInstallerTests
+        tests/BrokerServiceInstallerTests.cpp
+        src/BrokerServiceInstaller.cpp
+        src/BrokerServiceInstaller.h
+    )
+    target_include_directories(LauncherBrokerServiceInstallerTests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(LauncherBrokerServiceInstallerTests PRIVATE
+        Advapi32
+        Ole32
+        Shell32
+    )
+    configure_launch_as_target(LauncherBrokerServiceInstallerTests)
+
     add_executable(LauncherArgvProbe
         tests/ArgvProbe.cpp
     )

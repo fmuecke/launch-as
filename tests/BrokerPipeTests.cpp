@@ -20,6 +20,7 @@ struct LaunchCapture
     bool invoked = false;
     launch_as::broker::BrokerRequest request;
     std::vector<BYTE> callerSid;
+    std::vector<BYTE> callerLogonSid;
 };
 
 DWORD CaptureLaunchRequest(void* context, const launch_as::broker::BrokerRequest& request,
@@ -33,6 +34,7 @@ DWORD CaptureLaunchRequest(void* context, const launch_as::broker::BrokerRequest
     capture->invoked = true;
     capture->request = request;
     capture->callerSid = caller.userSid;
+    capture->callerLogonSid = caller.logonSid;
     return ERROR_NOT_READY;
 }
 
@@ -137,6 +139,9 @@ int wmain()
                    Expect(!capture.callerSid.empty() &&
                               IsValidSid(const_cast<BYTE*>(capture.callerSid.data())),
                        L"The broker did not provide a valid authenticated caller SID.") &&
+                   Expect(!capture.callerLogonSid.empty() &&
+                              IsValidSid(const_cast<BYTE*>(capture.callerLogonSid.data())),
+                       L"The broker did not provide the authenticated caller logon SID.") &&
                    Expect(capture.request.arguments.empty(),
                        L"The broker changed the launch request before dispatching it.") &&
                    Expect(response.find("\"requestId\":\"123e4567-e89b-12d3-a456-426614174000\"") !=

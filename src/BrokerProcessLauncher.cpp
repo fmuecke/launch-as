@@ -107,6 +107,23 @@ class EnabledProcessPrivileges final
     }
 }
 
+[[nodiscard]] bool CopyValidSid(PSID source, std::vector<BYTE>& destination)
+{
+    destination.clear();
+    if (!IsValidSid(source))
+    {
+        return false;
+    }
+    const DWORD sidBytes = GetLengthSid(source);
+    destination.resize(sidBytes);
+    if (!CopySid(sidBytes, destination.data(), source))
+    {
+        destination.clear();
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 BrokerChildProcess::~BrokerChildProcess() { Reset(); }
@@ -204,7 +221,7 @@ DWORD LaunchFixedBrokerProbe(HANDLE token, BrokerChildProcess& child)
         child.Reset();
         return executableError;
     }
-    std::wstring commandLine = L"\"" + executablePath + L"\" /d /c exit 0";
+    std::wstring commandLine = L"\"" + executablePath + L"\" /d /c timeout /t 30 /nobreak >nul";
     std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
     mutableCommandLine.push_back(L'\0');
     STARTUPINFOW startupInfo {};
@@ -237,6 +254,63 @@ DWORD LaunchFixedBrokerProbe(HANDLE token, BrokerChildProcess& child)
     }
     child.SetProcess(processInfo.hProcess, processInfo.hThread);
     return ERROR_SUCCESS;
+}
+
+DWORD GetTokenLogonSid(HANDLE token, std::vector<BYTE>& logonSid)
+{
+    logonSid.clear();
+    if (token == nullptr)
+    {
+        return ERROR_INVALID_HANDLE;
+    }
+    DWORD groupBytes = 0;
+    GetTokenInformation(token, TokenGroups, nullptr, 0, &groupBytes);
+    const DWORD sizeError = GetLastError();
+    if (sizeError != ERROR_INSUFFICIENT_BUFFER || groupBytes == 0)
+    {
+        return sizeError;
+    }
+    std::vector<BYTE> groups(groupBytes);
+    if (!GetTokenInformation(token, TokenGroups, groups.data(), groupBytes, &groupBytes))
+    {
+        const DWORD groupsError = GetLastError();
+        return groupsError;
+    }
+    const auto* tokenGroups = reinterpret_cast<const TOKEN_GROUPS*>(groups.data());
+    for (DWORD index = 0; index < tokenGroups->GroupCount; ++index)
+    {
+        const SID_AND_ATTRIBUTES& group = tokenGroups->Groups[index];
+        if ((group.Attributes & SE_GROUP_LOGON_ID) != 0)
+        {
+            return CopyValidSid(group.Sid, logonSid) ? ERROR_SUCCESS : ERROR_INVALID_SID;
+        }
+    }
+    return ERROR_NOT_FOUND;
+}
+
+DWORD ValidateChildLogonSid(HANDLE process, const std::vector<BYTE>& callerLogonSid)
+{
+    if (process == nullptr || callerLogonSid.empty() ||
+        !IsValidSid(const_cast<BYTE*>(callerLogonSid.data())))
+    {
+        return ERROR_INVALID_SID;
+    }
+    HANDLE token = nullptr;
+    if (!OpenProcessToken(process, TOKEN_QUERY, &token))
+    {
+        const DWORD tokenError = GetLastError();
+        return tokenError;
+    }
+    std::vector<BYTE> childLogonSid;
+    const DWORD logonSidError = GetTokenLogonSid(token, childLogonSid);
+    CloseHandle(token);
+    if (logonSidError != ERROR_SUCCESS)
+    {
+        return logonSidError;
+    }
+    return EqualSid(const_cast<BYTE*>(callerLogonSid.data()), childLogonSid.data()) != FALSE
+               ? ERROR_ACCESS_DENIED
+               : ERROR_SUCCESS;
 }
 
 } // namespace launch_as::broker

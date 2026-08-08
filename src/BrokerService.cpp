@@ -252,7 +252,19 @@ DWORD LaunchProfile(void* context, const launch_as::broker::BrokerRequest& reque
     {
         return logonError;
     }
-    return launch_as::broker::LaunchFixedBrokerProbe(token.get(), child);
+    const DWORD launchError = launch_as::broker::LaunchFixedBrokerProbe(token.get(), child);
+    if (launchError != ERROR_SUCCESS)
+    {
+        return launchError;
+    }
+    const DWORD validationError =
+        launch_as::broker::ValidateChildLogonSid(child.process(), caller.logonSid);
+    if (validationError != ERROR_SUCCESS)
+    {
+        child.Reset();
+        return validationError;
+    }
+    return ERROR_SUCCESS;
 }
 
 void WINAPI ServiceMain(DWORD, wchar_t**)

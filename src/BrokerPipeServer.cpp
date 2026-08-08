@@ -139,6 +139,10 @@ void BeginOverlappedOperation(OVERLAPPED& overlapped, HANDLE event)
     {
         return false;
     }
+    if (GetTokenLogonSid(token.get(), identity.logonSid) != ERROR_SUCCESS)
+    {
+        return false;
+    }
     DWORD returnedBytes = 0;
     if (!GetTokenInformation(token.get(),
             TokenSessionId,
@@ -279,7 +283,11 @@ void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
     {
         response = BuildErrorResponse(request.requestId, "invalid_request", ERROR_INVALID_DATA);
     }
-    static_cast<void>(WriteResponse(pipe, stopEvent, response));
+    if (WriteResponse(pipe, stopEvent, response) && child)
+    {
+        std::string ignored;
+        static_cast<void>(ReadRequest(pipe, stopEvent, ignored));
+    }
 }
 
 } // namespace launch_as::broker

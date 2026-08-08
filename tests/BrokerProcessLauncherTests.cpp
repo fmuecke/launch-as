@@ -6,6 +6,7 @@
 
 #include <Windows.h>
 #include <iostream>
+#include <vector>
 
 namespace
 {
@@ -37,9 +38,27 @@ int wmain()
     {
         return 1;
     }
-    return Expect(
-               (limits.BasicLimitInformation.LimitFlags & JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE) != 0,
-               L"The broker job does not kill children when it closes.")
+    if (!Expect((limits.BasicLimitInformation.LimitFlags & JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE) != 0,
+            L"The broker job does not kill children when it closes."))
+    {
+        return 1;
+    }
+    HANDLE token = nullptr;
+    if (!Expect(OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token),
+            L"Could not open the current process token."))
+    {
+        return 1;
+    }
+    std::vector<BYTE> currentLogonSid;
+    const DWORD logonSidError = launch_as::broker::GetTokenLogonSid(token, currentLogonSid);
+    CloseHandle(token);
+    if (!Expect(logonSidError == ERROR_SUCCESS, L"Could not read the current logon SID."))
+    {
+        return 1;
+    }
+    return Expect(launch_as::broker::ValidateChildLogonSid(GetCurrentProcess(), currentLogonSid) ==
+                      ERROR_ACCESS_DENIED,
+               L"The broker accepted a child sharing the caller logon SID.")
                ? 0
                : 1;
 }

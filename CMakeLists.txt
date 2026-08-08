@@ -331,6 +331,11 @@ if(BUILD_TESTING)
         LABELS "broker;integration"
     )
 
+    add_executable(LauncherBrokerProcessAccessProbe
+        tests/BrokerProcessAccessProbe.cpp
+    )
+    configure_launch_as_target(LauncherBrokerProcessAccessProbe)
+
     add_executable(LauncherBrokerAccountProvisioningTests
         tests/BrokerAccountProvisioningTests.cpp
         src/BrokerAccountProvisioner.cpp

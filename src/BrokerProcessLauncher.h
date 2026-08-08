@@ -5,6 +5,7 @@
 #pragma once
 
 #include <Windows.h>
+#include <vector>
 
 namespace launch_as::broker
 {
@@ -37,5 +38,7 @@ class BrokerChildProcess final
 
 [[nodiscard]] DWORD CreateBrokerJob(BrokerChildProcess& child);
 [[nodiscard]] DWORD LaunchFixedBrokerProbe(HANDLE token, BrokerChildProcess& child);
+[[nodiscard]] DWORD GetTokenLogonSid(HANDLE token, std::vector<BYTE>& logonSid);
+[[nodiscard]] DWORD ValidateChildLogonSid(HANDLE process, const std::vector<BYTE>& callerLogonSid);
 
 } // namespace launch_as::broker

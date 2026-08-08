@@ -17,6 +17,7 @@ using RegisterRequestHandler = DWORD (*)(void* context);
 struct BrokerCallerIdentity
 {
     std::vector<BYTE> userSid;
+    std::vector<BYTE> logonSid;
     DWORD sessionId = 0;
     DWORD integrityLevel = 0;
 };

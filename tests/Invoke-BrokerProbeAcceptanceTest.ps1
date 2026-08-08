@@ -7,6 +7,12 @@ param(
     [string]$PipeName = 'launch-as-broker.v1'
 )
 
+$caller = [System.Security.Principal.WindowsPrincipal]::new(
+    [System.Security.Principal.WindowsIdentity]::GetCurrent())
+if ($caller.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    throw 'Run this acceptance probe from the authorised non-elevated user session. Administrators are outside the broker threat boundary.'
+}
+
 $requestId = [guid]::NewGuid().ToString()
 $dataPipePrefix = "\\.\pipe\launch-as-probe-$requestId"
 $request = [ordered]@{
@@ -44,7 +50,12 @@ try {
         $response.reasonCode -ne 'launched' -or $response.processId -le 0) {
         throw "Broker probe failed: $responseText"
     }
-    Write-Output "Broker probe succeeded; launched PID $($response.processId)."
+    $accessProbe = Resolve-Path (Join-Path $PSScriptRoot '..\out\build\Release\LauncherBrokerProcessAccessProbe.exe')
+    & $accessProbe.Path $response.processId
+    if ($LASTEXITCODE -ne 0) {
+        throw "The broker child exposed caller process access; probe exit code: $LASTEXITCODE"
+    }
+    Write-Output "Broker probe succeeded; PID $($response.processId) denied VM_READ and TERMINATE."
 }
 finally {
     $pipe.Dispose()

@@ -111,6 +111,28 @@ set_target_properties(launch_as PROPERTIES
     OUTPUT_NAME "launch-as"
 )
 
+add_executable(launch_as_conhost
+    src/launch_as_conhost.cpp
+    src/LauncherOptions.h
+    src/PseudoConsoleHost.cpp
+    src/PseudoConsoleHost.h
+    src/PseudoConsoleSession.cpp
+    src/PseudoConsoleSession.h
+    src/TerminalIO.cpp
+    src/TerminalIO.h
+    src/Win32Support.cpp
+    src/Win32Support.h
+    src/WindowsCommandLine.cpp
+    src/WindowsCommandLine.h
+)
+target_link_libraries(launch_as_conhost PRIVATE
+    Ole32
+)
+configure_launch_as_target(launch_as_conhost)
+set_target_properties(launch_as_conhost PROPERTIES
+    OUTPUT_NAME "launch-as-conhost"
+)
+
 add_executable(launch_as_broker
     src/BrokerAccountProvisioner.cpp
     src/BrokerAccountProvisioner.h
@@ -444,7 +466,7 @@ if(BUILD_TESTING)
         NAME launcher.pseudoconsole
         COMMAND
             "$<TARGET_FILE:LauncherPseudoConsoleTests>"
-            "$<TARGET_FILE:launch_as>"
+            "$<TARGET_FILE:launch_as_conhost>"
             "$<TARGET_FILE:LauncherTerminalSizeProbe>"
     )
     set_tests_properties(launcher.pseudoconsole PROPERTIES

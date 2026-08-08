@@ -4,7 +4,6 @@
 
 #include "PseudoConsoleHost.h"
 
-#include "LaunchProcess.h"
 #include "PseudoConsoleSession.h"
 #include "Win32Support.h"
 #include "WindowsCommandLine.h"
@@ -153,11 +152,11 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
         return ExitUsage;
     }
 
-    Options options {
-        .command = Command::Run, .executablePath = executable, .processArguments = processArguments
-    };
-    if (!ValidateRunPaths(options))
+    std::error_code pathError;
+    if (!executable.is_absolute() || !std::filesystem::is_regular_file(executable, pathError))
     {
+        std::wcerr << L"Pseudoconsole target is not an existing absolute file: "
+                   << executable.c_str() << L"\n";
         return ExitFailure;
     }
 
@@ -174,13 +173,12 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
         return ExitFailure;
     }
 
-    std::wstring commandLine =
-        BuildWindowsCommandLine(options.executablePath.native(), options.processArguments);
+    std::wstring commandLine = BuildWindowsCommandLine(executable.native(), processArguments);
     std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
     mutableCommandLine.push_back(L'\0');
 
     PROCESS_INFORMATION processInformation {};
-    if (!CreateProcessW(options.executablePath.c_str(),
+    if (!CreateProcessW(executable.c_str(),
             mutableCommandLine.data(),
             nullptr,
             nullptr,

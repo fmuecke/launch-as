@@ -4,7 +4,9 @@
 
 #include "BrokerCredentialStore.h"
 
+#include <Lmcons.h>
 #include <Wincrypt.h>
+#include <algorithm>
 #include <limits>
 #include <new>
 #include <utility>
@@ -15,7 +17,6 @@ namespace launch_as::broker
 namespace
 {
 
-constexpr std::wstring_view AgentSandboxProfile = L"agent-sandbox";
 constexpr DWORD MaximumCredentialBytes = 64 * 1024;
 
 class LocalData final
@@ -99,7 +100,7 @@ CredentialStore::CredentialStore(std::wstring_view directory) : directory_(direc
 
 DWORD CredentialStore::Store(std::wstring_view profileId, std::span<const wchar_t> password) const
 {
-    if (!IsSupportedProfile(profileId) || password.empty() ||
+    if (!IsValidProfileId(profileId) || password.empty() ||
         password.size_bytes() > std::numeric_limits<DWORD>::max())
     {
         return ERROR_INVALID_PARAMETER;
@@ -184,7 +185,7 @@ DWORD CredentialStore::Store(std::wstring_view profileId, std::span<const wchar_
 DWORD CredentialStore::Load(std::wstring_view profileId, SecurePassword& password) const
 {
     password.Clear();
-    if (!IsSupportedProfile(profileId))
+    if (!IsValidProfileId(profileId))
     {
         return ERROR_INVALID_PARAMETER;
     }
@@ -251,9 +252,72 @@ DWORD CredentialStore::Load(std::wstring_view profileId, SecurePassword& passwor
     }
 }
 
-bool CredentialStore::IsSupportedProfile(std::wstring_view profileId) const noexcept
+DWORD CredentialStore::Remove(std::wstring_view profileId) const
 {
-    return profileId == AgentSandboxProfile;
+    if (!IsValidProfileId(profileId))
+    {
+        return ERROR_INVALID_PARAMETER;
+    }
+    const std::wstring blobPath = BlobPath(profileId);
+    if (DeleteFileW(blobPath.c_str()))
+    {
+        return ERROR_SUCCESS;
+    }
+    const DWORD deleteError = GetLastError();
+    return deleteError == ERROR_FILE_NOT_FOUND ? ERROR_SUCCESS : deleteError;
+}
+
+bool CredentialStore::Exists(std::wstring_view profileId) const
+{
+    if (!IsValidProfileId(profileId))
+    {
+        return false;
+    }
+    const DWORD attributes = GetFileAttributesW(BlobPath(profileId).c_str());
+    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
+}
+
+DWORD CredentialStore::List(std::vector<std::wstring>& profileIds) const
+{
+    profileIds.clear();
+    WIN32_FIND_DATAW entry {};
+    const std::wstring pattern = directory_ + L"\\*.blob";
+    HANDLE rawFind = FindFirstFileW(pattern.c_str(), &entry);
+    if (rawFind == INVALID_HANDLE_VALUE)
+    {
+        const DWORD findError = GetLastError();
+        return findError == ERROR_FILE_NOT_FOUND ? ERROR_SUCCESS : findError;
+    }
+    do
+    {
+        const std::wstring_view name(entry.cFileName);
+        constexpr std::wstring_view extension = L".blob";
+        if ((entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 &&
+            name.size() > extension.size() && name.ends_with(extension))
+        {
+            const std::wstring_view profileId = name.substr(0, name.size() - extension.size());
+            if (IsValidProfileId(profileId))
+            {
+                profileIds.emplace_back(profileId);
+            }
+        }
+    } while (FindNextFileW(rawFind, &entry));
+    const DWORD findError = GetLastError();
+    FindClose(rawFind);
+    if (findError != ERROR_NO_MORE_FILES)
+    {
+        profileIds.clear();
+        return findError;
+    }
+    std::ranges::sort(profileIds);
+    return ERROR_SUCCESS;
+}
+
+bool CredentialStore::IsValidProfileId(std::wstring_view profileId) const noexcept
+{
+    constexpr std::wstring_view invalidCharacters = L"\\/[]:;|=,+*?<>\"";
+    return !profileId.empty() && profileId.size() <= UNLEN &&
+           profileId.find_first_of(invalidCharacters) == std::wstring_view::npos;
 }
 
 std::wstring CredentialStore::BlobPath(std::wstring_view profileId) const

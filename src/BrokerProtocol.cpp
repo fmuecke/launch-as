@@ -4,6 +4,7 @@
 
 #include "BrokerProtocol.h"
 
+#include <Lmcons.h>
 #include <Windows.h>
 #include <algorithm>
 #include <charconv>
@@ -128,6 +129,24 @@ class JsonReader final
         }
         output = static_cast<DWORD>(value);
         return true;
+    }
+
+    [[nodiscard]] bool Boolean(bool& output)
+    {
+        SkipWhitespace();
+        if (input_.substr(position_).starts_with("true"))
+        {
+            position_ += 4;
+            output = true;
+            return true;
+        }
+        if (input_.substr(position_).starts_with("false"))
+        {
+            position_ += 5;
+            output = false;
+            return true;
+        }
+        return false;
     }
 
   private:
@@ -282,6 +301,13 @@ class JsonReader final
     return true;
 }
 
+[[nodiscard]] bool IsProfileId(const std::wstring& value)
+{
+    constexpr std::wstring_view invalidCharacters = L"\\/[]:;|=,+*?<>\"";
+    return !value.empty() && value.size() <= UNLEN &&
+           value.find_first_of(invalidCharacters) == std::wstring::npos;
+}
+
 [[nodiscard]] bool IsConsolePipeName(const std::wstring& value)
 {
     constexpr std::wstring_view prefix = L"\\\\.\\pipe\\launch-as-";
@@ -308,6 +334,35 @@ class JsonReader final
             return false;
         }
         arguments.push_back(std::move(argument));
+        if (reader.Consume(']'))
+        {
+            return true;
+        }
+        if (!reader.Consume(','))
+        {
+            return false;
+        }
+    }
+}
+
+[[nodiscard]] bool ReadAccounts(JsonReader& reader, std::vector<std::wstring>& accounts)
+{
+    if (!reader.Consume('['))
+    {
+        return false;
+    }
+    if (reader.Consume(']'))
+    {
+        return true;
+    }
+    for (;;)
+    {
+        std::wstring account;
+        if (!reader.String(account) || !IsProfileId(account) || accounts.size() == MaximumArguments)
+        {
+            return false;
+        }
+        accounts.push_back(std::move(account));
         if (reader.Consume(']'))
         {
             return true;
@@ -445,6 +500,8 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
     bool workingDirectorySeen = false;
     bool console = false;
     bool consoleSeen = false;
+    bool confirmed = false;
+    bool confirmedSeen = false;
     for (;;)
     {
         std::wstring name;
@@ -471,8 +528,7 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
         else if (name == L"profileId" && !profileSeen)
         {
             profileSeen = true;
-            std::wstring value;
-            profile = reader.String(value) && value == L"agent-sandbox";
+            profile = reader.String(request.profileId) && IsProfileId(request.profileId);
         }
         else if (name == L"mode" && !modeSeen)
         {
@@ -497,6 +553,11 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
             consoleSeen = true;
             console = ReadConsole(reader, request.console);
         }
+        else if (name == L"confirmed" && !confirmedSeen)
+        {
+            confirmedSeen = true;
+            confirmed = reader.Boolean(request.confirmed);
+        }
         else
         {
             return ParseResult::InvalidRequest;
@@ -514,17 +575,44 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
     {
         return ParseResult::InvalidJson;
     }
-    if (!version || !requestId || !operation || !profile || !IsRequestId(request.requestId))
+    if (!version || !requestId || !operation || !IsRequestId(request.requestId))
     {
         return ParseResult::InvalidRequest;
     }
-    if (operationName == L"register")
+    if (operationName == L"list" || operationName == L"unenroll-all")
     {
-        if (modeSeen || argumentsSeen || workingDirectorySeen || consoleSeen)
+        if (profileSeen || modeSeen || argumentsSeen || workingDirectorySeen || consoleSeen ||
+            (operationName == L"list" && confirmedSeen) ||
+            (operationName == L"unenroll-all" && (!confirmedSeen || !confirmed)))
         {
             return ParseResult::InvalidRequest;
         }
-        request.operation = RequestOperation::Register;
+        request.operation =
+            operationName == L"list" ? RequestOperation::List : RequestOperation::UnenrollAll;
+        return ParseResult::Success;
+    }
+    if (!profile)
+    {
+        return ParseResult::InvalidRequest;
+    }
+    if (operationName == L"enroll")
+    {
+        if (modeSeen || argumentsSeen || workingDirectorySeen || consoleSeen || !confirmedSeen ||
+            !confirmed)
+        {
+            return ParseResult::InvalidRequest;
+        }
+        request.operation = RequestOperation::Enroll;
+        return ParseResult::Success;
+    }
+    if (operationName == L"unenroll")
+    {
+        if (modeSeen || argumentsSeen || workingDirectorySeen || consoleSeen || !confirmedSeen ||
+            !confirmed)
+        {
+            return ParseResult::InvalidRequest;
+        }
+        request.operation = RequestOperation::Unenroll;
         return ParseResult::Success;
     }
     if (operationName != L"launch" || !mode || !arguments || !workingDirectory || !console ||
@@ -556,6 +644,160 @@ std::string BuildSuccessResponse(std::wstring_view requestId, std::string_view r
     response.append(reasonCode);
     response += "\",\"win32Error\":0}";
     return response;
+}
+
+std::string BuildListResponse(std::wstring_view requestId, std::span<const std::wstring> accounts)
+{
+    std::string response = "{\"version\":1,\"requestId\":";
+    AppendJsonString(response, requestId);
+    response += ",\"status\":\"ok\",\"accounts\":[";
+    for (std::size_t index = 0; index < accounts.size(); ++index)
+    {
+        if (index != 0)
+        {
+            response += ',';
+        }
+        AppendJsonString(response, accounts[index]);
+    }
+    response += "],\"reasonCode\":\"listed\",\"win32Error\":0}";
+    return response;
+}
+
+bool ParseListResponse(
+    std::string_view response, std::wstring_view requestId, std::vector<std::wstring>& accounts)
+{
+    accounts.clear();
+    JsonReader reader(response);
+    if (!reader.Consume('{'))
+    {
+        return false;
+    }
+    bool version = false;
+    bool responseId = false;
+    bool status = false;
+    bool listedAccounts = false;
+    bool reason = false;
+    bool error = false;
+    for (;;)
+    {
+        std::wstring name;
+        if (!reader.String(name) || !reader.Consume(':'))
+        {
+            return false;
+        }
+        if (name == L"version" && !version)
+        {
+            DWORD value = 0;
+            version = reader.Unsigned(value) && value == 1;
+        }
+        else if (name == L"requestId" && !responseId)
+        {
+            std::wstring value;
+            responseId = reader.String(value) && value == requestId;
+        }
+        else if (name == L"status" && !status)
+        {
+            std::wstring value;
+            status = reader.String(value) && value == L"ok";
+        }
+        else if (name == L"accounts" && !listedAccounts)
+        {
+            listedAccounts = ReadAccounts(reader, accounts);
+        }
+        else if (name == L"reasonCode" && !reason)
+        {
+            std::wstring value;
+            reason = reader.String(value) && value == L"listed";
+        }
+        else if (name == L"win32Error" && !error)
+        {
+            DWORD value = 0;
+            error = reader.Unsigned(value) && value == ERROR_SUCCESS;
+        }
+        else
+        {
+            return false;
+        }
+        if (reader.Consume('}'))
+        {
+            break;
+        }
+        if (!reader.Consume(','))
+        {
+            return false;
+        }
+    }
+    if (!reader.End() || !(version && responseId && status && listedAccounts && reason && error))
+    {
+        accounts.clear();
+        return false;
+    }
+    return true;
+}
+
+bool ParseErrorResponse(std::string_view response, std::wstring_view requestId, DWORD& win32Error)
+{
+    win32Error = ERROR_INVALID_DATA;
+    JsonReader reader(response);
+    if (!reader.Consume('{'))
+    {
+        return false;
+    }
+    bool version = false;
+    bool responseId = false;
+    bool status = false;
+    bool reason = false;
+    bool error = false;
+    for (;;)
+    {
+        std::wstring name;
+        if (!reader.String(name) || !reader.Consume(':'))
+        {
+            return false;
+        }
+        if (name == L"version" && !version)
+        {
+            DWORD value = 0;
+            version = reader.Unsigned(value) && value == 1;
+        }
+        else if (name == L"requestId" && !responseId)
+        {
+            std::wstring value;
+            responseId = reader.String(value) && value == requestId;
+        }
+        else if (name == L"status" && !status)
+        {
+            std::wstring value;
+            status = reader.String(value) && value == L"error";
+        }
+        else if (name == L"reasonCode" && !reason)
+        {
+            std::wstring ignored;
+            reason = reader.String(ignored) && !ignored.empty();
+        }
+        else if (name == L"win32Error" && !error)
+        {
+            error = reader.Unsigned(win32Error);
+        }
+        else
+        {
+            return false;
+        }
+        if (reader.Consume('}'))
+        {
+            break;
+        }
+        if (!reader.Consume(','))
+        {
+            return false;
+        }
+    }
+    if (!(reader.End() && version && responseId && status && reason && error))
+    {
+        win32Error = ERROR_INVALID_DATA;
+        return false;
+    }
+    return true;
 }
 
 std::string BuildLaunchSuccessResponse(std::wstring_view requestId, DWORD processId)

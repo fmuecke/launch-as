@@ -21,7 +21,9 @@ namespace
 
 constexpr wchar_t BrokerInstallDirectoryName[] = L"launch-as";
 constexpr wchar_t BrokerExecutableName[] = L"launch-as-broker.exe";
+constexpr wchar_t BrokerConhostExecutableName[] = L"launch-as-conhost.exe";
 constexpr wchar_t BrokerInstallDacl[] = L"D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200A9;;;BU)";
+constexpr DWORD ServiceStopTimeoutMilliseconds = 10'000;
 
 class ServiceHandle final
 {
@@ -176,6 +178,48 @@ class LocalSecurityDescriptor final
     }
 }
 
+[[nodiscard]] DWORD GetSiblingExecutablePath(
+    std::wstring_view executablePath, std::wstring_view siblingName, std::wstring& siblingPath)
+{
+    siblingPath.clear();
+    const std::size_t separator = executablePath.find_last_of(L"\\/");
+    if (separator == std::wstring_view::npos || siblingName.empty())
+    {
+        return ERROR_BAD_PATHNAME;
+    }
+    siblingPath = std::wstring(executablePath.substr(0, separator + 1));
+    siblingPath += siblingName;
+    const DWORD attributes = GetFileAttributesW(siblingPath.c_str());
+    const DWORD attributeError =
+        attributes == INVALID_FILE_ATTRIBUTES ? GetLastError() : ERROR_SUCCESS;
+    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+    {
+        siblingPath.clear();
+        return attributes == INVALID_FILE_ATTRIBUTES ? attributeError : ERROR_FILE_NOT_FOUND;
+    }
+    return ERROR_SUCCESS;
+}
+
+[[nodiscard]] DWORD CopyAndSecureInstallFile(
+    std::wstring_view sourcePath, std::wstring_view installedPath)
+{
+    const std::wstring source(sourcePath);
+    const std::wstring installed(installedPath);
+    if (CompareStringOrdinal(sourcePath.data(),
+            static_cast<int>(sourcePath.size()),
+            installedPath.data(),
+            static_cast<int>(installedPath.size()),
+            TRUE) != CSTR_EQUAL)
+    {
+        if (!CopyFileW(source.c_str(), installed.c_str(), FALSE))
+        {
+            const DWORD copyError = GetLastError();
+            return copyError;
+        }
+    }
+    return SetBrokerInstallSecurity(installed);
+}
+
 [[nodiscard]] DWORD GetBrokerInstallDirectory(std::wstring& directory)
 {
     PWSTR programFiles = nullptr;
@@ -248,6 +292,13 @@ DWORD InstallBrokerService()
     {
         return sourceError;
     }
+    std::wstring sourceConhostPath;
+    const DWORD sourceConhostError =
+        GetSiblingExecutablePath(sourcePath, BrokerConhostExecutableName, sourceConhostPath);
+    if (sourceConhostError != ERROR_SUCCESS)
+    {
+        return sourceConhostError;
+    }
     std::wstring installDirectory;
     const DWORD directoryPathError = GetBrokerInstallDirectory(installDirectory);
     if (directoryPathError != ERROR_SUCCESS)
@@ -260,22 +311,18 @@ DWORD InstallBrokerService()
         return directoryError;
     }
     const std::wstring installedPath = installDirectory + L"\\" + BrokerExecutableName;
-    if (CompareStringOrdinal(sourcePath.c_str(),
-            static_cast<int>(sourcePath.size()),
-            installedPath.c_str(),
-            static_cast<int>(installedPath.size()),
-            TRUE) != CSTR_EQUAL)
+    const DWORD brokerCopyError = CopyAndSecureInstallFile(sourcePath, installedPath);
+    if (brokerCopyError != ERROR_SUCCESS)
     {
-        if (!CopyFileW(sourcePath.c_str(), installedPath.c_str(), FALSE))
-        {
-            const DWORD copyError = GetLastError();
-            return copyError;
-        }
+        return brokerCopyError;
     }
-    const DWORD securityError = SetBrokerInstallSecurity(installedPath);
-    if (securityError != ERROR_SUCCESS)
+    const std::wstring installedConhostPath =
+        installDirectory + L"\\" + BrokerConhostExecutableName;
+    const DWORD conhostCopyError =
+        CopyAndSecureInstallFile(sourceConhostPath, installedConhostPath);
+    if (conhostCopyError != ERROR_SUCCESS)
     {
-        return securityError;
+        return conhostCopyError;
     }
     const DWORD serviceError = InstallDemandStartBrokerService(L"launch-as-broker", installedPath);
     if (serviceError != ERROR_SUCCESS)
@@ -419,6 +466,72 @@ DWORD InstallDemandStartBrokerService(
             DeleteService(service.get());
         }
         return securityError;
+    }
+    return ERROR_SUCCESS;
+}
+
+DWORD UninstallBrokerService() { return UninstallDemandStartBrokerService(L"launch-as-broker"); }
+
+DWORD UninstallDemandStartBrokerService(std::wstring_view serviceName)
+{
+    if (serviceName.empty())
+    {
+        return ERROR_INVALID_PARAMETER;
+    }
+    const std::wstring name(serviceName);
+    ServiceHandle manager(OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT));
+    if (!manager)
+    {
+        const DWORD managerError = GetLastError();
+        return managerError;
+    }
+    ServiceHandle service(
+        OpenServiceW(manager.get(), name.c_str(), SERVICE_STOP | SERVICE_QUERY_STATUS | DELETE));
+    if (!service)
+    {
+        const DWORD serviceError = GetLastError();
+        return serviceError == ERROR_SERVICE_DOES_NOT_EXIST ? ERROR_SUCCESS : serviceError;
+    }
+    SERVICE_STATUS status {};
+    if (!ControlService(service.get(), SERVICE_CONTROL_STOP, &status))
+    {
+        const DWORD stopError = GetLastError();
+        if (stopError != ERROR_SERVICE_NOT_ACTIVE)
+        {
+            return stopError;
+        }
+    }
+    else
+    {
+        const ULONGLONG deadline = GetTickCount64() + ServiceStopTimeoutMilliseconds;
+        for (;;)
+        {
+            SERVICE_STATUS_PROCESS processStatus {};
+            DWORD returnedBytes = 0;
+            if (!QueryServiceStatusEx(service.get(),
+                    SC_STATUS_PROCESS_INFO,
+                    reinterpret_cast<BYTE*>(&processStatus),
+                    sizeof(processStatus),
+                    &returnedBytes))
+            {
+                const DWORD statusError = GetLastError();
+                return statusError;
+            }
+            if (processStatus.dwCurrentState == SERVICE_STOPPED)
+            {
+                break;
+            }
+            if (GetTickCount64() >= deadline)
+            {
+                return ERROR_TIMEOUT;
+            }
+            Sleep(100);
+        }
+    }
+    if (!DeleteService(service.get()))
+    {
+        const DWORD deleteError = GetLastError();
+        return deleteError == ERROR_SERVICE_MARKED_FOR_DELETE ? ERROR_SUCCESS : deleteError;
     }
     return ERROR_SUCCESS;
 }

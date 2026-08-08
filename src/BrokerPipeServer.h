@@ -13,19 +13,22 @@
 namespace launch_as::broker
 {
 
-using RegisterRequestHandler = DWORD (*)(void* context);
 struct BrokerCallerIdentity
 {
     std::vector<BYTE> userSid;
     std::vector<BYTE> logonSid;
     DWORD sessionId = 0;
     DWORD integrityLevel = 0;
+    bool isElevated = false;
 };
+using ConfigurationRequestHandler = DWORD (*)(void* context, const BrokerRequest& request,
+    const BrokerCallerIdentity& caller, std::vector<std::wstring>& accounts);
 using LaunchRequestHandler = DWORD (*)(void* context, const BrokerRequest& request,
     const BrokerCallerIdentity& caller, BrokerChildProcess& child);
 
 void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
-    RegisterRequestHandler registerRequestHandler = nullptr, void* registrationContext = nullptr,
-    LaunchRequestHandler launchRequestHandler = nullptr, void* launchContext = nullptr);
+    ConfigurationRequestHandler configurationRequestHandler = nullptr,
+    void* configurationContext = nullptr, LaunchRequestHandler launchRequestHandler = nullptr,
+    void* launchContext = nullptr);
 
 } // namespace launch_as::broker

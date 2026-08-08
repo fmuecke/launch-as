@@ -9,6 +9,7 @@
 #include <Windows.h>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace launch_as::broker
 {
@@ -16,12 +17,14 @@ namespace launch_as::broker
 class RegistrationService final
 {
   public:
-    RegistrationService(std::wstring_view accountName, std::wstring_view credentialDirectory);
+    explicit RegistrationService(std::wstring_view credentialDirectory);
 
-    [[nodiscard]] DWORD Register();
+    [[nodiscard]] DWORD Register(std::wstring_view accountName);
+    [[nodiscard]] DWORD Drop(std::wstring_view accountName);
+    [[nodiscard]] DWORD DropAll();
+    [[nodiscard]] DWORD List(std::vector<std::wstring>& accountNames) const;
 
   private:
-    std::wstring accountName_;
     CredentialStore store_;
 };
 

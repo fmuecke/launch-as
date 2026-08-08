@@ -29,7 +29,7 @@ class BrokerLogonToken final
     HANDLE token_ = nullptr;
 };
 
-[[nodiscard]] DWORD LogOnBrokerProfile(
-    std::wstring_view accountName, const CredentialStore& store, BrokerLogonToken& token);
+[[nodiscard]] DWORD LogOnBrokerProfile(std::wstring_view accountName, std::wstring_view profileId,
+    const CredentialStore& store, BrokerLogonToken& token);
 
 } // namespace launch_as::broker

@@ -183,6 +183,14 @@ void BeginOverlappedOperation(OVERLAPPED& overlapped, HANDLE event)
         return false;
     }
     identity.integrityLevel = *integritySubAuthority;
+    TOKEN_ELEVATION elevation {};
+    if (!GetTokenInformation(
+            token.get(), TokenElevation, &elevation, sizeof(elevation), &returnedBytes) ||
+        returnedBytes != sizeof(elevation))
+    {
+        return false;
+    }
+    identity.isElevated = elevation.TokenIsElevated != 0;
 
     ULONG clientProcessId = 0;
     if (!GetNamedPipeClientProcessId(pipe, &clientProcessId) || clientProcessId == 0)
@@ -227,7 +235,7 @@ void BeginOverlappedOperation(OVERLAPPED& overlapped, HANDLE event)
 } // namespace
 
 void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
-    RegisterRequestHandler registerRequestHandler, void* registrationContext,
+    ConfigurationRequestHandler configurationRequestHandler, void* configurationContext,
     LaunchRequestHandler launchRequestHandler, void* launchContext)
 {
     std::string message;
@@ -243,19 +251,36 @@ void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
     {
         response = BuildErrorResponse(L"", "invalid_request", ERROR_INVALID_DATA);
     }
-    else if (request.operation == RequestOperation::Register)
+    else if (request.operation == RequestOperation::Enroll ||
+             request.operation == RequestOperation::List ||
+             request.operation == RequestOperation::Unenroll ||
+             request.operation == RequestOperation::UnenrollAll)
     {
-        if (registerRequestHandler == nullptr)
+        if (configurationRequestHandler == nullptr)
         {
             response = BuildErrorResponse(request.requestId, "not_configured", ERROR_NOT_READY);
         }
         else
         {
-            const DWORD registrationError = registerRequestHandler(registrationContext);
-            response = registrationError == ERROR_SUCCESS
-                           ? BuildSuccessResponse(request.requestId, "registered")
-                           : BuildErrorResponse(
-                                 request.requestId, "registration_failed", registrationError);
+            std::vector<std::wstring> accounts;
+            const DWORD configurationError =
+                configurationRequestHandler(configurationContext, request, caller, accounts);
+            if (configurationError != ERROR_SUCCESS)
+            {
+                const char* reasonCode = request.operation == RequestOperation::Enroll
+                                             ? "enrollment_failed"
+                                             : "unenrollment_failed";
+                response = BuildErrorResponse(request.requestId, reasonCode, configurationError);
+            }
+            else if (request.operation == RequestOperation::List)
+            {
+                response = BuildListResponse(request.requestId, accounts);
+            }
+            else
+            {
+                response = BuildSuccessResponse(request.requestId,
+                    request.operation == RequestOperation::Enroll ? "enrolled" : "unenrolled");
+            }
         }
     }
     else if (request.operation == RequestOperation::ConsoleLaunch)

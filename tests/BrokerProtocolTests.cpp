@@ -4,6 +4,7 @@
 
 #include "BrokerProtocol.h"
 
+#include <array>
 #include <iostream>
 #include <string>
 #include <utility>
@@ -30,6 +31,34 @@ constexpr char ValidRequest[] = R"json({
   }
 })json";
 
+constexpr char ListRequest[] = R"json({
+  "version": 1,
+  "requestId": "123e4567-e89b-12d3-a456-426614174000",
+  "operation": "list"
+})json";
+
+constexpr char UnenrollRequest[] = R"json({
+  "version": 1,
+  "requestId": "123e4567-e89b-12d3-a456-426614174000",
+  "operation": "unenroll",
+  "profileId": "agent-sandbox",
+  "confirmed": true
+})json";
+
+constexpr char UnenrollAllRequest[] = R"json({
+  "version": 1,
+  "requestId": "123e4567-e89b-12d3-a456-426614174000",
+  "operation": "unenroll-all",
+  "confirmed": true
+})json";
+
+constexpr char UnconfirmedEnrollRequest[] = R"json({
+  "version": 1,
+  "requestId": "123e4567-e89b-12d3-a456-426614174000",
+  "operation": "enroll",
+  "profileId": "sandbox"
+})json";
+
 [[nodiscard]] bool Expect(bool condition, const wchar_t* message)
 {
     if (!condition)
@@ -51,7 +80,33 @@ int wmain()
                     request.arguments[2] == L"emoji \U0001F680",
             L"Unicode argument was not decoded.") ||
         !Expect(request.console.columns == 120 && request.console.rows == 30,
-            L"Console size was not decoded."))
+            L"Console size was not decoded.") ||
+        !Expect(request.profileId == L"agent-sandbox", L"Profile id was not decoded."))
+    {
+        return 1;
+    }
+
+    if (!Expect(launch_as::broker::ParseBrokerRequest(ListRequest, request) ==
+                        launch_as::broker::ParseResult::Success &&
+                    request.operation == launch_as::broker::RequestOperation::List,
+            L"List request was rejected.") ||
+        !Expect(launch_as::broker::ParseBrokerRequest(UnenrollRequest, request) ==
+                        launch_as::broker::ParseResult::Success &&
+                    request.operation == launch_as::broker::RequestOperation::Unenroll,
+            L"Unenroll request was rejected."))
+    {
+        return 1;
+    }
+    if (!Expect(launch_as::broker::ParseBrokerRequest(UnenrollAllRequest, request) ==
+                        launch_as::broker::ParseResult::Success &&
+                    request.operation == launch_as::broker::RequestOperation::UnenrollAll,
+            L"Unenroll-all request was rejected."))
+    {
+        return 1;
+    }
+    if (!Expect(launch_as::broker::ParseBrokerRequest(UnconfirmedEnrollRequest, request) ==
+                    launch_as::broker::ParseResult::InvalidRequest,
+            L"Unconfirmed registration request was accepted."))
     {
         return 1;
     }
@@ -94,11 +149,36 @@ int wmain()
     {
         return 1;
     }
+    DWORD parsedError = ERROR_SUCCESS;
+    if (!Expect(launch_as::broker::ParseErrorResponse(
+                    response, L"123e4567-e89b-12d3-a456-426614174000", parsedError) &&
+                    parsedError == ERROR_NOT_READY,
+            L"Error response did not preserve its Win32 error."))
+    {
+        return 1;
+    }
     if (!Expect(launch_as::broker::BuildSuccessResponse(
                     L"123e4567-e89b-12d3-a456-426614174000", "registered") ==
                     "{\"version\":1,\"requestId\":\"123e4567-e89b-12d3-a456-426614174000\","
                     "\"status\":\"ok\",\"reasonCode\":\"registered\",\"win32Error\":0}",
             L"Success response is not stable."))
+    {
+        return 1;
+    }
+    const std::array accounts {std::wstring(L"AgentSandbox"), std::wstring(L"AnotherAccount")};
+    const std::string listResponse =
+        launch_as::broker::BuildListResponse(L"123e4567-e89b-12d3-a456-426614174000", accounts);
+    std::vector<std::wstring> listedAccounts;
+    if (!Expect(listResponse ==
+                    "{\"version\":1,\"requestId\":\"123e4567-e89b-12d3-a456-426614174000\","
+                    "\"status\":\"ok\",\"accounts\":[\"AgentSandbox\",\"AnotherAccount\"],"
+                    "\"reasonCode\":\"listed\","
+                    "\"win32Error\":0}",
+            L"List response is not stable.") ||
+        !Expect(launch_as::broker::ParseListResponse(
+                    listResponse, L"123e4567-e89b-12d3-a456-426614174000", listedAccounts) &&
+                    listedAccounts == std::vector<std::wstring>(accounts.begin(), accounts.end()),
+            L"List response was not decoded."))
     {
         return 1;
     }

@@ -241,11 +241,11 @@ The stored account is configured `PasswordNeverExpires` and `UserMayChangePasswo
 
 ---
 
-## 11. Credential/account management operations (register, update, rotate, test, remove)
+## 11. Credential/account management operations (enroll, update, rotate, test, unenroll)
 
 A separate **elevated** admin path (config subcommand of the broker binary, or a co-installed `launch-as-admin.exe`). Normal `launch` requests can never reach these. Run during the setup phase and thereafter for maintenance.
 
-- **`register <profileId>`** (default: broker-generated password):
+- **`enroll <profileId>`** (default: broker-generated password):
   1. ensure the account exists (`NetUserAdd` if absent; else leave membership as-is), Standard user only, hardened (never-expires, user-cannot-change, deny network+RDP logon, hidden from welcome screen) — or delegate account creation to the existing `Setup-*` script and only manage the credential here;
   2. generate a strong random password (`BCryptGenRandom`, mapped to policy);
   3. set it on the account (`NetUserSetInfo`, `USER_INFO_1003`);
@@ -253,8 +253,8 @@ A separate **elevated** admin path (config subcommand of the broker binary, or a
   5. `SecureZeroMemory`. Operator is never shown the password.
   - Option `--supply-password`: read a password from a secure prompt instead of generating (for an externally managed account); broker stores the blob (and optionally sets it).
 - **`update`/`rotate <profileId>`**: regenerate → `NetUserSetInfo` → re-protect → verify. Rotation invalidates the previous blob.
-- **`test <profileId>`**: `LogonUser` with the decrypted blob; report success/`ERROR_LOGON_FAILURE` without echoing the secret. On stale blob at launch time, the broker fails closed with a distinct reason code telling the operator to re-register (no silent self-heal).
-- **`remove <profileId>`**: delete the blob; optionally disable the account.
+- **`test <profileId>`**: `LogonUser` with the decrypted blob; report success/`ERROR_LOGON_FAILURE` without echoing the secret. On stale blob at launch time, the broker fails closed with a distinct reason code telling the operator to re-enroll (no silent self-heal).
+- **`unenroll <profileId>`**: delete the blob; optionally disable the account.
 
 ---
 
@@ -298,7 +298,7 @@ The installer/setup runs **elevated once** and must:
 - **delegate `SERVICE_START` to the launcher's caller SID (or a dedicated group)** via `sc sdset` / `SetServiceObjectSecurity`, so day-to-day launches start the service with **no UAC prompt**;
 - create `%ProgramData%\launch-as\{,credentials}` with restrictive ACLs (§4);
 - register the Event Log source;
-- provision/har­den the `AgentSandbox` account and run `register agent-sandbox` (§11) to set + store its credential;
+- provision/har­den the `AgentSandbox` account and run `enroll agent-sandbox` (§11) to set + store its credential;
 - optionally create Firewall rules (separate, out of scope here);
 - deny ordinary users any right to replace/reconfigure the service or its files;
 - support clean uninstall with optional secure credential deletion.
@@ -362,7 +362,7 @@ Credential / authorization:
 ## 19. Implementation phases
 
 **Phase 1 — broker + boundary, `console` (ConPTY) mode only:**
-service scaffold (SCM, demand-start, `sc sdset` delegation), named-pipe IPC with impersonation-based auth, single fixed profile, broker-owned DPAPI credential + `register`/`rotate`/`test`, `LogonUser` + `CreateProcessAsUserW`, Job object, Event Log audit. Ship the **`console` (ConPTY) adapter** on the default noninteractive station, reusing the existing `TerminalBridge`/`PseudoConsoleHost` with the child-creation call moved behind the broker (client owns the terminal and the SID-DACL'd data pipes). This is the daily-driver path (Claude Code) and closes **both** surfaces, so it validates the full trust boundary end-to-end. Run the §6.1 token-graft probe. Client: remove all credential/`CreateProcessWithLogonW` logic; relocate the two token-validation checks into the broker.
+service scaffold (SCM, demand-start, `sc sdset` delegation), named-pipe IPC with impersonation-based auth, single fixed profile, broker-owned SYSTEM-scope DPAPI credential + `enroll`/`rotate`/`test`, `LogonUser` + `CreateProcessAsUserW`, Job object, Event Log audit. Ship the **`console` (ConPTY) adapter** on the default noninteractive station, reusing the existing `TerminalBridge`/`PseudoConsoleHost` with the child-creation call moved behind the broker (client owns the terminal and the SID-DACL'd data pipes). This is the daily-driver path (Claude Code) and closes **both** surfaces, so it validates the full trust boundary end-to-end. Run the §6.1 token-graft probe. Client: remove all credential/`CreateProcessWithLogonW` logic; relocate the two token-validation checks into the broker.
 
 **Phase 2 — `interactive` (GUI) adapter + hardened policy:** the GUI adapter (§7.2) — session resolution, `SetTokenInformation(TokenSessionId)`, child-logon-SID `WinSta0`/`Default` ACEs with teardown, `LoadUserProfile`/`CreateEnvironmentBlock`, `detached` Job lifetime — launching e.g. VS Code into the caller's session (Surface 2 closed, Surface 1 accepted). Plus: multi-profile config + admin tool, executable allow-listing, canonical-path/ACL checks, working-dir + environment policy, credential rotation schedule, config integrity protection, concurrency/rate limits, optional `LocalService` downgrade if §6.1 passes.
 
@@ -375,10 +375,39 @@ service scaffold (SCM, demand-start, `sc sdset` delegation), named-pipe IPC with
 - C++ Windows service, `LocalSystem`, demand-start, `SERVICE_START` delegated to the caller SID;
 - named pipe `\\.\pipe\launch-as-broker.v1`, message mode, SID-DACL, `ImpersonateNamedPipeClient` auth;
 - single fixed profile `agent-sandbox` → `.\AgentSandbox`;
-- broker-owned SYSTEM-scope DPAPI credential; `register` generates + sets the account password;
+- broker-owned SYSTEM-scope DPAPI credential; `enroll` generates + sets the account password;
 - `LogonUserW(INTERACTIVE)` + `CreateProcessAsUserW`;
 - **`console` (ConPTY) adapter** as the Phase-1 slice; **`interactive` (GUI) adapter** in Phase 2;
 - Job object (kill-on-close for console, detached for GUI);
 - Event Log audit; no Windows Hello/master password in v1.
 
 The essential improvement over the current client: the agent runs under an **independent logon session** (Surface 2 closed) and the interactive user and agent can request a launch but can never retrieve the account password.
+
+---
+
+## 21. Open account-lifecycle decisions
+
+The current broker implementation is not the decision record for these points. Resolve them before treating multi-account registration as a stable interface.
+
+### Decisions pending
+
+- Separate a broker **profile** (launch policy and authorised callers) from its Windows account. A managed account name may use a recognisable `launch-as-` prefix while the profile has a stable, human-facing name.
+- Support three explicit enrollment modes rather than overloading `enroll`:
+  - **attach** an existing account after the operator supplies its password; validate it and store it, without changing the account password;
+  - **take over** an existing account by generating and setting a new password; this cannot restore the old password later;
+  - **create** a broker-managed account with a recognisable name, allowing account-specific hardening.
+- Record registration mode and account ownership as protected metadata. A name prefix alone is not proof that the broker owns an account.
+- Define symmetric teardown per mode:
+  - attached accounts: remove broker credential/metadata only;
+  - taken-over accounts: remove broker credential/metadata only unless a separately confirmed destructive action is chosen;
+  - broker-managed accounts: decide whether normal teardown disables or deletes the account, and handle its profile, processes, services, and scheduled tasks.
+- Destructive operations—password rotation/take-over, replacement of a registration, disabling or deleting an account, and bulk teardown—must prompt in the client unless `--force` is supplied. The service must reject a destructive IPC request unless it includes an explicit confirmation/force indication; confirmation is an accidental-action safeguard, not an authorisation boundary.
+
+### Implementation todos after those decisions
+
+- Define account eligibility beyond Administrators membership: built-in, domain, protected, service, scheduled-task, and loaded-profile accounts.
+- Never pass a supplied password on a command line or log it. Define secure interactive input and an explicit automation input path; zero plaintext buffers after validation and storage.
+- Make account changes and DPAPI/metadata updates recoverable when one step succeeds and a later step fails.
+- Define per-profile caller authorisation, fixed executable policy, and account-selection semantics. Supporting multiple accounts must not permit arbitrary executable launches.
+- Specify `unenroll-all` preview, confirmation, partial-failure reporting, and audit records.
+- Audit attach, take-over, create, password rotation, disable, unregister, and deletion without recording secrets.

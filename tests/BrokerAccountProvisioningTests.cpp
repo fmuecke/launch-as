@@ -142,16 +142,16 @@ int wmain()
         return 1;
     }
 
-    launch_as::broker::RegistrationService registration(account.name(), credentialDirectory.path());
+    launch_as::broker::RegistrationService registration(credentialDirectory.path());
     account.MarkCreated();
-    const DWORD initialRegistrationError = registration.Register();
+    const DWORD initialRegistrationError = registration.Register(account.name());
     if (!Expect(initialRegistrationError == ERROR_SUCCESS,
             L"Could not register the disposable local account."))
     {
         std::wcerr << L"Registration status: " << initialRegistrationError << L"\n";
         return 1;
     }
-    const DWORD rotationRegistrationError = registration.Register();
+    const DWORD rotationRegistrationError = registration.Register(account.name());
     if (!Expect(rotationRegistrationError == ERROR_SUCCESS,
             L"Could not rotate the disposable account password."))
     {
@@ -162,9 +162,9 @@ int wmain()
     launch_as::broker::SecurePassword storedPassword;
     launch_as::broker::BrokerLogonToken token;
     const DWORD brokerTokenError =
-        launch_as::broker::LogOnBrokerProfile(account.name(), store, token);
+        launch_as::broker::LogOnBrokerProfile(account.name(), account.name(), store, token);
     if (!Expect(HasRequiredFlags(account.name()), L"Disposable account flags are not hardened.") ||
-        !Expect(store.Load(L"agent-sandbox", storedPassword) == ERROR_SUCCESS,
+        !Expect(store.Load(account.name(), storedPassword) == ERROR_SUCCESS,
             L"Could not load the stored disposable account password.") ||
         !Expect(brokerTokenError == ERROR_SUCCESS && static_cast<bool>(token),
             L"Rotated disposable account password did not produce a valid broker token."))

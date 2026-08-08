@@ -133,16 +133,16 @@ void BrokerLogonToken::Reset(HANDLE token) noexcept
     token_ = token;
 }
 
-DWORD LogOnBrokerProfile(
-    std::wstring_view accountName, const CredentialStore& store, BrokerLogonToken& token)
+DWORD LogOnBrokerProfile(std::wstring_view accountName, std::wstring_view profileId,
+    const CredentialStore& store, BrokerLogonToken& token)
 {
     token.Reset();
-    if (accountName.empty())
+    if (accountName.empty() || profileId.empty())
     {
         return ERROR_INVALID_PARAMETER;
     }
     SecurePassword password;
-    const DWORD credentialError = store.Load(L"agent-sandbox", password);
+    const DWORD credentialError = store.Load(profileId, password);
     if (credentialError != ERROR_SUCCESS)
     {
         return credentialError;

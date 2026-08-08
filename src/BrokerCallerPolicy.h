@@ -12,8 +12,7 @@
 namespace launch_as::broker
 {
 
-inline constexpr std::wstring_view AuthorizedCallerPolicyFileName =
-    L"agent-sandbox.authorized-caller.sid";
+inline constexpr std::wstring_view AuthorizedCallerPolicyFileName = L"authorized-caller.sid";
 
 [[nodiscard]] DWORD StoreAuthorizedCallerSid(std::wstring_view path, PSID callerSid);
 [[nodiscard]] DWORD LoadAuthorizedCallerSid(std::wstring_view path, std::vector<BYTE>& callerSid);

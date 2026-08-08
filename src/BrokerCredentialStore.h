@@ -52,9 +52,12 @@ class CredentialStore final
 
     [[nodiscard]] DWORD Store(std::wstring_view profileId, std::span<const wchar_t> password) const;
     [[nodiscard]] DWORD Load(std::wstring_view profileId, SecurePassword& password) const;
+    [[nodiscard]] DWORD Remove(std::wstring_view profileId) const;
+    [[nodiscard]] bool Exists(std::wstring_view profileId) const;
+    [[nodiscard]] DWORD List(std::vector<std::wstring>& profileIds) const;
 
   private:
-    [[nodiscard]] bool IsSupportedProfile(std::wstring_view profileId) const noexcept;
+    [[nodiscard]] bool IsValidProfileId(std::wstring_view profileId) const noexcept;
     [[nodiscard]] std::wstring BlobPath(std::wstring_view profileId) const;
 
     std::wstring directory_;

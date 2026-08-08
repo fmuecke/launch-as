@@ -6,6 +6,7 @@
 
 #include <Lm.h>
 #include <Lmcons.h>
+#include <array>
 #include <string>
 
 namespace launch_as::broker
@@ -15,13 +16,6 @@ namespace
 
 constexpr DWORD RequiredAccountFlags =
     UF_NORMAL_ACCOUNT | UF_DONT_EXPIRE_PASSWD | UF_PASSWD_CANT_CHANGE;
-
-[[nodiscard]] bool IsValidAccountName(std::wstring_view accountName)
-{
-    constexpr std::wstring_view InvalidCharacters = L"\\/[]:;|=,+*?<>\"";
-    return !accountName.empty() && accountName.size() <= UNLEN &&
-           accountName.find_first_of(InvalidCharacters) == std::wstring_view::npos;
-}
 
 [[nodiscard]] NET_API_STATUS ApplyAccountFlags(const std::wstring& accountName)
 {
@@ -43,13 +37,91 @@ constexpr DWORD RequiredAccountFlags =
         nullptr, accountName.c_str(), 1008, reinterpret_cast<LPBYTE>(&flags), nullptr);
 }
 
+[[nodiscard]] DWORD RejectAdministratorAccount(std::wstring_view accountName)
+{
+    std::array<BYTE, SECURITY_MAX_SID_SIZE> administratorsSid {};
+    DWORD administratorsSidSize = static_cast<DWORD>(administratorsSid.size());
+    if (!CreateWellKnownSid(
+            WinBuiltinAdministratorsSid, nullptr, administratorsSid.data(), &administratorsSidSize))
+    {
+        const DWORD sidError = GetLastError();
+        return sidError;
+    }
+
+    const std::wstring name(accountName);
+    LPLOCALGROUP_USERS_INFO_0 rawGroups = nullptr;
+    DWORD groupsRead = 0;
+    DWORD groupsAvailable = 0;
+    const NET_API_STATUS groupStatus = NetUserGetLocalGroups(nullptr,
+        name.c_str(),
+        0,
+        LG_INCLUDE_INDIRECT,
+        reinterpret_cast<LPBYTE*>(&rawGroups),
+        MAX_PREFERRED_LENGTH,
+        &groupsRead,
+        &groupsAvailable);
+    if (groupStatus == NERR_UserNotFound)
+    {
+        return ERROR_SUCCESS;
+    }
+    if (groupStatus != NERR_Success)
+    {
+        return groupStatus;
+    }
+    for (DWORD index = 0; index < groupsRead; ++index)
+    {
+        std::array<BYTE, SECURITY_MAX_SID_SIZE> groupSid {};
+        DWORD groupSidSize = static_cast<DWORD>(groupSid.size());
+        std::array<wchar_t, 256> domain {};
+        DWORD domainSize = static_cast<DWORD>(domain.size());
+        SID_NAME_USE use {};
+        if (!LookupAccountNameW(nullptr,
+                rawGroups[index].lgrui0_name,
+                groupSid.data(),
+                &groupSidSize,
+                domain.data(),
+                &domainSize,
+                &use))
+        {
+            const DWORD lookupError = GetLastError();
+            NetApiBufferFree(rawGroups);
+            return lookupError;
+        }
+        if (EqualSid(groupSid.data(), administratorsSid.data()))
+        {
+            NetApiBufferFree(rawGroups);
+            return ERROR_MEMBER_IN_GROUP;
+        }
+    }
+    NetApiBufferFree(rawGroups);
+    return ERROR_SUCCESS;
+}
+
 } // namespace
+
+bool IsValidBrokerAccountName(std::wstring_view accountName) noexcept
+{
+    constexpr std::wstring_view InvalidCharacters = L"\\/[]:;|=,+*?<>\"";
+    return !accountName.empty() && accountName.size() <= UNLEN &&
+           accountName.find_first_of(InvalidCharacters) == std::wstring_view::npos;
+}
+
+DWORD ValidateBrokerAccountForRegistration(std::wstring_view accountName)
+{
+    return IsValidBrokerAccountName(accountName) ? RejectAdministratorAccount(accountName)
+                                                 : ERROR_INVALID_PARAMETER;
+}
 
 DWORD ProvisionStandardLocalAccount(std::wstring_view accountName, const SecurePassword& password)
 {
-    if (!IsValidAccountName(accountName) || password.characters().empty())
+    if (password.characters().empty())
     {
         return ERROR_INVALID_PARAMETER;
+    }
+    const DWORD accountValidationError = ValidateBrokerAccountForRegistration(accountName);
+    if (accountValidationError != ERROR_SUCCESS)
+    {
+        return accountValidationError;
     }
 
     const std::wstring name(accountName);

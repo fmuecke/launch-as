@@ -7,6 +7,7 @@
 #include "Win32Support.h"
 
 #include <Windows.h>
+#include <array>
 #include <atomic>
 #include <iostream>
 #include <string>
@@ -61,6 +62,90 @@ namespace
     }
     CloseHandle(processInfo.hProcess);
     return exitCode;
+}
+
+struct CommandResult
+{
+    DWORD exitCode = ERROR_GEN_FAILURE;
+    std::wstring output;
+};
+
+[[nodiscard]] CommandResult RunCommandAndCapture(
+    std::wstring_view brokerPath, std::wstring_view arguments)
+{
+    std::wstring commandLine = Quote(brokerPath) + L" " + std::wstring(arguments);
+    std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
+    mutableCommandLine.push_back(L'\0');
+
+    SECURITY_ATTRIBUTES attributes {};
+    attributes.nLength = sizeof(attributes);
+    attributes.bInheritHandle = TRUE;
+    HANDLE rawRead = nullptr;
+    HANDLE rawWrite = nullptr;
+    if (!CreatePipe(&rawRead, &rawWrite, &attributes, 0))
+    {
+        return {.exitCode = GetLastError()};
+    }
+    launch_as::UniqueHandle read(rawRead);
+    launch_as::UniqueHandle write(rawWrite);
+    if (!SetHandleInformation(read.get(), HANDLE_FLAG_INHERIT, 0))
+    {
+        return {.exitCode = GetLastError()};
+    }
+
+    STARTUPINFOW startupInfo {};
+    startupInfo.cb = sizeof(startupInfo);
+    startupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startupInfo.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    startupInfo.hStdOutput = write.get();
+    startupInfo.hStdError = write.get();
+    PROCESS_INFORMATION processInfo {};
+    if (!CreateProcessW(nullptr,
+            mutableCommandLine.data(),
+            nullptr,
+            nullptr,
+            TRUE,
+            CREATE_NO_WINDOW,
+            nullptr,
+            nullptr,
+            &startupInfo,
+            &processInfo))
+    {
+        return {.exitCode = GetLastError()};
+    }
+    CloseHandle(processInfo.hThread);
+    write.reset();
+    WaitForSingleObject(processInfo.hProcess, INFINITE);
+
+    CommandResult result;
+    if (!GetExitCodeProcess(processInfo.hProcess, &result.exitCode))
+    {
+        result.exitCode = GetLastError();
+    }
+    CloseHandle(processInfo.hProcess);
+
+    std::array<char, 2048> output {};
+    DWORD bytesRead = 0;
+    if (!ReadFile(
+            read.get(), output.data(), static_cast<DWORD>(output.size()), &bytesRead, nullptr) &&
+        GetLastError() != ERROR_BROKEN_PIPE)
+    {
+        result.exitCode = GetLastError();
+        return result;
+    }
+    const int characters =
+        MultiByteToWideChar(CP_UTF8, 0, output.data(), static_cast<int>(bytesRead), nullptr, 0);
+    if (characters > 0)
+    {
+        result.output.resize(static_cast<std::size_t>(characters));
+        MultiByteToWideChar(CP_UTF8,
+            0,
+            output.data(),
+            static_cast<int>(bytesRead),
+            result.output.data(),
+            characters);
+    }
+    return result;
 }
 
 class ServerThread final
@@ -127,8 +212,19 @@ int wmain(int argumentCount, wchar_t* arguments[])
         return 1;
     }
 
-    if (!Expect(RunCommand(arguments[1], L"register arbitrary-profile") == ERROR_INVALID_PARAMETER,
-            L"Broker register accepted an arbitrary profile."))
+    if (!Expect(RunCommand(arguments[1], L"enroll arbitrary-profile") == ERROR_INVALID_PARAMETER,
+            L"Broker enroll accepted an arbitrary profile.") ||
+        !Expect(RunCommand(arguments[1], L"unenroll arbitrary-profile") == ERROR_INVALID_PARAMETER,
+            L"Broker unenroll accepted an arbitrary profile."))
+    {
+        return 1;
+    }
+    const CommandResult invalidCommand = RunCommandAndCapture(arguments[1], L"enroll bad/name");
+    if (!Expect(invalidCommand.exitCode == ERROR_INVALID_PARAMETER,
+            L"Broker invalid account did not return ERROR_INVALID_PARAMETER.") ||
+        !Expect(invalidCommand.output.find(L"Invalid account name") != std::wstring::npos &&
+                    invalidCommand.output.find(L"enroll <account>") != std::wstring::npos,
+            L"Broker invalid account did not explain its parameters."))
     {
         return 1;
     }
@@ -154,11 +250,11 @@ int wmain(int argumentCount, wchar_t* arguments[])
     }
 
     ServerThread serverThread(server.get(), stopEvent.get());
-    const DWORD result = RunCommand(arguments[1], L"register agent-sandbox");
+    const DWORD result = RunCommand(arguments[1], L"enroll AgentSandbox --force");
     return Expect(
-               serverThread.connected(), L"Broker register did not connect to the control pipe.") &&
+               serverThread.connected(), L"Broker enroll did not connect to the control pipe.") &&
                    Expect(result == ERROR_NOT_READY,
-                       L"Broker register did not return the service response.")
+                       L"Broker enroll did not return the service response.")
                ? 0
                : 1;
 }

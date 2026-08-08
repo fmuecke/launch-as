@@ -6,6 +6,7 @@
 
 #include <Windows.h>
 #include <array>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -28,13 +29,18 @@ struct ConsoleRequest
 enum class RequestOperation
 {
     ConsoleLaunch,
-    Register
+    Enroll,
+    List,
+    Unenroll,
+    UnenrollAll
 };
 
 struct BrokerRequest
 {
     RequestOperation operation = RequestOperation::ConsoleLaunch;
     std::wstring requestId;
+    std::wstring profileId;
+    bool confirmed = false;
     std::vector<std::wstring> arguments;
     std::wstring workingDirectory;
     ConsoleRequest console;
@@ -52,6 +58,12 @@ enum class ParseResult
     std::wstring_view requestId, std::string_view reasonCode, DWORD win32Error);
 [[nodiscard]] std::string BuildSuccessResponse(
     std::wstring_view requestId, std::string_view reasonCode);
+[[nodiscard]] std::string BuildListResponse(
+    std::wstring_view requestId, std::span<const std::wstring> accounts);
+[[nodiscard]] bool ParseListResponse(
+    std::string_view response, std::wstring_view requestId, std::vector<std::wstring>& accounts);
+[[nodiscard]] bool ParseErrorResponse(
+    std::string_view response, std::wstring_view requestId, DWORD& win32Error);
 [[nodiscard]] std::string BuildLaunchSuccessResponse(std::wstring_view requestId, DWORD processId);
 
 } // namespace launch_as::broker

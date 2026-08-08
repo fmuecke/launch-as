@@ -114,6 +114,8 @@ set_target_properties(launch_as PROPERTIES
 add_executable(launch_as_broker
     src/BrokerAccountProvisioner.cpp
     src/BrokerAccountProvisioner.h
+    src/BrokerCallerPolicy.cpp
+    src/BrokerCallerPolicy.h
     src/BrokerCredentialStore.cpp
     src/BrokerCredentialStore.h
     src/BrokerDataDirectory.cpp
@@ -281,6 +283,27 @@ if(BUILD_TESTING)
         LABELS "broker;integration"
     )
 
+    add_executable(LauncherBrokerCallerPolicyTests
+        tests/BrokerCallerPolicyTests.cpp
+        src/BrokerCallerPolicy.cpp
+        src/BrokerCallerPolicy.h
+    )
+    target_include_directories(LauncherBrokerCallerPolicyTests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(LauncherBrokerCallerPolicyTests PRIVATE
+        Advapi32
+    )
+    configure_launch_as_target(LauncherBrokerCallerPolicyTests)
+
+    add_test(
+        NAME launcher.broker_caller_policy
+        COMMAND "$<TARGET_FILE:LauncherBrokerCallerPolicyTests>"
+    )
+    set_tests_properties(launcher.broker_caller_policy PROPERTIES
+        LABELS "broker;integration"
+    )
+
     add_executable(LauncherBrokerAccountProvisioningTests
         tests/BrokerAccountProvisioningTests.cpp
         src/BrokerAccountProvisioner.cpp
@@ -307,6 +330,10 @@ if(BUILD_TESTING)
 
     add_executable(LauncherBrokerServiceInstallerTests
         tests/BrokerServiceInstallerTests.cpp
+        src/BrokerCallerPolicy.cpp
+        src/BrokerCallerPolicy.h
+        src/BrokerDataDirectory.cpp
+        src/BrokerDataDirectory.h
         src/BrokerServiceInstaller.cpp
         src/BrokerServiceInstaller.h
     )

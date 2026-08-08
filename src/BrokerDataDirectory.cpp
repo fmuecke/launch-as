@@ -76,7 +76,7 @@ DWORD CreateSecureDirectory(std::wstring_view path)
     return ERROR_SUCCESS;
 }
 
-DWORD GetBrokerCredentialDirectory(std::wstring& directory)
+DWORD GetBrokerDataDirectory(std::wstring& directory)
 {
     directory.clear();
     const DWORD requiredCharacters = GetEnvironmentVariableW(L"ProgramData", nullptr, 0);
@@ -94,13 +94,24 @@ DWORD GetBrokerCredentialDirectory(std::wstring& directory)
         return environmentError == ERROR_SUCCESS ? ERROR_ENVVAR_NOT_FOUND : environmentError;
     }
     const std::wstring root(programData.data(), copiedCharacters);
-    const std::wstring brokerDirectory = root + L"\\launch-as";
-    const DWORD brokerDirectoryError = CreateSecureDirectory(brokerDirectory);
+    directory = root + L"\\launch-as";
+    const DWORD brokerDirectoryError = CreateSecureDirectory(directory);
+    if (brokerDirectoryError != ERROR_SUCCESS)
+    {
+        directory.clear();
+        return brokerDirectoryError;
+    }
+    return ERROR_SUCCESS;
+}
+
+DWORD GetBrokerCredentialDirectory(std::wstring& directory)
+{
+    const DWORD brokerDirectoryError = GetBrokerDataDirectory(directory);
     if (brokerDirectoryError != ERROR_SUCCESS)
     {
         return brokerDirectoryError;
     }
-    directory = brokerDirectory + L"\\credentials";
+    directory += L"\\credentials";
     const DWORD credentialDirectoryError = CreateSecureDirectory(directory);
     if (credentialDirectoryError != ERROR_SUCCESS)
     {

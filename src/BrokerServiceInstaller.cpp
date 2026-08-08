@@ -4,6 +4,9 @@
 
 #include "BrokerServiceInstaller.h"
 
+#include "BrokerCallerPolicy.h"
+#include "BrokerDataDirectory.h"
+
 #include <Aclapi.h>
 #include <ShlObj.h>
 #include <array>
@@ -233,6 +236,12 @@ class LocalSecurityDescriptor final
 
 DWORD InstallBrokerService()
 {
+    std::vector<BYTE> callerSid;
+    const DWORD callerError = GetCallerSid(callerSid);
+    if (callerError != ERROR_SUCCESS)
+    {
+        return callerError;
+    }
     std::wstring sourcePath;
     const DWORD sourceError = GetCurrentExecutablePath(sourcePath);
     if (sourceError != ERROR_SUCCESS)
@@ -268,7 +277,18 @@ DWORD InstallBrokerService()
     {
         return securityError;
     }
-    return InstallDemandStartBrokerService(L"launch-as-broker", installedPath);
+    const DWORD serviceError = InstallDemandStartBrokerService(L"launch-as-broker", installedPath);
+    if (serviceError != ERROR_SUCCESS)
+    {
+        return serviceError;
+    }
+    std::wstring dataDirectory;
+    const DWORD dataDirectoryError = GetBrokerDataDirectory(dataDirectory);
+    if (dataDirectoryError != ERROR_SUCCESS)
+    {
+        return dataDirectoryError;
+    }
+    return StoreAuthorizedCallerSid(GetAuthorizedCallerPolicyPath(dataDirectory), callerSid.data());
 }
 
 DWORD InstallDemandStartBrokerService(

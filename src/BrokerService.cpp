@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Project: https://github.com/fmuecke/launch-as
 
+#include "BrokerCallerPolicy.h"
 #include "BrokerDataDirectory.h"
 #include "BrokerPipeServer.h"
 #include "BrokerProtocol.h"
@@ -17,6 +18,7 @@
 #include <sddl.h>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace
 {
@@ -96,11 +98,48 @@ class LocalSecurityDescriptor final
     PSECURITY_DESCRIPTOR value_ = nullptr;
 };
 
-[[nodiscard]] launch_as::UniqueHandle CreateControlPipe()
+class LocalString final
 {
+  public:
+    ~LocalString()
+    {
+        if (value_ != nullptr)
+        {
+            LocalFree(value_);
+        }
+    }
+
+    [[nodiscard]] PWSTR* address() noexcept { return &value_; }
+    [[nodiscard]] PWSTR get() const noexcept { return value_; }
+
+  private:
+    PWSTR value_ = nullptr;
+};
+
+struct BrokerLaunchPolicy
+{
+    std::vector<BYTE> authorizedCallerSid;
+};
+
+[[nodiscard]] launch_as::UniqueHandle CreateControlPipe(
+    const std::vector<BYTE>& authorizedCallerSid)
+{
+    std::wstring dacl = L"D:P(A;;GA;;;SY)(A;;GA;;;BA)";
+    if (!authorizedCallerSid.empty())
+    {
+        LocalString callerSid;
+        if (!ConvertSidToStringSidW(
+                const_cast<BYTE*>(authorizedCallerSid.data()), callerSid.address()))
+        {
+            return {};
+        }
+        dacl += L"(A;;GRGW;;;";
+        dacl += callerSid.get();
+        dacl += L")";
+    }
     LocalSecurityDescriptor securityDescriptor;
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            L"D:P(A;;GA;;;SY)(A;;GA;;;BA)", SDDL_REVISION_1, securityDescriptor.address(), nullptr))
+            dacl.c_str(), SDDL_REVISION_1, securityDescriptor.address(), nullptr))
     {
         return {};
     }
@@ -120,12 +159,15 @@ class LocalSecurityDescriptor final
 }
 
 DWORD RegisterProfile(void* context);
+DWORD LaunchProfile(void* context, const launch_as::broker::BrokerRequest& request,
+    const launch_as::broker::BrokerCallerIdentity& caller);
 
-void RunPipeServer(launch_as::broker::RegistrationService& registration)
+void RunPipeServer(
+    launch_as::broker::RegistrationService& registration, BrokerLaunchPolicy& launchPolicy)
 {
     while (WaitForSingleObject(stopEvent, 0) == WAIT_TIMEOUT)
     {
-        launch_as::UniqueHandle pipe(CreateControlPipe());
+        launch_as::UniqueHandle pipe(CreateControlPipe(launchPolicy.authorizedCallerSid));
         if (!pipe)
         {
             return;
@@ -172,7 +214,7 @@ void RunPipeServer(launch_as::broker::RegistrationService& registration)
             continue;
         }
         launch_as::broker::ServeControlPipeRequest(
-            pipe.get(), stopEvent, RegisterProfile, &registration);
+            pipe.get(), stopEvent, RegisterProfile, &registration, LaunchProfile, &launchPolicy);
         DisconnectNamedPipe(pipe.get());
     }
 }
@@ -181,6 +223,19 @@ DWORD RegisterProfile(void* context)
 {
     auto* registration = static_cast<launch_as::broker::RegistrationService*>(context);
     return registration == nullptr ? ERROR_INVALID_PARAMETER : registration->Register();
+}
+
+DWORD LaunchProfile(void* context, const launch_as::broker::BrokerRequest& request,
+    const launch_as::broker::BrokerCallerIdentity& caller)
+{
+    const auto* policy = static_cast<const BrokerLaunchPolicy*>(context);
+    if (policy == nullptr ||
+        request.operation != launch_as::broker::RequestOperation::ConsoleLaunch ||
+        !launch_as::broker::IsAuthorizedCaller(policy->authorizedCallerSid, caller.userSid))
+    {
+        return ERROR_ACCESS_DENIED;
+    }
+    return ERROR_NOT_READY;
 }
 
 void WINAPI ServiceMain(DWORD, wchar_t**)
@@ -211,8 +266,19 @@ void WINAPI ServiceMain(DWORD, wchar_t**)
         return;
     }
     launch_as::broker::RegistrationService registration(L"AgentSandbox", credentialDirectory);
+    std::wstring dataDirectory;
+    const DWORD dataDirectoryError = launch_as::broker::GetBrokerDataDirectory(dataDirectory);
+    if (dataDirectoryError != ERROR_SUCCESS)
+    {
+        ReportServiceStatus(SERVICE_STOPPED, dataDirectoryError);
+        return;
+    }
+    BrokerLaunchPolicy launchPolicy;
+    static_cast<void>(launch_as::broker::LoadAuthorizedCallerSid(
+        launch_as::broker::GetAuthorizedCallerPolicyPath(dataDirectory),
+        launchPolicy.authorizedCallerSid));
     ReportServiceStatus(SERVICE_RUNNING);
-    RunPipeServer(registration);
+    RunPipeServer(registration, launchPolicy);
     ReportServiceStatus(SERVICE_STOPPED);
 }
 

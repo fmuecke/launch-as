@@ -118,6 +118,8 @@ add_executable(launch_as_broker
     src/BrokerCredentialStore.h
     src/BrokerDataDirectory.cpp
     src/BrokerDataDirectory.h
+    src/BrokerLogonToken.cpp
+    src/BrokerLogonToken.h
     src/BrokerPassword.cpp
     src/BrokerPassword.h
     src/BrokerRegistration.cpp
@@ -285,6 +287,8 @@ if(BUILD_TESTING)
         src/BrokerAccountProvisioner.h
         src/BrokerCredentialStore.cpp
         src/BrokerCredentialStore.h
+        src/BrokerLogonToken.cpp
+        src/BrokerLogonToken.h
         src/BrokerPassword.cpp
         src/BrokerPassword.h
         src/BrokerRegistration.cpp
@@ -297,6 +301,7 @@ if(BUILD_TESTING)
         Bcrypt
         Crypt32
         Netapi32
+        Advapi32
     )
     configure_launch_as_target(LauncherBrokerAccountProvisioningTests)
 

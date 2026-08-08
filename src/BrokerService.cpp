@@ -22,10 +22,33 @@ namespace
 {
 
 constexpr wchar_t ServiceName[] = L"launch-as-broker";
+constexpr DWORD BrokerIdleTimeoutMilliseconds = 30'000;
 
 SERVICE_STATUS_HANDLE serviceStatusHandle = nullptr;
 SERVICE_STATUS serviceStatus {};
 HANDLE stopEvent = nullptr;
+
+class ServiceHandle final
+{
+  public:
+    explicit ServiceHandle(SC_HANDLE value = nullptr) noexcept : value_(value) {}
+    ~ServiceHandle()
+    {
+        if (value_ != nullptr)
+        {
+            CloseServiceHandle(value_);
+        }
+    }
+
+    ServiceHandle(const ServiceHandle&) = delete;
+    ServiceHandle& operator=(const ServiceHandle&) = delete;
+
+    [[nodiscard]] SC_HANDLE get() const noexcept { return value_; }
+    [[nodiscard]] explicit operator bool() const noexcept { return value_ != nullptr; }
+
+  private:
+    SC_HANDLE value_;
+};
 
 void ReportServiceStatus(DWORD currentState, DWORD win32ExitCode = ERROR_SUCCESS)
 {
@@ -120,8 +143,17 @@ void RunPipeServer(launch_as::broker::RegistrationService& registration)
         if (!connected && connectError == ERROR_IO_PENDING)
         {
             const std::array waitHandles {stopEvent, connectEvent.get()};
-            const DWORD wait = WaitForMultipleObjects(
-                static_cast<DWORD>(waitHandles.size()), waitHandles.data(), FALSE, INFINITE);
+            const DWORD wait = WaitForMultipleObjects(static_cast<DWORD>(waitHandles.size()),
+                waitHandles.data(),
+                FALSE,
+                BrokerIdleTimeoutMilliseconds);
+            if (wait == WAIT_TIMEOUT)
+            {
+                CancelIoEx(pipe.get(), &overlapped);
+                DWORD ignored = 0;
+                static_cast<void>(GetOverlappedResult(pipe.get(), &overlapped, &ignored, TRUE));
+                return;
+            }
             if (wait != WAIT_OBJECT_0 + 1)
             {
                 CancelIoEx(pipe.get(), &overlapped);
@@ -199,6 +231,48 @@ void WINAPI ServiceMain(DWORD, wchar_t**)
     return std::wstring(formatted + 1, 36);
 }
 
+[[nodiscard]] DWORD StartBrokerService()
+{
+    ServiceHandle manager(OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT));
+    if (!manager)
+    {
+        const DWORD managerError = GetLastError();
+        return managerError;
+    }
+    ServiceHandle service(OpenServiceW(manager.get(), ServiceName, SERVICE_START));
+    if (!service)
+    {
+        const DWORD serviceError = GetLastError();
+        return serviceError;
+    }
+    if (StartServiceW(service.get(), 0, nullptr))
+    {
+        return ERROR_SUCCESS;
+    }
+    const DWORD startError = GetLastError();
+    return startError == ERROR_SERVICE_ALREADY_RUNNING ? ERROR_SUCCESS : startError;
+}
+
+[[nodiscard]] DWORD WaitForControlPipe(DWORD timeoutMilliseconds)
+{
+    const ULONGLONG deadline = GetTickCount64() + timeoutMilliseconds;
+    DWORD waitError = ERROR_FILE_NOT_FOUND;
+    do
+    {
+        if (WaitNamedPipeW(launch_as::broker::ControlPipeName.data(), 100))
+        {
+            return ERROR_SUCCESS;
+        }
+        waitError = GetLastError();
+        if (waitError != ERROR_FILE_NOT_FOUND && waitError != ERROR_PIPE_BUSY)
+        {
+            return waitError;
+        }
+        Sleep(50);
+    } while (GetTickCount64() < deadline);
+    return waitError;
+}
+
 [[nodiscard]] DWORD ForwardRegistrationRequest()
 {
     const std::optional<std::wstring> requestId = CreateRequestId();
@@ -215,10 +289,23 @@ void WINAPI ServiceMain(DWORD, wchar_t**)
     const std::string request = "{\"version\":1,\"requestId\":\"" + requestIdUtf8 +
                                 "\",\"operation\":\"register\",\"profileId\":\"agent-sandbox\"}";
 
-    if (!WaitNamedPipeW(launch_as::broker::ControlPipeName.data(), 5'000))
+    if (!WaitNamedPipeW(launch_as::broker::ControlPipeName.data(), 0))
     {
         const DWORD waitError = GetLastError();
-        return waitError;
+        if (waitError != ERROR_FILE_NOT_FOUND)
+        {
+            return waitError;
+        }
+        const DWORD startError = StartBrokerService();
+        if (startError != ERROR_SUCCESS)
+        {
+            return startError;
+        }
+        const DWORD readyError = WaitForControlPipe(5'000);
+        if (readyError != ERROR_SUCCESS)
+        {
+            return readyError;
+        }
     }
     HANDLE rawPipe = CreateFileW(launch_as::broker::ControlPipeName.data(),
         GENERIC_READ | GENERIC_WRITE,

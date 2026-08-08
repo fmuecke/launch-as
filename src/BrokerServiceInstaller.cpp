@@ -347,7 +347,7 @@ DWORD InstallDemandStartBrokerService(
         return managerError;
     }
     const std::wstring commandLine = L"\"" + path + L"\"";
-    ServiceHandle service(CreateServiceW(manager.get(),
+    SC_HANDLE rawService = CreateServiceW(manager.get(),
         name.c_str(),
         name.c_str(),
         SERVICE_ALL_ACCESS,
@@ -359,16 +359,45 @@ DWORD InstallDemandStartBrokerService(
         nullptr,
         nullptr,
         nullptr,
-        nullptr));
-    if (!service)
+        nullptr);
+    bool created = rawService != nullptr;
+    if (rawService == nullptr)
     {
         const DWORD serviceError = GetLastError();
-        return serviceError;
+        if (serviceError != ERROR_SERVICE_EXISTS)
+        {
+            return serviceError;
+        }
+        rawService = OpenServiceW(manager.get(), name.c_str(), SERVICE_CHANGE_CONFIG | WRITE_DAC);
+        if (rawService == nullptr)
+        {
+            const DWORD openError = GetLastError();
+            return openError;
+        }
+    }
+    ServiceHandle service(rawService);
+    if (!created && !ChangeServiceConfigW(service.get(),
+                        SERVICE_WIN32_OWN_PROCESS,
+                        SERVICE_DEMAND_START,
+                        SERVICE_ERROR_NORMAL,
+                        commandLine.c_str(),
+                        nullptr,
+                        nullptr,
+                        nullptr,
+                        L"LocalSystem",
+                        nullptr,
+                        name.c_str()))
+    {
+        const DWORD configurationError = GetLastError();
+        return configurationError;
     }
     if (!SetServiceObjectSecurity(service.get(), DACL_SECURITY_INFORMATION, &descriptor))
     {
         const DWORD securityError = GetLastError();
-        DeleteService(service.get());
+        if (created)
+        {
+            DeleteService(service.get());
+        }
         return securityError;
     }
     return ERROR_SUCCESS;

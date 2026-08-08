@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Project: https://github.com/fmuecke/launch-as
 
+#include "BrokerLogonToken.h"
 #include "BrokerRegistration.h"
 #include "Win32Support.h"
 
@@ -122,21 +123,6 @@ class TemporaryDirectory final
     return hasFlags;
 }
 
-[[nodiscard]] bool CanLogOn(
-    const std::wstring& name, const launch_as::broker::SecurePassword& password)
-{
-    HANDLE token = nullptr;
-    const BOOL loggedOn = LogonUserW(name.c_str(),
-        L".",
-        password.c_str(),
-        LOGON32_LOGON_INTERACTIVE,
-        LOGON32_PROVIDER_DEFAULT,
-        &token);
-    const DWORD logonError = loggedOn ? ERROR_SUCCESS : GetLastError();
-    launch_as::UniqueHandle tokenHandle(token);
-    return loggedOn && logonError == ERROR_SUCCESS;
-}
-
 } // namespace
 
 int wmain()
@@ -174,12 +160,16 @@ int wmain()
     }
     launch_as::broker::CredentialStore store(credentialDirectory.path());
     launch_as::broker::SecurePassword storedPassword;
+    launch_as::broker::BrokerLogonToken token;
+    const DWORD brokerTokenError =
+        launch_as::broker::LogOnBrokerProfile(account.name(), store, token);
     if (!Expect(HasRequiredFlags(account.name()), L"Disposable account flags are not hardened.") ||
         !Expect(store.Load(L"agent-sandbox", storedPassword) == ERROR_SUCCESS,
             L"Could not load the stored disposable account password.") ||
-        !Expect(CanLogOn(account.name(), storedPassword),
-            L"Rotated disposable account password could not log on."))
+        !Expect(brokerTokenError == ERROR_SUCCESS && static_cast<bool>(token),
+            L"Rotated disposable account password did not produce a valid broker token."))
     {
+        std::wcerr << L"Broker token status: " << brokerTokenError << L"\n";
         return 1;
     }
     const NET_API_STATUS removalStatus = account.Remove();

@@ -19,13 +19,6 @@ namespace
 
 constexpr DWORD RequestTimeoutMilliseconds = 5'000;
 
-struct CallerIdentity
-{
-    std::vector<BYTE> userSid;
-    DWORD sessionId = 0;
-    DWORD integrityLevel = 0;
-};
-
 [[nodiscard]] bool WaitForOperation(HANDLE pipe, HANDLE stopEvent, OVERLAPPED& overlapped,
     HANDLE operationEvent, DWORD& bytesTransferred)
 {
@@ -103,7 +96,7 @@ void BeginOverlappedOperation(OVERLAPPED& overlapped, HANDLE event)
     return bytesWritten == response.size();
 }
 
-[[nodiscard]] bool CaptureCallerIdentity(HANDLE pipe, CallerIdentity& identity)
+[[nodiscard]] bool CaptureCallerIdentity(HANDLE pipe, BrokerCallerIdentity& identity)
 {
     if (!ImpersonateNamedPipeClient(pipe))
     {
@@ -220,11 +213,12 @@ void BeginOverlappedOperation(OVERLAPPED& overlapped, HANDLE event)
 } // namespace
 
 void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
-    RegisterRequestHandler registerRequestHandler, void* registrationContext)
+    RegisterRequestHandler registerRequestHandler, void* registrationContext,
+    LaunchRequestHandler launchRequestHandler, void* launchContext)
 {
     std::string message;
     BrokerRequest request;
-    CallerIdentity caller;
+    BrokerCallerIdentity caller;
     std::string response;
     if (!ReadRequest(pipe, stopEvent, message) || !CaptureCallerIdentity(pipe, caller))
     {
@@ -249,10 +243,23 @@ void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
                                  request.requestId, "registration_failed", registrationError);
         }
     }
+    else if (request.operation == RequestOperation::ConsoleLaunch)
+    {
+        if (launchRequestHandler == nullptr)
+        {
+            response = BuildErrorResponse(request.requestId, "not_configured", ERROR_NOT_READY);
+        }
+        else
+        {
+            const DWORD launchError = launchRequestHandler(launchContext, request, caller);
+            response = launchError == ERROR_SUCCESS
+                           ? BuildSuccessResponse(request.requestId, "launched")
+                           : BuildErrorResponse(request.requestId, "launch_failed", launchError);
+        }
+    }
     else
     {
-        // No profile is enabled until setup has created the SYSTEM-only credential and policy.
-        response = BuildErrorResponse(request.requestId, "not_configured", ERROR_NOT_READY);
+        response = BuildErrorResponse(request.requestId, "invalid_request", ERROR_INVALID_DATA);
     }
     static_cast<void>(WriteResponse(pipe, stopEvent, response));
 }

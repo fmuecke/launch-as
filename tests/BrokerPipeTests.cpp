@@ -14,12 +14,33 @@
 namespace
 {
 
+struct LaunchCapture
+{
+    bool invoked = false;
+    launch_as::broker::BrokerRequest request;
+    bool capturedCallerIdentity = false;
+};
+
+DWORD CaptureLaunchRequest(void* context, const launch_as::broker::BrokerRequest& request,
+    const launch_as::broker::BrokerCallerIdentity& caller)
+{
+    auto* capture = static_cast<LaunchCapture*>(context);
+    if (capture == nullptr)
+    {
+        return ERROR_INVALID_PARAMETER;
+    }
+    capture->invoked = true;
+    capture->request = request;
+    capture->capturedCallerIdentity = !caller.userSid.empty();
+    return ERROR_NOT_READY;
+}
+
 class ServerThread final
 {
   public:
-    ServerThread(HANDLE pipe, HANDLE stopEvent)
+    ServerThread(HANDLE pipe, HANDLE stopEvent, LaunchCapture* capture)
         : thread_(
-              [pipe, stopEvent, this]
+              [pipe, stopEvent, capture, this]
               {
                   if (!ConnectNamedPipe(pipe, nullptr) && GetLastError() != ERROR_PIPE_CONNECTED)
                   {
@@ -27,7 +48,8 @@ class ServerThread final
                       return;
                   }
                   connected_ = true;
-                  launch_as::broker::ServeControlPipeRequest(pipe, stopEvent);
+                  launch_as::broker::ServeControlPipeRequest(
+                      pipe, stopEvent, nullptr, nullptr, CaptureLaunchRequest, capture);
                   DisconnectNamedPipe(pipe);
               })
     {
@@ -78,7 +100,8 @@ int wmain()
         return 1;
     }
 
-    ServerThread serverThread(server.get(), stopEvent.get());
+    LaunchCapture capture;
+    ServerThread serverThread(server.get(), stopEvent.get(), &capture);
     launch_as::UniqueHandle client(CreateFileW(
         pipeName.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr));
     if (!Expect(static_cast<bool>(client), L"Could not connect to the test pipe."))
@@ -109,11 +132,16 @@ int wmain()
     }
     response.resize(bytesRead);
     return Expect(serverThread.connected(), L"The broker test pipe did not connect.") &&
+                   Expect(capture.invoked, L"The broker did not dispatch the launch request.") &&
+                   Expect(capture.capturedCallerIdentity,
+                       L"The broker did not provide the authenticated caller identity.") &&
+                   Expect(capture.request.arguments.empty(),
+                       L"The broker changed the launch request before dispatching it.") &&
                    Expect(response.find("\"requestId\":\"123e4567-e89b-12d3-a456-426614174000\"") !=
                               std::string::npos,
                        L"The broker did not preserve the request id.") &&
-                   Expect(response.find("\"reasonCode\":\"not_configured\"") != std::string::npos,
-                       L"The broker did not authenticate and reach the configured response.")
+                   Expect(response.find("\"reasonCode\":\"launch_failed\"") != std::string::npos,
+                       L"The broker did not return the launch callback failure.")
                ? 0
                : 1;
 }

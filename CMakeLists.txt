@@ -124,6 +124,8 @@ add_executable(launch_as_broker
     src/BrokerLogonToken.h
     src/BrokerPassword.cpp
     src/BrokerPassword.h
+    src/BrokerProcessLauncher.cpp
+    src/BrokerProcessLauncher.h
     src/BrokerRegistration.cpp
     src/BrokerRegistration.h
     src/BrokerServiceInstaller.cpp
@@ -170,6 +172,8 @@ if(BUILD_TESTING)
 
     add_executable(LauncherBrokerPipeTests
         tests/BrokerPipeTests.cpp
+        src/BrokerProcessLauncher.cpp
+        src/BrokerProcessLauncher.h
         src/BrokerPipeServer.cpp
         src/BrokerPipeServer.h
         src/BrokerProtocol.cpp
@@ -193,6 +197,8 @@ if(BUILD_TESTING)
 
     add_executable(LauncherBrokerCommandTests
         tests/BrokerCommandTests.cpp
+        src/BrokerProcessLauncher.cpp
+        src/BrokerProcessLauncher.h
         src/BrokerPipeServer.cpp
         src/BrokerPipeServer.h
         src/BrokerProtocol.cpp
@@ -301,6 +307,27 @@ if(BUILD_TESTING)
         COMMAND "$<TARGET_FILE:LauncherBrokerCallerPolicyTests>"
     )
     set_tests_properties(launcher.broker_caller_policy PROPERTIES
+        LABELS "broker;integration"
+    )
+
+    add_executable(LauncherBrokerProcessLauncherTests
+        tests/BrokerProcessLauncherTests.cpp
+        src/BrokerProcessLauncher.cpp
+        src/BrokerProcessLauncher.h
+    )
+    target_include_directories(LauncherBrokerProcessLauncherTests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(LauncherBrokerProcessLauncherTests PRIVATE
+        Advapi32
+    )
+    configure_launch_as_target(LauncherBrokerProcessLauncherTests)
+
+    add_test(
+        NAME launcher.broker_process_launcher
+        COMMAND "$<TARGET_FILE:LauncherBrokerProcessLauncherTests>"
+    )
+    set_tests_properties(launcher.broker_process_launcher PROPERTIES
         LABELS "broker;integration"
     )
 

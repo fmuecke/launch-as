@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "BrokerProcessLauncher.h"
 #include "BrokerProtocol.h"
 
 #include <Windows.h>
@@ -19,8 +20,8 @@ struct BrokerCallerIdentity
     DWORD sessionId = 0;
     DWORD integrityLevel = 0;
 };
-using LaunchRequestHandler = DWORD (*)(
-    void* context, const BrokerRequest& request, const BrokerCallerIdentity& caller);
+using LaunchRequestHandler = DWORD (*)(void* context, const BrokerRequest& request,
+    const BrokerCallerIdentity& caller, BrokerChildProcess& child);
 
 void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
     RegisterRequestHandler registerRequestHandler = nullptr, void* registrationContext = nullptr,

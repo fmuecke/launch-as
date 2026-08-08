@@ -52,5 +52,6 @@ enum class ParseResult
     std::wstring_view requestId, std::string_view reasonCode, DWORD win32Error);
 [[nodiscard]] std::string BuildSuccessResponse(
     std::wstring_view requestId, std::string_view reasonCode);
+[[nodiscard]] std::string BuildLaunchSuccessResponse(std::wstring_view requestId, DWORD processId);
 
 } // namespace launch_as::broker

@@ -558,4 +558,13 @@ std::string BuildSuccessResponse(std::wstring_view requestId, std::string_view r
     return response;
 }
 
+std::string BuildLaunchSuccessResponse(std::wstring_view requestId, DWORD processId)
+{
+    std::string response = "{\"version\":1,\"requestId\":";
+    AppendJsonString(response, requestId);
+    response += ",\"status\":\"ok\",\"processId\":" + std::to_string(processId);
+    response += ",\"reasonCode\":\"launched\",\"win32Error\":0}";
+    return response;
+}
+
 } // namespace launch_as::broker

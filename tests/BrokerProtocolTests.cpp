@@ -94,11 +94,20 @@ int wmain()
     {
         return 1;
     }
-    return Expect(launch_as::broker::BuildSuccessResponse(
-                      L"123e4567-e89b-12d3-a456-426614174000", "registered") ==
+    if (!Expect(launch_as::broker::BuildSuccessResponse(
+                    L"123e4567-e89b-12d3-a456-426614174000", "registered") ==
+                    "{\"version\":1,\"requestId\":\"123e4567-e89b-12d3-a456-426614174000\","
+                    "\"status\":\"ok\",\"reasonCode\":\"registered\",\"win32Error\":0}",
+            L"Success response is not stable."))
+    {
+        return 1;
+    }
+    return Expect(launch_as::broker::BuildLaunchSuccessResponse(
+                      L"123e4567-e89b-12d3-a456-426614174000", 456) ==
                       "{\"version\":1,\"requestId\":\"123e4567-e89b-12d3-a456-426614174000\","
-                      "\"status\":\"ok\",\"reasonCode\":\"registered\",\"win32Error\":0}",
-               L"Success response is not stable.")
+                      "\"status\":\"ok\",\"processId\":456,\"reasonCode\":\"launched\","
+                      "\"win32Error\":0}",
+               L"Launch success response is not stable.")
                ? 0
                : 1;
 }

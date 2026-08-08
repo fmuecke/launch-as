@@ -122,9 +122,20 @@ void BeginOverlappedOperation(OVERLAPPED& overlapped, HANDLE event)
     {
         return false;
     }
-    identity.userSid.resize(tokenUserBytes);
+    std::vector<BYTE> tokenUser(tokenUserBytes);
     if (!GetTokenInformation(
-            token.get(), TokenUser, identity.userSid.data(), tokenUserBytes, &tokenUserBytes))
+            token.get(), TokenUser, tokenUser.data(), tokenUserBytes, &tokenUserBytes))
+    {
+        return false;
+    }
+    const auto* tokenUserInformation = reinterpret_cast<const TOKEN_USER*>(tokenUser.data());
+    if (!IsValidSid(tokenUserInformation->User.Sid))
+    {
+        return false;
+    }
+    const DWORD callerSidBytes = GetLengthSid(tokenUserInformation->User.Sid);
+    identity.userSid.resize(callerSidBytes);
+    if (!CopySid(callerSidBytes, identity.userSid.data(), tokenUserInformation->User.Sid))
     {
         return false;
     }
@@ -204,10 +215,9 @@ void BeginOverlappedOperation(OVERLAPPED& overlapped, HANDLE event)
         return false;
     }
 
-    const auto* caller = reinterpret_cast<const TOKEN_USER*>(identity.userSid.data());
     const auto* client = reinterpret_cast<const TOKEN_USER*>(clientTokenUser.data());
-    return IsValidSid(caller->User.Sid) && IsValidSid(client->User.Sid) &&
-           EqualSid(caller->User.Sid, client->User.Sid) != FALSE;
+    return IsValidSid(identity.userSid.data()) && IsValidSid(client->User.Sid) &&
+           EqualSid(identity.userSid.data(), client->User.Sid) != FALSE;
 }
 
 } // namespace
@@ -219,6 +229,7 @@ void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
     std::string message;
     BrokerRequest request;
     BrokerCallerIdentity caller;
+    BrokerChildProcess child;
     std::string response;
     if (!ReadRequest(pipe, stopEvent, message) || !CaptureCallerIdentity(pipe, caller))
     {
@@ -251,10 +262,17 @@ void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
         }
         else
         {
-            const DWORD launchError = launchRequestHandler(launchContext, request, caller);
-            response = launchError == ERROR_SUCCESS
-                           ? BuildSuccessResponse(request.requestId, "launched")
-                           : BuildErrorResponse(request.requestId, "launch_failed", launchError);
+            const DWORD launchError = launchRequestHandler(launchContext, request, caller, child);
+            if (launchError == ERROR_SUCCESS && child)
+            {
+                response = BuildLaunchSuccessResponse(request.requestId, child.processId());
+            }
+            else
+            {
+                response = BuildErrorResponse(request.requestId,
+                    "launch_failed",
+                    launchError == ERROR_SUCCESS ? ERROR_INVALID_DATA : launchError);
+            }
         }
     }
     else

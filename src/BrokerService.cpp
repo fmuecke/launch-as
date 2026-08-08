@@ -4,7 +4,9 @@
 
 #include "BrokerCallerPolicy.h"
 #include "BrokerDataDirectory.h"
+#include "BrokerLogonToken.h"
 #include "BrokerPipeServer.h"
+#include "BrokerProcessLauncher.h"
 #include "BrokerProtocol.h"
 #include "BrokerRegistration.h"
 #include "BrokerServiceInstaller.h"
@@ -118,7 +120,13 @@ class LocalString final
 
 struct BrokerLaunchPolicy
 {
+    explicit BrokerLaunchPolicy(std::wstring_view credentialDirectory)
+        : credentialStore(credentialDirectory)
+    {
+    }
+
     std::vector<BYTE> authorizedCallerSid;
+    launch_as::broker::CredentialStore credentialStore;
 };
 
 [[nodiscard]] launch_as::UniqueHandle CreateControlPipe(
@@ -160,7 +168,8 @@ struct BrokerLaunchPolicy
 
 DWORD RegisterProfile(void* context);
 DWORD LaunchProfile(void* context, const launch_as::broker::BrokerRequest& request,
-    const launch_as::broker::BrokerCallerIdentity& caller);
+    const launch_as::broker::BrokerCallerIdentity& caller,
+    launch_as::broker::BrokerChildProcess& child);
 
 void RunPipeServer(
     launch_as::broker::RegistrationService& registration, BrokerLaunchPolicy& launchPolicy)
@@ -226,7 +235,8 @@ DWORD RegisterProfile(void* context)
 }
 
 DWORD LaunchProfile(void* context, const launch_as::broker::BrokerRequest& request,
-    const launch_as::broker::BrokerCallerIdentity& caller)
+    const launch_as::broker::BrokerCallerIdentity& caller,
+    launch_as::broker::BrokerChildProcess& child)
 {
     const auto* policy = static_cast<const BrokerLaunchPolicy*>(context);
     if (policy == nullptr ||
@@ -235,7 +245,14 @@ DWORD LaunchProfile(void* context, const launch_as::broker::BrokerRequest& reque
     {
         return ERROR_ACCESS_DENIED;
     }
-    return ERROR_NOT_READY;
+    launch_as::broker::BrokerLogonToken token;
+    const DWORD logonError =
+        launch_as::broker::LogOnBrokerProfile(L"AgentSandbox", policy->credentialStore, token);
+    if (logonError != ERROR_SUCCESS)
+    {
+        return logonError;
+    }
+    return launch_as::broker::LaunchFixedBrokerProbe(token.get(), child);
 }
 
 void WINAPI ServiceMain(DWORD, wchar_t**)
@@ -273,7 +290,7 @@ void WINAPI ServiceMain(DWORD, wchar_t**)
         ReportServiceStatus(SERVICE_STOPPED, dataDirectoryError);
         return;
     }
-    BrokerLaunchPolicy launchPolicy;
+    BrokerLaunchPolicy launchPolicy(credentialDirectory);
     static_cast<void>(launch_as::broker::LoadAuthorizedCallerSid(
         launch_as::broker::GetAuthorizedCallerPolicyPath(dataDirectory),
         launchPolicy.authorizedCallerSid));

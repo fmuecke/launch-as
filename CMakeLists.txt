@@ -143,6 +143,8 @@ set_target_properties(launch_as_conhost PROPERTIES
 add_executable(launch_as_broker
     src/BrokerAccountProvisioner.cpp
     src/BrokerAccountProvisioner.h
+    src/BrokerAdminCli.cpp
+    src/BrokerAdminCli.h
     src/BrokerAudit.cpp
     src/BrokerAudit.h
     src/BrokerCallerPolicy.cpp
@@ -168,6 +170,8 @@ add_executable(launch_as_broker
     src/BrokerProtocol.cpp
     src/BrokerProtocol.h
     src/BrokerService.cpp
+    src/BrokerServiceRuntime.cpp
+    src/BrokerServiceRuntime.h
     src/Win32Support.cpp
     src/Win32Support.h
     src/WindowsCommandLine.cpp

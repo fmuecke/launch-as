@@ -5,7 +5,7 @@
 [CmdletBinding()]
 param(
     [string]$PipeName = 'launch-as-broker.v1',
-    [string]$Account = 'AgentSandbox'
+    [string]$Account = 'LaunchAsUser'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -95,19 +95,19 @@ $pipeSddl = "D:P(A;;GA;;;SY)(A;;GRGW;;;$accountSid)"
 $pipeServers = @()
 
 $request = [ordered]@{
-    version = 1
-    requestId = $requestId
-    operation = 'launch'
-    profileId = $Account
-    mode = 'console'
-    arguments = @($cmd, '/d', '/c', 'timeout /t 30 >nul')
+    version          = 1
+    requestId        = $requestId
+    operation        = 'launch'
+    profileId        = $Account
+    mode             = 'console'
+    arguments        = @($cmd, '/d', '/c', 'timeout /t 30 >nul')
     workingDirectory = $PWD.Path
-    console = [ordered]@{
-        pipeIn = "$dataPipePrefix-in"
-        pipeOut = "$dataPipePrefix-out"
+    console          = [ordered]@{
+        pipeIn     = "$dataPipePrefix-in"
+        pipeOut    = "$dataPipePrefix-out"
         pipeResize = "$dataPipePrefix-resize"
-        cols = 120
-        rows = 30
+        cols       = 120
+        rows       = 30
     }
 } | ConvertTo-Json -Compress
 

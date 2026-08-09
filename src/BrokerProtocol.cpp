@@ -488,10 +488,6 @@ std::wstring_view RequestOperationName(RequestOperation operation) noexcept
         return L"launch";
     case RequestOperation::Enroll:
         return L"enroll";
-    case RequestOperation::Rotate:
-        return L"rotate";
-    case RequestOperation::Test:
-        return L"test";
     case RequestOperation::List:
         return L"list";
     case RequestOperation::Unenroll:
@@ -513,10 +509,6 @@ std::string_view RequestOperationSuccessReason(RequestOperation operation) noexc
     {
     case RequestOperation::Enroll:
         return "enrolled";
-    case RequestOperation::Rotate:
-        return "rotated";
-    case RequestOperation::Test:
-        return "tested";
     case RequestOperation::List:
         return "listed";
     case RequestOperation::Unenroll:
@@ -534,10 +526,6 @@ std::string_view RequestOperationFailureReason(RequestOperation operation) noexc
     {
     case RequestOperation::Enroll:
         return "enrollment_failed";
-    case RequestOperation::Rotate:
-        return "rotation_failed";
-    case RequestOperation::Test:
-        return "test_failed";
     case RequestOperation::List:
         return "list_failed";
     case RequestOperation::Unenroll:
@@ -561,7 +549,7 @@ std::string BuildManagementRequest(RequestOperation operation, std::wstring_view
         request += ",\"profileId\":";
         AppendJsonString(request, profileId);
     }
-    if (operation != RequestOperation::List && operation != RequestOperation::Test)
+    if (operation != RequestOperation::List)
     {
         request += confirmed ? ",\"confirmed\":true" : ",\"confirmed\":false";
     }
@@ -695,24 +683,14 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
     {
         return ParseResult::InvalidRequest;
     }
-    if (operationName == L"enroll" || operationName == L"rotate")
+    if (operationName == L"enroll")
     {
         if (modeSeen || argumentsSeen || workingDirectorySeen || consoleSeen || !confirmedSeen ||
             !confirmed)
         {
             return ParseResult::InvalidRequest;
         }
-        request.operation =
-            operationName == L"enroll" ? RequestOperation::Enroll : RequestOperation::Rotate;
-        return ParseResult::Success;
-    }
-    if (operationName == L"test")
-    {
-        if (modeSeen || argumentsSeen || workingDirectorySeen || consoleSeen || confirmedSeen)
-        {
-            return ParseResult::InvalidRequest;
-        }
-        request.operation = RequestOperation::Test;
+        request.operation = RequestOperation::Enroll;
         return ParseResult::Success;
     }
     if (operationName == L"unenroll")

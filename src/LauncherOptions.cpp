@@ -24,7 +24,7 @@ void PrintUsage()
                       -- <absolute-executable> [arguments...]
 
   Starts a console session through launch-as-broker. Enroll the account first with the
-  elevated launch-as-broker command. The client never accepts or stores passwords.
+  elevated launch-as-admin command. The client never accepts or stores passwords.
 
 )usage";
     std::wcerr << std::endl;

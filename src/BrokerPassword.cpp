@@ -71,6 +71,40 @@ class GeneratedPassword final
 
 } // namespace
 
+SecurePassword::~SecurePassword() { Clear(); }
+
+void SecurePassword::Clear() noexcept
+{
+    if (!characters_.empty())
+    {
+        SecureZeroMemory(characters_.data(), characters_.size() * sizeof(wchar_t));
+        characters_.clear();
+    }
+    length_ = 0;
+}
+
+bool SecurePassword::Assign(const BYTE* bytes, DWORD byteCount)
+{
+    if (bytes == nullptr || byteCount == 0 || byteCount % sizeof(wchar_t) != 0)
+    {
+        return false;
+    }
+    const auto* first = reinterpret_cast<const wchar_t*>(bytes);
+    Clear();
+    try
+    {
+        length_ = byteCount / sizeof(wchar_t);
+        characters_.assign(first, first + length_);
+        characters_.push_back(L'\0');
+    }
+    catch (...)
+    {
+        Clear();
+        throw;
+    }
+    return true;
+}
+
 DWORD GenerateBrokerPassword(SecurePassword& password)
 {
     GeneratedPassword generated;

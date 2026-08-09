@@ -133,19 +133,18 @@ void BrokerLogonToken::Reset(HANDLE token) noexcept
     token_ = token;
 }
 
-DWORD LogOnBrokerProfile(std::wstring_view accountName, std::wstring_view profileId,
-    const CredentialStore& store, BrokerLogonToken& token)
+DWORD GetBrokerAccountSid(std::wstring_view accountName, std::vector<BYTE>& sid)
+{
+    return LookupLocalUserSid(accountName, sid);
+}
+
+DWORD LogOnBrokerAccount(
+    std::wstring_view accountName, const SecurePassword& password, BrokerLogonToken& token)
 {
     token.Reset();
-    if (accountName.empty() || profileId.empty())
+    if (accountName.empty() || password.characters().empty())
     {
         return ERROR_INVALID_PARAMETER;
-    }
-    SecurePassword password;
-    const DWORD credentialError = store.Load(profileId, password);
-    if (credentialError != ERROR_SUCCESS)
-    {
-        return credentialError;
     }
     HANDLE rawToken = nullptr;
     const BOOL loggedOn = LogonUserW(std::wstring(accountName).c_str(),
@@ -155,7 +154,6 @@ DWORD LogOnBrokerProfile(std::wstring_view accountName, std::wstring_view profil
         LOGON32_PROVIDER_DEFAULT,
         &rawToken);
     const DWORD logonError = loggedOn ? ERROR_SUCCESS : GetLastError();
-    password.Clear();
     if (!loggedOn)
     {
         return logonError;

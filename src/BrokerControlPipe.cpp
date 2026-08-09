@@ -84,6 +84,10 @@ DWORD OpenBrokerControlPipe(HANDLE& pipe)
             return ERROR_SUCCESS;
         }
         lastError = GetLastError();
+        if (lastError == ERROR_PIPE_BUSY)
+        {
+            return ERROR_PIPE_BUSY;
+        }
         if (lastError == ERROR_FILE_NOT_FOUND && !serviceStartAttempted)
         {
             const DWORD startError = StartBrokerService();
@@ -93,7 +97,7 @@ DWORD OpenBrokerControlPipe(HANDLE& pipe)
             }
             serviceStartAttempted = true;
         }
-        else if (lastError != ERROR_FILE_NOT_FOUND && lastError != ERROR_PIPE_BUSY)
+        else if (lastError != ERROR_FILE_NOT_FOUND)
         {
             return lastError;
         }

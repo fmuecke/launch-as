@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Project: https://github.com/fmuecke/launch-as
 
+#include "BrokerControlPipe.h"
 #include "BrokerPipeServer.h"
 #include "BrokerProtocol.h"
 #include "Win32Support.h"
@@ -228,9 +229,18 @@ class ServerThread final
 
 int wmain(int argumentCount, wchar_t* arguments[])
 {
-    if (argumentCount != 2)
+    if (argumentCount != 3)
     {
-        std::wcerr << L"Expected the launch-as-broker executable path.\n";
+        std::wcerr << L"Expected the launch-as-admin and launch-as-broker executable paths.\n";
+        return 1;
+    }
+    const std::wstring_view adminPath(arguments[1]);
+    const std::wstring_view brokerPath(arguments[2]);
+    const CommandResult serviceCommand = RunCommandAndCapture(brokerPath, L"install");
+    if (!Expect(serviceCommand.exitCode == ERROR_FAILED_SERVICE_CONTROLLER_CONNECT &&
+                    serviceCommand.output.find(L"Service Control Manager") != std::wstring::npos,
+            L"The broker service accepted an administrative command."))
+    {
         return 1;
     }
     if (IsBrokerServiceInstalled())
@@ -240,9 +250,9 @@ int wmain(int argumentCount, wchar_t* arguments[])
     }
 
     const CommandResult unconfirmedEnroll =
-        RunCommandAndCapture(arguments[1], L"enroll arbitrary-profile");
+        RunCommandAndCapture(adminPath, L"enroll arbitrary-profile");
     const CommandResult unconfirmedUnenroll =
-        RunCommandAndCapture(arguments[1], L"unenroll arbitrary-profile");
+        RunCommandAndCapture(adminPath, L"unenroll arbitrary-profile");
     if (!Expect(unconfirmedEnroll.exitCode == ERROR_CANCELLED &&
                     unconfirmedEnroll.output.find(L"without an interactive console") !=
                         std::wstring::npos,
@@ -254,7 +264,7 @@ int wmain(int argumentCount, wchar_t* arguments[])
     {
         return 1;
     }
-    const CommandResult invalidCommand = RunCommandAndCapture(arguments[1], L"enroll bad/name");
+    const CommandResult invalidCommand = RunCommandAndCapture(adminPath, L"enroll bad/name");
     if (!Expect(invalidCommand.exitCode == ERROR_INVALID_PARAMETER,
             L"Broker invalid account did not return ERROR_INVALID_PARAMETER.") ||
         !Expect(invalidCommand.output.find(L"Invalid account name") != std::wstring::npos &&
@@ -263,8 +273,8 @@ int wmain(int argumentCount, wchar_t* arguments[])
     {
         return 1;
     }
-    if (!Expect(RunCommand(arguments[1], L"install") == ERROR_ACCESS_DENIED,
-            L"Broker install did not require elevation."))
+    if (!Expect(RunCommand(adminPath, L"install") == ERROR_ACCESS_DENIED,
+            L"Admin install did not require elevation."))
     {
         return 1;
     }
@@ -295,12 +305,37 @@ int wmain(int argumentCount, wchar_t* arguments[])
         return 1;
     }
 
+    launch_as::UniqueHandle occupied(CreateFileW(launch_as::broker::ControlPipeName.data(),
+        GENERIC_READ | GENERIC_WRITE,
+        0,
+        nullptr,
+        OPEN_EXISTING,
+        0,
+        nullptr));
+    if (!Expect(static_cast<bool>(occupied), L"Could not occupy the broker control pipe."))
+    {
+        return 1;
+    }
+    HANDLE rawSecondPipe = nullptr;
+    const DWORD busyError = launch_as::broker::OpenBrokerControlPipe(rawSecondPipe);
+    launch_as::UniqueHandle secondPipe(rawSecondPipe);
+    if (!Expect(busyError == ERROR_PIPE_BUSY && !secondPipe,
+            L"A second broker launch did not fail immediately while the pipe was busy."))
+    {
+        return 1;
+    }
+    occupied.reset();
+    if (!DisconnectNamedPipe(server.get()))
+    {
+        std::wcerr << L"Could not release the occupied broker control pipe.\n";
+        return 1;
+    }
+
     ServerThread serverThread(server.get(), stopEvent.get());
-    const DWORD result = RunCommand(arguments[1], L"enroll AgentSandbox --force");
-    return Expect(
-               serverThread.connected(), L"Broker enroll did not connect to the control pipe.") &&
+    const DWORD result = RunCommand(adminPath, L"enroll LaunchAsUser --force");
+    return Expect(serverThread.connected(), L"Admin enroll did not connect to the control pipe.") &&
                    Expect(result == ERROR_NOT_READY,
-                       L"Broker enroll did not return the service response.")
+                       L"Admin enroll did not return the service response.")
                ? 0
                : 1;
 }

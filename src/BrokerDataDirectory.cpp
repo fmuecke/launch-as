@@ -104,19 +104,19 @@ DWORD GetBrokerDataDirectory(std::wstring& directory)
     return ERROR_SUCCESS;
 }
 
-DWORD GetBrokerCredentialDirectory(std::wstring& directory)
+DWORD GetBrokerEnrollmentDirectory(std::wstring& directory)
 {
     const DWORD brokerDirectoryError = GetBrokerDataDirectory(directory);
     if (brokerDirectoryError != ERROR_SUCCESS)
     {
         return brokerDirectoryError;
     }
-    directory += L"\\credentials";
-    const DWORD credentialDirectoryError = CreateSecureDirectory(directory);
-    if (credentialDirectoryError != ERROR_SUCCESS)
+    directory += L"\\enrollments";
+    const DWORD enrollmentDirectoryError = CreateSecureDirectory(directory);
+    if (enrollmentDirectoryError != ERROR_SUCCESS)
     {
         directory.clear();
-        return credentialDirectoryError;
+        return enrollmentDirectoryError;
     }
     return ERROR_SUCCESS;
 }

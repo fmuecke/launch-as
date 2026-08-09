@@ -3,7 +3,9 @@
 // Project: https://github.com/fmuecke/launch-as
 
 #include "BrokerAccountProvisioner.h"
+#include "BrokerEnrollmentStore.h"
 #include "BrokerLogonToken.h"
+#include "BrokerPassword.h"
 #include "BrokerRegistration.h"
 #include "Win32Support.h"
 
@@ -71,8 +73,20 @@ class TemporaryDirectory final
     {
         if (created_)
         {
-            DeleteFileW((path_ + L"\\agent-sandbox.blob").c_str());
-            DeleteFileW((path_ + L"\\agent-sandbox.blob.tmp").c_str());
+            const std::wstring search = path_ + L"\\*.enrollment*";
+            WIN32_FIND_DATAW file {};
+            HANDLE find = FindFirstFileW(search.c_str(), &file);
+            if (find != INVALID_HANDLE_VALUE)
+            {
+                do
+                {
+                    if ((file.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+                    {
+                        DeleteFileW((path_ + L"\\" + file.cFileName).c_str());
+                    }
+                } while (FindNextFileW(find, &file));
+                FindClose(find);
+            }
             RemoveDirectoryW(path_.c_str());
         }
     }
@@ -194,25 +208,24 @@ int wmain()
         std::wcerr << L"Registration status: " << initialRegistrationError << L"\n";
         return 1;
     }
-    const DWORD rotationRegistrationError = registration.Rotate(account.name());
-    if (!Expect(rotationRegistrationError == ERROR_SUCCESS,
-            L"Could not rotate the disposable account password."))
-    {
-        std::wcerr << L"Rotation status: " << rotationRegistrationError << L"\n";
-        return 1;
-    }
-    launch_as::broker::CredentialStore store(credentialDirectory.path());
-    launch_as::broker::SecurePassword storedPassword;
+    launch_as::broker::SecurePassword password;
+    const DWORD passwordError = launch_as::broker::GenerateBrokerPassword(password);
+    const DWORD resetError = passwordError == ERROR_SUCCESS
+                                 ? registration.ResetPassword(account.name(), password)
+                                 : passwordError;
     launch_as::broker::BrokerLogonToken token;
     const DWORD brokerTokenError =
-        launch_as::broker::LogOnBrokerProfile(account.name(), account.name(), store, token);
+        resetError == ERROR_SUCCESS
+            ? launch_as::broker::LogOnBrokerAccount(account.name(), password, token)
+            : resetError;
+    password.Clear();
+    launch_as::broker::EnrollmentStore enrollments(credentialDirectory.path());
+    std::vector<BYTE> enrolledSid;
     if (!Expect(HasRequiredFlags(account.name()), L"Disposable account flags are not hardened.") ||
-        !Expect(registration.Test(account.name()) == ERROR_SUCCESS,
-            L"Could not verify the stored disposable account credential.") ||
-        !Expect(store.Load(account.name(), storedPassword) == ERROR_SUCCESS,
-            L"Could not load the stored disposable account password.") ||
+        !Expect(enrollments.Load(account.name(), enrolledSid) == ERROR_SUCCESS,
+            L"Enrollment did not retain the account identity.") ||
         !Expect(brokerTokenError == ERROR_SUCCESS && static_cast<bool>(token),
-            L"Rotated disposable account password did not produce a valid broker token."))
+            L"Active disposable account password did not produce a valid broker token."))
     {
         std::wcerr << L"Broker token status: " << brokerTokenError << L"\n";
         return 1;
@@ -220,7 +233,8 @@ int wmain()
 
     if (!Expect(registration.Unenroll(account.name()) == ERROR_SUCCESS,
             L"Could not unenroll the disposable account.") ||
-        !Expect(!store.Exists(account.name()), L"Unenrollment retained the credential.") ||
+        !Expect(enrollments.Load(account.name(), enrolledSid) == ERROR_FILE_NOT_FOUND,
+            L"Unenrollment retained the account enrollment.") ||
         !Expect(IsAccountDisabled(account.name()), L"Unenrollment did not disable the account."))
     {
         return 1;
@@ -238,15 +252,33 @@ int wmain()
 
     if (!Expect(registration.Enroll(account.name()) == ERROR_SUCCESS,
             L"Could not re-enroll the disposable account.") ||
-        !Expect(store.Exists(account.name()), L"Re-enrollment did not restore the credential.") ||
+        !Expect(enrollments.Load(account.name(), enrolledSid) == ERROR_SUCCESS,
+            L"Re-enrollment did not restore the account enrollment.") ||
         !Expect(account.Remove() == NERR_Success,
             L"Could not externally remove the disposable account.") ||
-        !Expect(registration.Rotate(account.name()) == NERR_UserNotFound,
-            L"Broker rotation recreated a missing enrolled account.") ||
+        !Expect(launch_as::broker::GenerateBrokerPassword(password) == ERROR_SUCCESS,
+            L"Could not generate a disposable password for the missing-account check.") ||
+        !Expect(registration.ResetPassword(account.name(), password) != ERROR_SUCCESS,
+            L"Broker password reset recreated a missing enrolled account.") ||
+        !Expect(launch_as::broker::ProvisionStandardLocalAccount(account.name(), password) ==
+                    ERROR_SUCCESS,
+            L"Could not recreate the account with its original name."))
+    {
+        return 1;
+    }
+    password.Clear();
+    account.MarkCreated();
+    std::vector<std::wstring> accounts;
+    if (!Expect(registration.Unenroll(account.name()) == ERROR_ACCESS_DENIED,
+            L"Broker unenrolled a replacement account with a different SID.") ||
+        !Expect(!IsAccountDisabled(account.name()),
+            L"Broker disabled a replacement account with a different SID.") ||
+        !Expect(registration.List(accounts) == ERROR_SUCCESS && accounts.empty(),
+            L"Broker listed an enrollment whose account SID had changed.") ||
+        !Expect(registration.Enroll(account.name()) == ERROR_SUCCESS,
+            L"Could not re-enroll the replacement account.") ||
         !Expect(registration.Unenroll(account.name()) == ERROR_SUCCESS,
-            L"Could not unenroll a missing registered account.") ||
-        !Expect(!store.Exists(account.name()),
-            L"Unenrollment retained the credential for a missing account."))
+            L"Could not unenroll the re-enrolled replacement account."))
     {
         return 1;
     }

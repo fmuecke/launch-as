@@ -170,6 +170,12 @@ ExitCode RunBrokerConsole(const AccountIdentity& account, const Options& options
         processId);
     if (launchError != ERROR_SUCCESS)
     {
+        if (launchError == ERROR_PIPE_BUSY)
+        {
+            std::wcerr << L"The broker is already running a session. Wait for it to finish before "
+                          L"starting another.\n";
+            return ExitFailure;
+        }
         std::wcerr << L"Could not launch the enrolled account through the broker: "
                    << FormatWindowsError(launchError) << L"\n";
         return ExitFailure;

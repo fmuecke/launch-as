@@ -4,7 +4,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$Account = 'AgentSandbox',
+    [string]$Account = 'LaunchAsUser',
     [ValidateRange(0, [int]::MaxValue)]
     [int]$ExpectedExitCode = 0
 )
@@ -23,7 +23,7 @@ if (-not (Test-Path -LiteralPath $workingDirectory -PathType Container)) {
 }
 
 ${interactiveWindow} = Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } |
-    Select-Object -First 1
+Select-Object -First 1
 if ($null -eq $interactiveWindow) {
     throw 'Open a normal desktop window, then run this test from the authorised non-elevated session.'
 }
@@ -38,12 +38,12 @@ $authenticatedUsersSid = [System.Security.Principal.SecurityIdentifier]::new(
     [System.Security.Principal.WellKnownSidType]::AuthenticatedUserSid, $null)
 $reportDirectoryAcl = Get-Acl -LiteralPath $reportDirectory
 $reportDirectoryAcl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
-    $authenticatedUsersSid,
-    [System.Security.AccessControl.FileSystemRights]::Modify,
-    [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+        $authenticatedUsersSid,
+        [System.Security.AccessControl.FileSystemRights]::Modify,
+        [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
         [System.Security.AccessControl.InheritanceFlags]::ObjectInherit,
-    [System.Security.AccessControl.PropagationFlags]::None,
-    [System.Security.AccessControl.AccessControlType]::Allow))
+        [System.Security.AccessControl.PropagationFlags]::None,
+        [System.Security.AccessControl.AccessControlType]::Allow))
 Set-Acl -LiteralPath $reportDirectory -AclObject $reportDirectoryAcl
 $reportPath = Join-Path $reportDirectory 'probe.txt'
 

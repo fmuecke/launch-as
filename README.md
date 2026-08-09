@@ -12,24 +12,32 @@ not part of Phase 1.
 
 ## Setup
 
-Run these elevated, once per computer or when changing enrolled accounts:
+For interactive setup, build first and run the convenience wrapper. It elevates when necessary,
+offers to update or uninstall an existing service, and offers to enroll a default account after a
+fresh install:
 
 ```powershell
-.\out\build\Release\launch-as-broker.exe install
-.\out\build\Release\launch-as-broker.exe enroll AgentSandbox
-.\out\build\Release\launch-as-broker.exe test AgentSandbox
+.\Setup-LaunchAs.ps1
 ```
 
-`enroll` creates a missing non-administrative local account or takes over an existing one by
-setting a broker-owned password. It prompts before changing the account; `--force` is the explicit
-non-interactive override. `unenroll` deletes the broker credential and disables the account, but
-does not delete the Windows account.
+For automation or individual elevated administration operations, use `launch-as-admin.exe`:
 
 ```powershell
-.\out\build\Release\launch-as-broker.exe list
-.\out\build\Release\launch-as-broker.exe rotate AgentSandbox
-.\out\build\Release\launch-as-broker.exe unenroll AgentSandbox
-.\out\build\Release\launch-as-broker.exe uninstall
+.\out\build\Release\launch-as-admin.exe install
+.\out\build\Release\launch-as-admin.exe enroll LaunchAsUser
+```
+
+`install` stops any active broker session before updating the service. `enroll` creates a missing non-administrative local account or takes over an existing one by
+setting a broker-owned password. It prompts before changing the account; `--force` is the explicit
+non-interactive override. The broker retains no password after enrollment: it creates one for each
+launch, uses it to log on, then wipes it. The broker accepts one session at a time; a second launch
+fails immediately instead of waiting. `unenroll` forgets the enrollment and disables the account,
+but does not delete the Windows account.
+
+```powershell
+.\out\build\Release\launch-as-admin.exe list
+.\out\build\Release\launch-as-admin.exe unenroll LaunchAsUser
+.\out\build\Release\launch-as-admin.exe uninstall
 ```
 
 ## Launch
@@ -38,14 +46,14 @@ From a normal terminal, launch an enrolled account in the current pane:
 
 ```powershell
 .\out\build\Release\launch-as.exe `
-    --user AgentSandbox `
+    --user LaunchAsUser `
     --working-directory C:\dev\project `
     -- C:\Windows\System32\cmd.exe /d /k
 ```
 
 `run` is an optional spelling of the same command. The client starts the demand-start broker,
 creates the terminal data pipes, and returns the target program's exit code. The broker owns the
-credential and kills the console job when the client control connection closes.
+temporary launch password and kills the console job when the client control connection closes.
 
 ## Build and test
 
@@ -62,8 +70,8 @@ requires `ninja` on `PATH` and builds the Ninja Multi-Config Release target by d
 explicit because they require elevation and an enrolled account:
 
 ```powershell
-.\tests\Invoke-BrokerConsoleAcceptanceTest.ps1 -Account AgentSandbox -ExpectedExitCode 37
-.\tests\Invoke-BrokerProbeAcceptanceTest.ps1 -Account AgentSandbox
+.\tests\Invoke-BrokerConsoleAcceptanceTest.ps1 -Account LaunchAsUser -ExpectedExitCode 37
+.\tests\Invoke-BrokerProbeAcceptanceTest.ps1 -Account LaunchAsUser
 ```
 
 The probe confirms a distinct logon SID, no interactive windows, and denied `VM_READ` and

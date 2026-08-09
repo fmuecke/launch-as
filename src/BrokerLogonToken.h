@@ -4,10 +4,11 @@
 
 #pragma once
 
-#include "BrokerCredentialStore.h"
+#include "BrokerPassword.h"
 
 #include <Windows.h>
 #include <string_view>
+#include <vector>
 
 namespace launch_as::broker
 {
@@ -29,7 +30,8 @@ class BrokerLogonToken final
     HANDLE token_ = nullptr;
 };
 
-[[nodiscard]] DWORD LogOnBrokerProfile(std::wstring_view accountName, std::wstring_view profileId,
-    const CredentialStore& store, BrokerLogonToken& token);
+[[nodiscard]] DWORD GetBrokerAccountSid(std::wstring_view accountName, std::vector<BYTE>& sid);
+[[nodiscard]] DWORD LogOnBrokerAccount(
+    std::wstring_view accountName, const SecurePassword& password, BrokerLogonToken& token);
 
 } // namespace launch_as::broker

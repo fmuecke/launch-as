@@ -277,25 +277,74 @@ class LocalSecurityDescriptor final
     return ERROR_SUCCESS;
 }
 
+[[nodiscard]] DWORD StopServiceAndWait(SC_HANDLE service)
+{
+    SERVICE_STATUS status {};
+    if (!ControlService(service, SERVICE_CONTROL_STOP, &status))
+    {
+        const DWORD stopError = GetLastError();
+        if (stopError != ERROR_SERVICE_NOT_ACTIVE)
+        {
+            return stopError;
+        }
+    }
+    const ULONGLONG deadline = GetTickCount64() + ServiceStopTimeoutMilliseconds;
+    for (;;)
+    {
+        SERVICE_STATUS_PROCESS processStatus {};
+        DWORD returnedBytes = 0;
+        if (!QueryServiceStatusEx(service,
+                SC_STATUS_PROCESS_INFO,
+                reinterpret_cast<BYTE*>(&processStatus),
+                sizeof(processStatus),
+                &returnedBytes))
+        {
+            const DWORD statusError = GetLastError();
+            return statusError;
+        }
+        if (processStatus.dwCurrentState == SERVICE_STOPPED)
+        {
+            return ERROR_SUCCESS;
+        }
+        if (GetTickCount64() >= deadline)
+        {
+            return ERROR_TIMEOUT;
+        }
+        Sleep(100);
+    }
+}
+
 } // namespace
 
 DWORD InstallBrokerService()
 {
+    const DWORD stopError = StopBrokerService();
+    if (stopError != ERROR_SUCCESS)
+    {
+        return stopError;
+    }
     std::vector<BYTE> callerSid;
     const DWORD callerError = GetCallerSid(callerSid);
     if (callerError != ERROR_SUCCESS)
     {
         return callerError;
     }
-    std::wstring sourcePath;
-    const DWORD sourceError = GetCurrentExecutablePath(sourcePath);
+    std::wstring adminPath;
+    const DWORD sourceError = GetCurrentExecutablePath(adminPath);
     if (sourceError != ERROR_SUCCESS)
     {
         return sourceError;
     }
+    std::wstring sourceBrokerPath;
+    const DWORD sourceBrokerError =
+        GetSiblingExecutablePath(adminPath, BrokerExecutableName, sourceBrokerPath);
+    if (sourceBrokerError != ERROR_SUCCESS)
+    {
+        return sourceBrokerError;
+    }
     std::wstring sourceConhostPath;
     const DWORD sourceConhostError =
-        GetSiblingExecutablePath(sourcePath, BrokerConhostExecutableName, sourceConhostPath);
+        GetSiblingExecutablePath(adminPath, BrokerConhostExecutableName, sourceConhostPath);
     if (sourceConhostError != ERROR_SUCCESS)
     {
         return sourceConhostError;
@@ -312,7 +361,7 @@ DWORD InstallBrokerService()
         return directoryError;
     }
     const std::wstring installedPath = installDirectory + L"\\" + BrokerExecutableName;
-    const DWORD brokerCopyError = CopyAndSecureInstallFile(sourcePath, installedPath);
+    const DWORD brokerCopyError = CopyAndSecureInstallFile(sourceBrokerPath, installedPath);
     if (brokerCopyError != ERROR_SUCCESS)
     {
         return brokerCopyError;
@@ -497,6 +546,24 @@ DWORD UninstallBrokerService()
     return RemoveBrokerInstallFiles(installDirectory);
 }
 
+DWORD StopBrokerService()
+{
+    ServiceHandle manager(OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT));
+    if (!manager)
+    {
+        const DWORD managerError = GetLastError();
+        return managerError;
+    }
+    ServiceHandle service(
+        OpenServiceW(manager.get(), L"launch-as-broker", SERVICE_STOP | SERVICE_QUERY_STATUS));
+    if (!service)
+    {
+        const DWORD serviceError = GetLastError();
+        return serviceError == ERROR_SERVICE_DOES_NOT_EXIST ? ERROR_SUCCESS : serviceError;
+    }
+    return StopServiceAndWait(service.get());
+}
+
 DWORD RemoveBrokerInstallFiles(std::wstring_view installDirectory)
 {
     if (installDirectory.empty())
@@ -559,41 +626,10 @@ DWORD UninstallDemandStartBrokerService(std::wstring_view serviceName)
         const DWORD serviceError = GetLastError();
         return serviceError == ERROR_SERVICE_DOES_NOT_EXIST ? ERROR_SUCCESS : serviceError;
     }
-    SERVICE_STATUS status {};
-    if (!ControlService(service.get(), SERVICE_CONTROL_STOP, &status))
+    const DWORD stopError = StopServiceAndWait(service.get());
+    if (stopError != ERROR_SUCCESS)
     {
-        const DWORD stopError = GetLastError();
-        if (stopError != ERROR_SERVICE_NOT_ACTIVE)
-        {
-            return stopError;
-        }
-    }
-    else
-    {
-        const ULONGLONG deadline = GetTickCount64() + ServiceStopTimeoutMilliseconds;
-        for (;;)
-        {
-            SERVICE_STATUS_PROCESS processStatus {};
-            DWORD returnedBytes = 0;
-            if (!QueryServiceStatusEx(service.get(),
-                    SC_STATUS_PROCESS_INFO,
-                    reinterpret_cast<BYTE*>(&processStatus),
-                    sizeof(processStatus),
-                    &returnedBytes))
-            {
-                const DWORD statusError = GetLastError();
-                return statusError;
-            }
-            if (processStatus.dwCurrentState == SERVICE_STOPPED)
-            {
-                break;
-            }
-            if (GetTickCount64() >= deadline)
-            {
-                return ERROR_TIMEOUT;
-            }
-            Sleep(100);
-        }
+        return stopError;
     }
     if (!DeleteService(service.get()))
     {

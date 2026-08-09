@@ -113,7 +113,7 @@ int wmain()
     }
 
     constexpr char request[] =
-        R"json({"version":1,"requestId":"123e4567-e89b-12d3-a456-426614174000","operation":"launch","profileId":"agent-sandbox","mode":"console","arguments":[],"workingDirectory":"C:\\repo","console":{"pipeIn":"\\\\.\\pipe\\launch-as-test-in","pipeOut":"\\\\.\\pipe\\launch-as-test-out","pipeResize":"\\\\.\\pipe\\launch-as-test-resize","cols":120,"rows":30}})json";
+        R"json({"version":1,"requestId":"123e4567-e89b-12d3-a456-426614174000","operation":"launch","profileId":"LaunchAsUser","mode":"console","arguments":[],"workingDirectory":"C:\\repo","console":{"pipeIn":"\\\\.\\pipe\\launch-as-test-in","pipeOut":"\\\\.\\pipe\\launch-as-test-out","pipeResize":"\\\\.\\pipe\\launch-as-test-resize","cols":120,"rows":30}})json";
     DWORD bytesWritten = 0;
     if (!Expect(WriteFile(client.get(), request, sizeof(request) - 1, &bytesWritten, nullptr) &&
                     bytesWritten == sizeof(request) - 1,

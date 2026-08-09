@@ -114,17 +114,15 @@ namespace
 void PrintUsage()
 {
     std::wcerr << LR"usage(Usage:
-  launch-as-broker install                        Create or update the broker service.
-  launch-as-broker uninstall [--force]            Stop and remove the service; accounts are retained.
-  launch-as-broker enroll <account> [--force]     Create an account or add an existing. This will change its password.
-  launch-as-broker rotate <account> [--force]     Replace an enrolled account's broker-owned password.
-  launch-as-broker test <account>                 Test an enrolled account's stored credential.
-  launch-as-broker list                           Show owned accounts.
-  launch-as-broker unenroll <account> [--force]   Erase its credential and disable the account.
-  launch-as-broker unenroll-all [--force]         Unenroll every owned account.
+  launch-as-admin install                         Stop active sessions, then create or update the broker service.
+  launch-as-admin uninstall [--force]             Stop and remove the service; accounts are retained.
+  launch-as-admin enroll <account> [--force]      Create an account or take over an existing one; changes its password.
+  launch-as-admin list                            Show owned accounts.
+  launch-as-admin unenroll <account> [--force]    End its sessions, forget it, and disable the account.
+  launch-as-admin unenroll-all [--force]          Unenroll every owned account.
 
-install, uninstall, enroll, rotate, test, unenroll, and unenroll-all require elevation.
-uninstall, enroll, rotate, unenroll, and unenroll-all require consent; --force skips the prompt.
+install, uninstall, enroll, unenroll, and unenroll-all require elevation.
+uninstall, enroll, unenroll, and unenroll-all require consent; --force skips the prompt.
 
 )usage";
 }
@@ -194,7 +192,6 @@ int RunConfigurationCommand(int argumentCount, wchar_t* arguments[])
     }
     if ((argumentCount == 3 || argumentCount == 4) &&
         (std::wstring_view(arguments[1]) == L"enroll" ||
-            std::wstring_view(arguments[1]) == L"rotate" ||
             std::wstring_view(arguments[1]) == L"unenroll") &&
         (argumentCount == 3 || std::wstring_view(arguments[3]) == L"--force"))
     {
@@ -207,7 +204,6 @@ int RunConfigurationCommand(int argumentCount, wchar_t* arguments[])
         }
         const std::wstring_view command(arguments[1]);
         const bool isEnrollment = command == L"enroll";
-        const bool isRotation = command == L"rotate";
         if (isEnrollment)
         {
             const DWORD validationError =
@@ -228,25 +224,30 @@ int RunConfigurationCommand(int argumentCount, wchar_t* arguments[])
         const bool forced = argumentCount == 4;
         const std::wstring action =
             isEnrollment
-                ? L"Enroll " + std::wstring(accountName) + L" and create or rotate its password"
-            : isRotation ? L"Rotate the broker-owned password for " + std::wstring(accountName)
-                         : L"Unenroll " + std::wstring(accountName) + L" and disable the account";
+                ? L"Enroll " + std::wstring(accountName) + L" and create or take over its account"
+                : L"Unenroll " + std::wstring(accountName) + L" and disable the account";
         if (!forced && !ConfirmDestructiveOperation(action))
         {
             return ERROR_CANCELLED;
         }
         const launch_as::broker::RequestOperation operation =
             isEnrollment ? launch_as::broker::RequestOperation::Enroll
-            : isRotation ? launch_as::broker::RequestOperation::Rotate
                          : launch_as::broker::RequestOperation::Unenroll;
+        if (!isEnrollment)
+        {
+            const DWORD stopError = launch_as::broker::StopBrokerService();
+            if (stopError != ERROR_SUCCESS)
+            {
+                std::wcerr << L"Could not stop broker sessions before unenrollment: "
+                           << launch_as::FormatWindowsError(stopError) << L"\n";
+                return static_cast<int>(stopError);
+            }
+        }
         const DWORD configurationError =
             ForwardManagementRequest(operation, accountName, true, nullptr);
         if (configurationError == ERROR_SUCCESS)
         {
-            std::wcout << (isEnrollment    ? L"Enrolled "
-                              : isRotation ? L"Rotated "
-                                           : L"Unenrolled ")
-                       << accountName << L".\n";
+            std::wcout << (isEnrollment ? L"Enrolled " : L"Unenrolled ") << accountName << L".\n";
         }
         else if (isEnrollment && configurationError == ERROR_MEMBER_IN_GROUP)
         {
@@ -255,36 +256,11 @@ int RunConfigurationCommand(int argumentCount, wchar_t* arguments[])
         }
         else
         {
-            std::wcerr << L"Broker "
-                       << (isEnrollment    ? L"enrollment"
-                              : isRotation ? L"rotation"
-                                           : L"unenrollment")
+            std::wcerr << L"Broker " << (isEnrollment ? L"enrollment" : L"unenrollment")
                        << L" failed: " << launch_as::FormatWindowsError(configurationError)
                        << L"\n";
         }
         return static_cast<int>(configurationError);
-    }
-    if (argumentCount == 3 && std::wstring_view(arguments[1]) == L"test")
-    {
-        const std::wstring_view accountName(arguments[2]);
-        if (!launch_as::broker::IsValidBrokerAccountName(accountName))
-        {
-            std::wcerr << L"Invalid account name: " << accountName << L"\n";
-            PrintUsage();
-            return ERROR_INVALID_PARAMETER;
-        }
-        const DWORD testError = ForwardManagementRequest(
-            launch_as::broker::RequestOperation::Test, accountName, false, nullptr);
-        if (testError == ERROR_SUCCESS)
-        {
-            std::wcout << L"Stored broker credential for " << accountName << L" is valid.\n";
-        }
-        else
-        {
-            std::wcerr << L"Broker credential test failed: "
-                       << launch_as::FormatWindowsError(testError) << L"\n";
-        }
-        return static_cast<int>(testError);
     }
     if ((argumentCount == 2 || argumentCount == 3) &&
         std::wstring_view(arguments[1]) == L"unenroll-all" &&
@@ -294,6 +270,13 @@ int RunConfigurationCommand(int argumentCount, wchar_t* arguments[])
             !ConfirmDestructiveOperation(L"Unenroll every enrolled broker account"))
         {
             return ERROR_CANCELLED;
+        }
+        const DWORD stopError = launch_as::broker::StopBrokerService();
+        if (stopError != ERROR_SUCCESS)
+        {
+            std::wcerr << L"Could not stop broker sessions before unenrollment: "
+                       << launch_as::FormatWindowsError(stopError) << L"\n";
+            return static_cast<int>(stopError);
         }
         const DWORD dropError = ForwardManagementRequest(
             launch_as::broker::RequestOperation::UnenrollAll, L"", true, nullptr);

@@ -19,10 +19,10 @@ constexpr char ValidRequest[] = R"json({
   "version": 1,
   "requestId": "123e4567-e89b-12d3-a456-426614174000",
   "operation": "launch",
-  "profileId": "agent-sandbox",
+  "profileId": "LaunchAsUser",
   "mode": "console",
   "arguments": ["--resume", "caf\u00e9", "emoji \uD83D\uDE80"],
-  "workingDirectory": "C:\\dev\\AgentSandbox\\repo",
+  "workingDirectory": "C:\\dev\\LaunchAsUser\\repo",
   "console": {
     "pipeIn": "\\\\.\\pipe\\launch-as-123-in",
     "pipeOut": "\\\\.\\pipe\\launch-as-123-out",
@@ -34,7 +34,7 @@ constexpr char ValidRequest[] = R"json({
 })json";
 
 constexpr char LegacyConsoleRequest[] =
-    R"json({"version":1,"requestId":"123e4567-e89b-12d3-a456-426614174000","operation":"launch","profileId":"agent-sandbox","mode":"console","arguments":[],"workingDirectory":"C:\\repo","console":{"pipeIn":"\\\\.\\pipe\\launch-as-123-in","pipeOut":"\\\\.\\pipe\\launch-as-123-out","pipeResize":"\\\\.\\pipe\\launch-as-123-resize","cols":120,"rows":30}})json";
+    R"json({"version":1,"requestId":"123e4567-e89b-12d3-a456-426614174000","operation":"launch","profileId":"LaunchAsUser","mode":"console","arguments":[],"workingDirectory":"C:\\repo","console":{"pipeIn":"\\\\.\\pipe\\launch-as-123-in","pipeOut":"\\\\.\\pipe\\launch-as-123-out","pipeResize":"\\\\.\\pipe\\launch-as-123-resize","cols":120,"rows":30}})json";
 
 constexpr char ListRequest[] = R"json({
   "version": 1,
@@ -46,7 +46,7 @@ constexpr char UnenrollRequest[] = R"json({
   "version": 1,
   "requestId": "123e4567-e89b-12d3-a456-426614174000",
   "operation": "unenroll",
-  "profileId": "agent-sandbox",
+  "profileId": "LaunchAsUser",
   "confirmed": true
 })json";
 
@@ -55,21 +55,6 @@ constexpr char UnenrollAllRequest[] = R"json({
   "requestId": "123e4567-e89b-12d3-a456-426614174000",
   "operation": "unenroll-all",
   "confirmed": true
-})json";
-
-constexpr char RotateRequest[] = R"json({
-  "version": 1,
-  "requestId": "123e4567-e89b-12d3-a456-426614174000",
-  "operation": "rotate",
-  "profileId": "agent-sandbox",
-  "confirmed": true
-})json";
-
-constexpr char TestRequest[] = R"json({
-  "version": 1,
-  "requestId": "123e4567-e89b-12d3-a456-426614174000",
-  "operation": "test",
-  "profileId": "agent-sandbox"
 })json";
 
 constexpr char UnconfirmedEnrollRequest[] = R"json({
@@ -102,7 +87,7 @@ int wmain()
         !Expect(request.console.columns == 120 && request.console.rows == 30,
             L"Console size was not decoded.") ||
         !Expect(request.console.inheritCursor, L"Cursor-inheritance capability was not decoded.") ||
-        !Expect(request.profileId == L"agent-sandbox", L"Profile id was not decoded."))
+        !Expect(request.profileId == L"LaunchAsUser", L"Profile id was not decoded."))
     {
         return 1;
     }
@@ -132,17 +117,6 @@ int wmain()
     {
         return 1;
     }
-    if (!Expect(launch_as::broker::ParseBrokerRequest(RotateRequest, request) ==
-                        launch_as::broker::ParseResult::Success &&
-                    request.operation == launch_as::broker::RequestOperation::Rotate,
-            L"Rotate request was rejected.") ||
-        !Expect(launch_as::broker::ParseBrokerRequest(TestRequest, request) ==
-                        launch_as::broker::ParseResult::Success &&
-                    request.operation == launch_as::broker::RequestOperation::Test,
-            L"Credential test request was rejected."))
-    {
-        return 1;
-    }
     if (!Expect(launch_as::broker::ParseBrokerRequest(UnconfirmedEnrollRequest, request) ==
                     launch_as::broker::ParseResult::InvalidRequest,
             L"Unconfirmed registration request was accepted."))
@@ -150,20 +124,29 @@ int wmain()
         return 1;
     }
     const std::string managementRequest =
-        launch_as::broker::BuildManagementRequest(launch_as::broker::RequestOperation::Rotate,
+        launch_as::broker::BuildManagementRequest(launch_as::broker::RequestOperation::Enroll,
             L"123e4567-e89b-12d3-a456-426614174000",
             L"account with space",
             true);
     if (!Expect(launch_as::broker::ParseBrokerRequest(managementRequest, request) ==
                         launch_as::broker::ParseResult::Success &&
-                    request.operation == launch_as::broker::RequestOperation::Rotate &&
+                    request.operation == launch_as::broker::RequestOperation::Enroll &&
                     request.profileId == L"account with space" && request.confirmed,
             L"Built management request was not accepted by the protocol parser.") ||
         !Expect(launch_as::broker::RequestOperationSuccessReason(
-                    launch_as::broker::RequestOperation::Rotate) == "rotated" &&
+                    launch_as::broker::RequestOperation::Enroll) == "enrolled" &&
                     launch_as::broker::RequestOperationFailureReason(
-                        launch_as::broker::RequestOperation::Rotate) == "rotation_failed",
+                        launch_as::broker::RequestOperation::Enroll) == "enrollment_failed",
             L"Management operation reasons are not centralized."))
+    {
+        return 1;
+    }
+
+    std::string removedOperation = managementRequest;
+    removedOperation.replace(removedOperation.find("enroll"), 6, "rotate");
+    if (!Expect(launch_as::broker::ParseBrokerRequest(removedOperation, request) ==
+                    launch_as::broker::ParseResult::InvalidRequest,
+            L"The removed password-rotation operation was accepted."))
     {
         return 1;
     }
@@ -222,13 +205,13 @@ int wmain()
     {
         return 1;
     }
-    const std::array accounts {std::wstring(L"AgentSandbox"), std::wstring(L"AnotherAccount")};
+    const std::array accounts {std::wstring(L"LaunchAsUser"), std::wstring(L"AnotherAccount")};
     const std::string listResponse =
         launch_as::broker::BuildListResponse(L"123e4567-e89b-12d3-a456-426614174000", accounts);
     std::vector<std::wstring> listedAccounts;
     if (!Expect(listResponse ==
                     "{\"version\":1,\"requestId\":\"123e4567-e89b-12d3-a456-426614174000\","
-                    "\"status\":\"ok\",\"accounts\":[\"AgentSandbox\",\"AnotherAccount\"],"
+                    "\"status\":\"ok\",\"accounts\":[\"LaunchAsUser\",\"AnotherAccount\"],"
                     "\"reasonCode\":\"listed\","
                     "\"win32Error\":0}",
             L"List response is not stable.") ||

@@ -8,6 +8,7 @@
 #include "BrokerCallerPolicy.h"
 #include "BrokerDataDirectory.h"
 #include "BrokerLogonToken.h"
+#include "BrokerPassword.h"
 #include "BrokerPipeServer.h"
 #include "BrokerProcessLauncher.h"
 #include "BrokerProtocol.h"
@@ -98,13 +99,12 @@ class LocalString final
 
 struct BrokerLaunchPolicy
 {
-    explicit BrokerLaunchPolicy(std::wstring_view credentialDirectory)
-        : credentialStore(credentialDirectory), registration(credentialDirectory)
+    explicit BrokerLaunchPolicy(std::wstring_view enrollmentDirectory)
+        : registration(enrollmentDirectory)
     {
     }
 
     std::vector<BYTE> authorizedCallerSid;
-    launch_as::broker::CredentialStore credentialStore;
     launch_as::broker::RegistrationService registration;
     std::wstring controlPipeDacl;
 };
@@ -270,7 +270,7 @@ DWORD ConfigureProfile(void* context, const launch_as::broker::BrokerRequest& re
     {
         return complete(policy->registration.List(accounts));
     }
-    if (request.operation != launch_as::broker::RequestOperation::Test && !request.confirmed)
+    if (!request.confirmed)
     {
         return complete(ERROR_CANCELLED);
     }
@@ -281,14 +281,6 @@ DWORD ConfigureProfile(void* context, const launch_as::broker::BrokerRequest& re
     if (request.operation == launch_as::broker::RequestOperation::Enroll)
     {
         return complete(policy->registration.Enroll(request.profileId));
-    }
-    if (request.operation == launch_as::broker::RequestOperation::Rotate)
-    {
-        return complete(policy->registration.Rotate(request.profileId));
-    }
-    if (request.operation == launch_as::broker::RequestOperation::Test)
-    {
-        return complete(policy->registration.Test(request.profileId));
     }
     if (request.operation == launch_as::broker::RequestOperation::Unenroll)
     {
@@ -314,23 +306,36 @@ DWORD LaunchProfile(void* context, const launch_as::broker::BrokerRequest& reque
             child.processId());
         return result;
     };
-    const auto* policy = static_cast<const BrokerLaunchPolicy*>(context);
+    auto* policy = static_cast<BrokerLaunchPolicy*>(context);
     if (policy == nullptr ||
         request.operation != launch_as::broker::RequestOperation::ConsoleLaunch ||
         !launch_as::broker::IsAuthorizedCaller(policy->authorizedCallerSid, caller.userSid))
     {
         return complete(ERROR_ACCESS_DENIED);
     }
-    launch_as::broker::BrokerLogonToken token;
-    const DWORD logonError = launch_as::broker::LogOnBrokerProfile(
-        request.profileId, request.profileId, policy->credentialStore, token);
-    if (logonError != ERROR_SUCCESS)
-    {
-        return complete(logonError);
-    }
     if (request.arguments.empty())
     {
         return complete(ERROR_INVALID_PARAMETER);
+    }
+    launch_as::broker::SecurePassword password;
+    const DWORD passwordError = launch_as::broker::GenerateBrokerPassword(password);
+    if (passwordError != ERROR_SUCCESS)
+    {
+        return complete(passwordError);
+    }
+    const DWORD resetError = policy->registration.ResetPassword(request.profileId, password);
+    if (resetError != ERROR_SUCCESS)
+    {
+        password.Clear();
+        return complete(resetError);
+    }
+    launch_as::broker::BrokerLogonToken token;
+    const DWORD logonError =
+        launch_as::broker::LogOnBrokerAccount(request.profileId, password, token);
+    password.Clear();
+    if (logonError != ERROR_SUCCESS)
+    {
+        return complete(logonError);
     }
     std::vector<std::wstring> conhostArguments {
         L"--internal-pseudoconsole-host",
@@ -392,14 +397,6 @@ void WINAPI ServiceMain(DWORD, wchar_t**)
         return;
     }
     stopEvent = ownedStopEvent.get();
-    std::wstring credentialDirectory;
-    const DWORD credentialDirectoryError =
-        launch_as::broker::GetBrokerCredentialDirectory(credentialDirectory);
-    if (credentialDirectoryError != ERROR_SUCCESS)
-    {
-        ReportServiceStatus(SERVICE_STOPPED, credentialDirectoryError);
-        return;
-    }
     std::wstring dataDirectory;
     const DWORD dataDirectoryError = launch_as::broker::GetBrokerDataDirectory(dataDirectory);
     if (dataDirectoryError != ERROR_SUCCESS)
@@ -407,7 +404,15 @@ void WINAPI ServiceMain(DWORD, wchar_t**)
         ReportServiceStatus(SERVICE_STOPPED, dataDirectoryError);
         return;
     }
-    BrokerLaunchPolicy launchPolicy(credentialDirectory);
+    std::wstring enrollmentDirectory;
+    const DWORD enrollmentDirectoryError =
+        launch_as::broker::GetBrokerEnrollmentDirectory(enrollmentDirectory);
+    if (enrollmentDirectoryError != ERROR_SUCCESS)
+    {
+        ReportServiceStatus(SERVICE_STOPPED, enrollmentDirectoryError);
+        return;
+    }
+    BrokerLaunchPolicy launchPolicy(enrollmentDirectory);
     static_cast<void>(launch_as::broker::LoadAuthorizedCallerSid(
         launch_as::broker::GetAuthorizedCallerPolicyPath(dataDirectory),
         launchPolicy.authorizedCallerSid));

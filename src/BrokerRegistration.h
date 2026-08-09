@@ -4,7 +4,8 @@
 
 #pragma once
 
-#include "BrokerCredentialStore.h"
+#include "BrokerEnrollmentStore.h"
+#include "BrokerPassword.h"
 
 #include <Windows.h>
 #include <string>
@@ -17,17 +18,17 @@ namespace launch_as::broker
 class RegistrationService final
 {
   public:
-    explicit RegistrationService(std::wstring_view credentialDirectory);
+    explicit RegistrationService(std::wstring_view enrollmentDirectory);
 
     [[nodiscard]] DWORD Enroll(std::wstring_view accountName);
-    [[nodiscard]] DWORD Rotate(std::wstring_view accountName);
-    [[nodiscard]] DWORD Test(std::wstring_view accountName) const;
+    [[nodiscard]] DWORD ResetPassword(
+        std::wstring_view accountName, const SecurePassword& password) const;
     [[nodiscard]] DWORD Unenroll(std::wstring_view accountName);
     [[nodiscard]] DWORD UnenrollAll();
     [[nodiscard]] DWORD List(std::vector<std::wstring>& accountNames) const;
 
   private:
-    CredentialStore store_;
+    EnrollmentStore enrollments_;
 };
 
 } // namespace launch_as::broker

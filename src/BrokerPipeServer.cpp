@@ -368,23 +368,23 @@ void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
         WaitForBrokerChildExit(pipe, stopEvent, child.process()))
     {
         DWORD exitCode = 0;
+        bool wroteExitResponse = false;
         if (GetExitCodeProcess(child.process(), &exitCode))
         {
-            if (WriteResponse(
-                    pipe, stopEvent, BuildLaunchExitResponse(request.requestId, exitCode)))
-            {
-                WaitForControlConnectionClose(pipe, stopEvent);
-            }
+            wroteExitResponse = WriteResponse(
+                pipe, stopEvent, BuildLaunchExitResponse(request.requestId, exitCode));
         }
         else
         {
             const DWORD exitCodeError = GetLastError();
-            if (WriteResponse(pipe,
-                    stopEvent,
-                    BuildErrorResponse(request.requestId, "exit_code_failed", exitCodeError)))
-            {
-                WaitForControlConnectionClose(pipe, stopEvent);
-            }
+            wroteExitResponse = WriteResponse(pipe,
+                stopEvent,
+                BuildErrorResponse(request.requestId, "exit_code_failed", exitCodeError));
+        }
+        child.Reset();
+        if (wroteExitResponse)
+        {
+            WaitForControlConnectionClose(pipe, stopEvent);
         }
     }
 }

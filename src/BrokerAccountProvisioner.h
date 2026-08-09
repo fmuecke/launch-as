@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "BrokerCredentialStore.h"
+#include "BrokerPassword.h"
 
 #include <Windows.h>
 #include <string_view>

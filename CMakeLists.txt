@@ -6,7 +6,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
     launch_as
-    VERSION 0.3.2
+    VERSION 1.0.0
     LANGUAGES CXX RC
 )
 
@@ -18,10 +18,40 @@ endif()
 
 include(CTest)
 
-configure_file(
-    resources/LauncherVersion.rc.in
-    "${CMAKE_CURRENT_BINARY_DIR}/LauncherVersion.rc"
-    @ONLY
+function(configure_launch_as_version_resource output description internal_name original_filename)
+    set(LAUNCH_AS_FILE_DESCRIPTION "${description}")
+    set(LAUNCH_AS_INTERNAL_NAME "${internal_name}")
+    set(LAUNCH_AS_ORIGINAL_FILENAME "${original_filename}")
+    configure_file(
+        resources/LauncherVersion.rc.in
+        "${CMAKE_CURRENT_BINARY_DIR}/${output}"
+        @ONLY
+    )
+endfunction()
+
+configure_launch_as_version_resource(
+    LauncherVersion.rc
+    "Launcher for repeatable least-privilege execution on Windows"
+    "launch-as"
+    "launch-as.exe"
+)
+configure_launch_as_version_resource(
+    LauncherConhostVersion.rc
+    "launch-as console host"
+    "launch-as-conhost"
+    "launch-as-conhost.exe"
+)
+configure_launch_as_version_resource(
+    LauncherBrokerVersion.rc
+    "launch-as broker service"
+    "launch-as-broker"
+    "launch-as-broker.exe"
+)
+configure_launch_as_version_resource(
+    LauncherAdminVersion.rc
+    "launch-as broker administration"
+    "launch-as-admin"
+    "launch-as-admin.exe"
 )
 configure_file(
     resources/LauncherVersion.h.in
@@ -126,6 +156,7 @@ add_executable(launch_as_conhost
     src/Win32Support.h
     src/WindowsCommandLine.cpp
     src/WindowsCommandLine.h
+    "${CMAKE_CURRENT_BINARY_DIR}/LauncherConhostVersion.rc"
 )
 target_link_libraries(launch_as_conhost PRIVATE
     Ole32
@@ -138,18 +169,16 @@ set_target_properties(launch_as_conhost PROPERTIES
 add_executable(launch_as_broker
     src/BrokerAccountProvisioner.cpp
     src/BrokerAccountProvisioner.h
-    src/BrokerAdminCli.cpp
-    src/BrokerAdminCli.h
     src/BrokerAudit.cpp
     src/BrokerAudit.h
     src/BrokerCallerPolicy.cpp
     src/BrokerCallerPolicy.h
     src/BrokerControlPipe.cpp
     src/BrokerControlPipe.h
-    src/BrokerCredentialStore.cpp
-    src/BrokerCredentialStore.h
     src/BrokerDataDirectory.cpp
     src/BrokerDataDirectory.h
+    src/BrokerEnrollmentStore.cpp
+    src/BrokerEnrollmentStore.h
     src/BrokerLogonToken.cpp
     src/BrokerLogonToken.h
     src/BrokerPassword.cpp
@@ -158,8 +187,6 @@ add_executable(launch_as_broker
     src/BrokerProcessLauncher.h
     src/BrokerRegistration.cpp
     src/BrokerRegistration.h
-    src/BrokerServiceInstaller.cpp
-    src/BrokerServiceInstaller.h
     src/BrokerPipeServer.cpp
     src/BrokerPipeServer.h
     src/BrokerProtocol.cpp
@@ -171,11 +198,11 @@ add_executable(launch_as_broker
     src/Win32Support.h
     src/WindowsCommandLine.cpp
     src/WindowsCommandLine.h
+    "${CMAKE_CURRENT_BINARY_DIR}/LauncherBrokerVersion.rc"
 )
 target_link_libraries(launch_as_broker PRIVATE
     Advapi32
     Bcrypt
-    Crypt32
     Netapi32
     Ole32
     Shell32
@@ -184,6 +211,39 @@ target_link_libraries(launch_as_broker PRIVATE
 configure_launch_as_target(launch_as_broker)
 set_target_properties(launch_as_broker PROPERTIES
     OUTPUT_NAME "launch-as-broker"
+)
+
+add_executable(launch_as_admin
+    src/BrokerAccountProvisioner.cpp
+    src/BrokerAccountProvisioner.h
+    src/BrokerAdmin.cpp
+    src/BrokerAdminCli.cpp
+    src/BrokerAdminCli.h
+    src/BrokerAudit.cpp
+    src/BrokerAudit.h
+    src/BrokerCallerPolicy.cpp
+    src/BrokerCallerPolicy.h
+    src/BrokerControlPipe.cpp
+    src/BrokerControlPipe.h
+    src/BrokerDataDirectory.cpp
+    src/BrokerDataDirectory.h
+    src/BrokerProtocol.cpp
+    src/BrokerProtocol.h
+    src/BrokerServiceInstaller.cpp
+    src/BrokerServiceInstaller.h
+    src/Win32Support.cpp
+    src/Win32Support.h
+    "${CMAKE_CURRENT_BINARY_DIR}/LauncherAdminVersion.rc"
+)
+target_link_libraries(launch_as_admin PRIVATE
+    Advapi32
+    Netapi32
+    Ole32
+    Shell32
+)
+configure_launch_as_target(launch_as_admin)
+set_target_properties(launch_as_admin PROPERTIES
+    OUTPUT_NAME "launch-as-admin"
 )
 
 if(BUILD_TESTING)
@@ -235,6 +295,8 @@ if(BUILD_TESTING)
 
     add_executable(LauncherBrokerCommandTests
         tests/BrokerCommandTests.cpp
+        src/BrokerControlPipe.cpp
+        src/BrokerControlPipe.h
         src/BrokerProcessLauncher.cpp
         src/BrokerProcessLauncher.h
         src/BrokerPipeServer.cpp
@@ -258,6 +320,7 @@ if(BUILD_TESTING)
         NAME launcher.broker_command
         COMMAND
             "$<TARGET_FILE:LauncherBrokerCommandTests>"
+            "$<TARGET_FILE:launch_as_admin>"
             "$<TARGET_FILE:launch_as_broker>"
     )
     set_tests_properties(launcher.broker_command PROPERTIES
@@ -266,31 +329,22 @@ if(BUILD_TESTING)
         TIMEOUT 15
     )
 
-    add_executable(LauncherBrokerCredentialStoreTests
-        tests/BrokerCredentialStoreTests.cpp
-        src/BrokerCredentialStore.cpp
-        src/BrokerCredentialStore.h
-    )
-    target_include_directories(LauncherBrokerCredentialStoreTests PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    )
-    target_link_libraries(LauncherBrokerCredentialStoreTests PRIVATE
-        Crypt32
-    )
-    configure_launch_as_target(LauncherBrokerCredentialStoreTests)
-
     add_test(
-        NAME launcher.broker_credential_store
-        COMMAND "$<TARGET_FILE:LauncherBrokerCredentialStoreTests>"
+        NAME launcher.setup_script
+        COMMAND
+            pwsh
+            -NoProfile
+            -File
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Test-PowerShellSyntax.ps1"
+            -Path
+            "${CMAKE_CURRENT_SOURCE_DIR}/Setup-LaunchAs.ps1"
     )
-    set_tests_properties(launcher.broker_credential_store PROPERTIES
-        LABELS "broker;integration"
+    set_tests_properties(launcher.setup_script PROPERTIES
+        LABELS "setup;unit"
     )
 
     add_executable(LauncherBrokerPasswordTests
         tests/BrokerPasswordTests.cpp
-        src/BrokerCredentialStore.cpp
-        src/BrokerCredentialStore.h
         src/BrokerPassword.cpp
         src/BrokerPassword.h
     )
@@ -299,7 +353,6 @@ if(BUILD_TESTING)
     )
     target_link_libraries(LauncherBrokerPasswordTests PRIVATE
         Bcrypt
-        Crypt32
     )
     configure_launch_as_target(LauncherBrokerPasswordTests)
 
@@ -308,6 +361,32 @@ if(BUILD_TESTING)
         COMMAND "$<TARGET_FILE:LauncherBrokerPasswordTests>"
     )
     set_tests_properties(launcher.broker_password PROPERTIES
+        LABELS "broker;unit"
+    )
+
+    add_executable(LauncherBrokerEnrollmentStoreTests
+        tests/BrokerEnrollmentStoreTests.cpp
+        src/BrokerAccountProvisioner.cpp
+        src/BrokerAccountProvisioner.h
+        src/BrokerEnrollmentStore.cpp
+        src/BrokerEnrollmentStore.h
+        src/BrokerPassword.cpp
+        src/BrokerPassword.h
+    )
+    target_include_directories(LauncherBrokerEnrollmentStoreTests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(LauncherBrokerEnrollmentStoreTests PRIVATE
+        Bcrypt
+        Netapi32
+    )
+    configure_launch_as_target(LauncherBrokerEnrollmentStoreTests)
+
+    add_test(
+        NAME launcher.broker_enrollment_store
+        COMMAND "$<TARGET_FILE:LauncherBrokerEnrollmentStoreTests>"
+    )
+    set_tests_properties(launcher.broker_enrollment_store PROPERTIES
         LABELS "broker;unit"
     )
 
@@ -434,8 +513,8 @@ if(BUILD_TESTING)
         tests/BrokerAccountProvisioningTests.cpp
         src/BrokerAccountProvisioner.cpp
         src/BrokerAccountProvisioner.h
-        src/BrokerCredentialStore.cpp
-        src/BrokerCredentialStore.h
+        src/BrokerEnrollmentStore.cpp
+        src/BrokerEnrollmentStore.h
         src/BrokerLogonToken.cpp
         src/BrokerLogonToken.h
         src/BrokerPassword.cpp
@@ -448,7 +527,6 @@ if(BUILD_TESTING)
     )
     target_link_libraries(LauncherBrokerAccountProvisioningTests PRIVATE
         Bcrypt
-        Crypt32
         Netapi32
         Advapi32
     )
@@ -631,6 +709,12 @@ if(BUILD_TESTING)
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/Invoke-LauncherBehaviorTests.ps1"
             -LauncherPath
             "$<TARGET_FILE:launch_as>"
+            -BrokerPath
+            "$<TARGET_FILE:launch_as_broker>"
+            -AdminPath
+            "$<TARGET_FILE:launch_as_admin>"
+            -ConhostPath
+            "$<TARGET_FILE:launch_as_conhost>"
             -ExpectedVersion
             "${PROJECT_VERSION}"
     )

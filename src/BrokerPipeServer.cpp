@@ -96,6 +96,38 @@ void BeginOverlappedOperation(OVERLAPPED& overlapped, HANDLE event)
     return bytesWritten == response.size();
 }
 
+void WaitForControlConnectionClose(HANDLE pipe, HANDLE stopEvent)
+{
+    UniqueHandle operationEvent(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+    if (!operationEvent)
+    {
+        return;
+    }
+    OVERLAPPED overlapped {};
+    BeginOverlappedOperation(overlapped, operationEvent.get());
+    char ignored = '\0';
+    DWORD bytesRead = 0;
+    if (ReadFile(pipe, &ignored, 1, &bytesRead, &overlapped))
+    {
+        return;
+    }
+    const DWORD readError = GetLastError();
+    if (readError != ERROR_IO_PENDING)
+    {
+        return;
+    }
+    const std::array waitHandles {stopEvent, operationEvent.get()};
+    if (WaitForMultipleObjects(
+            static_cast<DWORD>(waitHandles.size()), waitHandles.data(), FALSE, INFINITE) !=
+        WAIT_OBJECT_0 + 1)
+    {
+        CancelIoEx(pipe, &overlapped);
+        static_cast<void>(GetOverlappedResult(pipe, &overlapped, &bytesRead, TRUE));
+        return;
+    }
+    static_cast<void>(GetOverlappedResult(pipe, &overlapped, &bytesRead, FALSE));
+}
+
 [[nodiscard]] bool CaptureCallerIdentity(HANDLE pipe, BrokerCallerIdentity& identity)
 {
     if (!ImpersonateNamedPipeClient(pipe))
@@ -310,8 +342,7 @@ void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
     }
     if (WriteResponse(pipe, stopEvent, response) && child)
     {
-        std::string ignored;
-        static_cast<void>(ReadRequest(pipe, stopEvent, ignored));
+        WaitForControlConnectionClose(pipe, stopEvent);
     }
 }
 

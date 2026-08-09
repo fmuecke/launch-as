@@ -4,7 +4,10 @@
 
 #include "BrokerProcessLauncher.h"
 
+#include "WindowsCommandLine.h"
+
 #include <array>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -107,6 +110,34 @@ class EnabledProcessPrivileges final
     }
 }
 
+[[nodiscard]] DWORD GetBrokerConhostExecutablePath(std::wstring& path)
+{
+    std::vector<wchar_t> modulePath(512);
+    for (;;)
+    {
+        const DWORD characters =
+            GetModuleFileNameW(nullptr, modulePath.data(), static_cast<DWORD>(modulePath.size()));
+        if (characters == 0)
+        {
+            const DWORD moduleError = GetLastError();
+            return moduleError;
+        }
+        if (characters < modulePath.size())
+        {
+            const std::filesystem::path brokerPath(
+                std::wstring(modulePath.data(), static_cast<std::size_t>(characters)));
+            path = (brokerPath.parent_path() / L"launch-as-conhost.exe").native();
+            std::error_code pathError;
+            if (!std::filesystem::is_regular_file(path, pathError))
+            {
+                return pathError ? static_cast<DWORD>(pathError.value()) : ERROR_FILE_NOT_FOUND;
+            }
+            return ERROR_SUCCESS;
+        }
+        modulePath.resize(modulePath.size() * 2);
+    }
+}
+
 [[nodiscard]] bool CopyValidSid(PSID source, std::vector<BYTE>& destination)
 {
     destination.clear();
@@ -193,6 +224,76 @@ DWORD CreateBrokerJob(BrokerChildProcess& child)
         return limitError;
     }
     child.job_ = job;
+    return ERROR_SUCCESS;
+}
+
+DWORD LaunchBrokerConsoleHost(HANDLE token, std::span<const std::wstring> arguments,
+    std::wstring_view workingDirectory, BrokerChildProcess& child)
+{
+    if (token == nullptr || arguments.empty() || arguments.front().empty() ||
+        workingDirectory.empty())
+    {
+        return ERROR_INVALID_PARAMETER;
+    }
+    std::error_code workingDirectoryError;
+    if (!std::filesystem::is_directory(
+            std::filesystem::path(workingDirectory), workingDirectoryError))
+    {
+        return workingDirectoryError ? static_cast<DWORD>(workingDirectoryError.value())
+                                     : ERROR_DIRECTORY;
+    }
+    const DWORD jobError = CreateBrokerJob(child);
+    if (jobError != ERROR_SUCCESS)
+    {
+        return jobError;
+    }
+    EnabledProcessPrivileges privileges;
+    const DWORD privilegeError = privileges.EnableRequired();
+    if (privilegeError != ERROR_SUCCESS)
+    {
+        child.Reset();
+        return privilegeError;
+    }
+    std::wstring conhostPath;
+    const DWORD conhostError = GetBrokerConhostExecutablePath(conhostPath);
+    if (conhostError != ERROR_SUCCESS)
+    {
+        child.Reset();
+        return conhostError;
+    }
+    std::wstring commandLine = BuildWindowsCommandLine(conhostPath, arguments);
+    std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
+    mutableCommandLine.push_back(L'\0');
+    STARTUPINFOW startupInfo {};
+    startupInfo.cb = sizeof(startupInfo);
+    PROCESS_INFORMATION processInfo {};
+    const std::wstring directory(workingDirectory);
+    if (!CreateProcessAsUserW(token,
+            conhostPath.c_str(),
+            mutableCommandLine.data(),
+            nullptr,
+            nullptr,
+            FALSE,
+            CREATE_NO_WINDOW,
+            nullptr,
+            directory.c_str(),
+            &startupInfo,
+            &processInfo))
+    {
+        const DWORD processError = GetLastError();
+        child.Reset();
+        return processError;
+    }
+    if (!AssignProcessToJobObject(child.job_, processInfo.hProcess))
+    {
+        const DWORD assignmentError = GetLastError();
+        TerminateProcess(processInfo.hProcess, ERROR_CANCELLED);
+        CloseHandle(processInfo.hThread);
+        CloseHandle(processInfo.hProcess);
+        child.Reset();
+        return assignmentError;
+    }
+    child.SetProcess(processInfo.hProcess, processInfo.hThread);
     return ERROR_SUCCESS;
 }
 

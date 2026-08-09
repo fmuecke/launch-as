@@ -26,6 +26,7 @@ constexpr char ValidRequest[] = R"json({
   "console": {
     "pipeIn": "\\\\.\\pipe\\launch-as-123-in",
     "pipeOut": "\\\\.\\pipe\\launch-as-123-out",
+    "pipeResize": "\\\\.\\pipe\\launch-as-123-resize",
     "cols": 120,
     "rows": 30
   }
@@ -182,12 +183,18 @@ int wmain()
     {
         return 1;
     }
-    return Expect(launch_as::broker::BuildLaunchSuccessResponse(
-                      L"123e4567-e89b-12d3-a456-426614174000", 456) ==
+    const std::string launchResponse =
+        launch_as::broker::BuildLaunchSuccessResponse(L"123e4567-e89b-12d3-a456-426614174000", 456);
+    DWORD processId = 0;
+    return Expect(launchResponse ==
                       "{\"version\":1,\"requestId\":\"123e4567-e89b-12d3-a456-426614174000\","
                       "\"status\":\"ok\",\"processId\":456,\"reasonCode\":\"launched\","
                       "\"win32Error\":0}",
-               L"Launch success response is not stable.")
+               L"Launch success response is not stable.") &&
+                   Expect(launch_as::broker::ParseLaunchSuccessResponse(
+                              launchResponse, L"123e4567-e89b-12d3-a456-426614174000", processId) &&
+                              processId == 456,
+                       L"Launch success response was not decoded.")
                ? 0
                : 1;
 }

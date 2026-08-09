@@ -35,6 +35,10 @@ configure_file(
 )
 
 add_executable(launch_as
+    src/BrokerControlClient.cpp
+    src/BrokerControlClient.h
+    src/BrokerProtocol.cpp
+    src/BrokerProtocol.h
     src/CredentialInput.cpp
     src/CredentialInput.h
     src/Credentials.cpp
@@ -159,6 +163,8 @@ add_executable(launch_as_broker
     src/BrokerService.cpp
     src/Win32Support.cpp
     src/Win32Support.h
+    src/WindowsCommandLine.cpp
+    src/WindowsCommandLine.h
 )
 target_link_libraries(launch_as_broker PRIVATE
     Advapi32
@@ -200,6 +206,8 @@ if(BUILD_TESTING)
         src/BrokerPipeServer.h
         src/BrokerProtocol.cpp
         src/Win32Support.cpp
+        src/WindowsCommandLine.cpp
+        src/WindowsCommandLine.h
     )
     target_include_directories(LauncherBrokerPipeTests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
@@ -226,6 +234,8 @@ if(BUILD_TESTING)
         src/BrokerProtocol.cpp
         src/BrokerProtocol.h
         src/Win32Support.cpp
+        src/WindowsCommandLine.cpp
+        src/WindowsCommandLine.h
     )
     target_include_directories(LauncherBrokerCommandTests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
@@ -336,6 +346,8 @@ if(BUILD_TESTING)
         tests/BrokerProcessLauncherTests.cpp
         src/BrokerProcessLauncher.cpp
         src/BrokerProcessLauncher.h
+        src/WindowsCommandLine.cpp
+        src/WindowsCommandLine.h
     )
     target_include_directories(LauncherBrokerProcessLauncherTests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"

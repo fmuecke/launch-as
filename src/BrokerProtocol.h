@@ -22,6 +22,7 @@ struct ConsoleRequest
 {
     std::wstring pipeIn;
     std::wstring pipeOut;
+    std::wstring pipeResize;
     SHORT columns = 0;
     SHORT rows = 0;
 };
@@ -65,5 +66,7 @@ enum class ParseResult
 [[nodiscard]] bool ParseErrorResponse(
     std::string_view response, std::wstring_view requestId, DWORD& win32Error);
 [[nodiscard]] std::string BuildLaunchSuccessResponse(std::wstring_view requestId, DWORD processId);
+[[nodiscard]] bool ParseLaunchSuccessResponse(
+    std::string_view response, std::wstring_view requestId, DWORD& processId);
 
 } // namespace launch_as::broker

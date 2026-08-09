@@ -59,16 +59,18 @@ constexpr std::size_t MaximumTestCredentialTagCharacters = 64;
 
 void PrintUsage()
 {
-    std::wcerr << L"Usage:\n"
-               << L"  launch-as.exe register --user <local-user>"
-                  L" [--password-stdin]\n"
-               << L"  launch-as.exe status --user <local-user>\n"
-               << L"  launch-as.exe forget --user <local-user>\n"
-               << L"  launch-as.exe [run] --user <local-user>"
-                  L" [--credential-mode <auto|stored|prompt>]"
-                  L" [--working-directory <directory>]"
-                  L" [--terminal]"
-                  L" -- <absolute-executable> [arguments...]\n";
+    std::wcerr << LR"usage(Usage:
+  launch-as.exe register --user <local-user> [--password-stdin]
+  launch-as.exe status --user <local-user>
+  launch-as.exe forget --user <local-user>
+  launch-as.exe [run] --user <local-user> [--credential-mode <auto|stored|prompt>]
+                                          [--working-directory <directory>] 
+                                          [--terminal] 
+                                          -- <absolute-executable> [arguments...]
+
+  --terminal uses launch-as-broker and requires an enrolled account; credential-mode is not used.
+
+)usage";
 #ifndef NDEBUG
     std::wcerr << L"Credential commands used by tests also accept:"
                   L" --test-credential-tag <tag>\n";
@@ -191,7 +193,8 @@ std::optional<Options> ParseOptions(std::span<wchar_t*> arguments)
     if (command == Command::Run)
     {
         if (options.passwordFromStdin || !processArgumentsStarted ||
-            options.processArguments.empty())
+            options.processArguments.empty() ||
+            (options.terminal && options.credentialModeSpecified))
         {
             return std::nullopt;
         }

@@ -123,7 +123,7 @@ The launch core is mode-agnostic. A profile selects one adapter.
 ### 7.1 `console` mode (default for `agent-sandbox` / Claude Code)
 
 - Child stays on the **default noninteractive window station** (`Service-0x0-…`). Do **not** set `lpDesktop` to `WinSta0\Default`; do **not** hop the session.
-- I/O via **ConPTY + named pipes**: the broker launches `launch-as-conhost.exe` as `AgentSandbox`; the host creates the pseudoconsole, runs the target inside it, and connects two per-session named pipes back to the client's terminal. (Reuse the existing `PseudoConsoleHost` / `TerminalBridge` code; move the child-creation call behind the broker.)
+- I/O via **ConPTY + named pipes**: the broker launches `launch-as-conhost.exe` as `AgentSandbox`; the host creates the pseudoconsole, runs the target inside it, and connects per-session input, output, and resize pipes back to the client's terminal. (Reuse the existing `PseudoConsoleHost` / `TerminalBridge` code; move the child-creation call behind the broker.)
 - Data pipes are created by the **client** (in the interactive user's context) with a DACL granting connect+RW to `AgentSandbox` only; names are random per session with `FILE_FLAG_FIRST_PIPE_INSTANCE`. The broker passes the names in the request; it never touches stdio and never receives credential-store handles.
 - **Surfaces:** Surface 1 **closed** (no interactive desktop), Surface 2 **closed** (independent logon SID).
 
@@ -175,6 +175,7 @@ Impersonation failure is a **hard failure** (otherwise the request would proceed
   "console": {
     "pipeIn":  "\\\\.\\pipe\\launch-as-<rnd>-in",
     "pipeOut": "\\\\.\\pipe\\launch-as-<rnd>-out",
+    "pipeResize": "\\\\.\\pipe\\launch-as-<rnd>-resize",
     "cols": 120, "rows": 30
   }
 }

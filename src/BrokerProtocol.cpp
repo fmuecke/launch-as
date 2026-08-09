@@ -382,6 +382,7 @@ class JsonReader final
     }
     bool pipeIn = false;
     bool pipeOut = false;
+    bool pipeResize = false;
     bool columns = false;
     bool rows = false;
     for (;;)
@@ -398,6 +399,10 @@ class JsonReader final
         else if (name == L"pipeOut" && !pipeOut)
         {
             pipeOut = reader.String(console.pipeOut);
+        }
+        else if (name == L"pipeResize" && !pipeResize)
+        {
+            pipeResize = reader.String(console.pipeResize);
         }
         else
         {
@@ -425,13 +430,14 @@ class JsonReader final
                 return false;
             }
         }
-        if (!(pipeIn || name != L"pipeIn") || !(pipeOut || name != L"pipeOut"))
+        if (!(pipeIn || name != L"pipeIn") || !(pipeOut || name != L"pipeOut") ||
+            !(pipeResize || name != L"pipeResize"))
         {
             return false;
         }
         if (reader.Consume('}'))
         {
-            return pipeIn && pipeOut && columns && rows;
+            return pipeIn && pipeOut && pipeResize && columns && rows;
         }
         if (!reader.Consume(','))
         {
@@ -617,7 +623,10 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
     }
     if (operationName != L"launch" || !mode || !arguments || !workingDirectory || !console ||
         !IsConsolePipeName(request.console.pipeIn) || !IsConsolePipeName(request.console.pipeOut) ||
-        request.console.pipeIn == request.console.pipeOut)
+        !IsConsolePipeName(request.console.pipeResize) ||
+        request.console.pipeIn == request.console.pipeOut ||
+        request.console.pipeIn == request.console.pipeResize ||
+        request.console.pipeOut == request.console.pipeResize)
     {
         return ParseResult::InvalidRequest;
     }
@@ -807,6 +816,78 @@ std::string BuildLaunchSuccessResponse(std::wstring_view requestId, DWORD proces
     response += ",\"status\":\"ok\",\"processId\":" + std::to_string(processId);
     response += ",\"reasonCode\":\"launched\",\"win32Error\":0}";
     return response;
+}
+
+bool ParseLaunchSuccessResponse(
+    std::string_view response, std::wstring_view requestId, DWORD& processId)
+{
+    processId = 0;
+    JsonReader reader(response);
+    if (!reader.Consume('{'))
+    {
+        return false;
+    }
+    bool version = false;
+    bool responseId = false;
+    bool status = false;
+    bool process = false;
+    bool reason = false;
+    bool error = false;
+    for (;;)
+    {
+        std::wstring name;
+        if (!reader.String(name) || !reader.Consume(':'))
+        {
+            return false;
+        }
+        if (name == L"version" && !version)
+        {
+            DWORD value = 0;
+            version = reader.Unsigned(value) && value == 1;
+        }
+        else if (name == L"requestId" && !responseId)
+        {
+            std::wstring value;
+            responseId = reader.String(value) && value == requestId;
+        }
+        else if (name == L"status" && !status)
+        {
+            std::wstring value;
+            status = reader.String(value) && value == L"ok";
+        }
+        else if (name == L"processId" && !process)
+        {
+            process = reader.Unsigned(processId) && processId != 0;
+        }
+        else if (name == L"reasonCode" && !reason)
+        {
+            std::wstring value;
+            reason = reader.String(value) && value == L"launched";
+        }
+        else if (name == L"win32Error" && !error)
+        {
+            DWORD value = 0;
+            error = reader.Unsigned(value) && value == ERROR_SUCCESS;
+        }
+        else
+        {
+            return false;
+        }
+        if (reader.Consume('}'))
+        {
+            break;
+        }
+        if (!reader.Consume(','))
+        {
+            return false;
+        }
+    }
+    if (!(reader.End() && version && responseId && status && process && reason && error))
+    {
+        processId = 0;
+        return false;
+    }
+    return true;
 }
 
 } // namespace launch_as::broker

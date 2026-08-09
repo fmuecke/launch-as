@@ -24,16 +24,16 @@ PseudoConsoleSession::~PseudoConsoleSession()
     ClosePseudoConsole();
 }
 
-bool PseudoConsoleSession::Initialize(
-    COORD terminalSize, bool inheritCursor, HANDLE resizeInput, std::wstring& error)
+bool PseudoConsoleSession::Initialize(COORD terminalSize, bool inheritCursor, HANDLE parentInput,
+    HANDLE parentOutput, HANDLE resizeInput, std::wstring& error)
 {
     if (!LoadApi(error))
     {
         return false;
     }
 
-    parentInput_ = GetStdHandle(STD_INPUT_HANDLE);
-    parentOutput_ = GetStdHandle(STD_OUTPUT_HANDLE);
+    parentInput_ = parentInput;
+    parentOutput_ = parentOutput;
     resizeInput_ = resizeInput;
     if (!IsUsableHandle(parentInput_) || !IsUsableHandle(parentOutput_) ||
         !IsUsableHandle(resizeInput_))

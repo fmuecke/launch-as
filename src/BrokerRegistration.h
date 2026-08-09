@@ -19,9 +19,9 @@ class RegistrationService final
   public:
     explicit RegistrationService(std::wstring_view credentialDirectory);
 
-    [[nodiscard]] DWORD Register(std::wstring_view accountName);
-    [[nodiscard]] DWORD Drop(std::wstring_view accountName);
-    [[nodiscard]] DWORD DropAll();
+    [[nodiscard]] DWORD Enroll(std::wstring_view accountName);
+    [[nodiscard]] DWORD Unenroll(std::wstring_view accountName);
+    [[nodiscard]] DWORD UnenrollAll();
     [[nodiscard]] DWORD List(std::vector<std::wstring>& accountNames) const;
 
   private:

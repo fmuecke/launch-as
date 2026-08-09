@@ -9,10 +9,18 @@
 
 #include <Windows.h>
 #include <string>
+#include <string_view>
 #include <thread>
 
 namespace launch_as
 {
+
+struct TerminalPipeNames
+{
+    std::wstring input;
+    std::wstring output;
+    std::wstring resize;
+};
 
 class TerminalBridge final
 {
@@ -26,9 +34,13 @@ class TerminalBridge final
     TerminalBridge& operator=(TerminalBridge&&) = delete;
 
     [[nodiscard]] bool Initialize(STARTUPINFOW& childStartupInformation, std::wstring& error);
+    [[nodiscard]] bool InitializeForBroker(
+        std::wstring_view childSid, TerminalPipeNames& pipeNames, std::wstring& error);
     [[nodiscard]] bool PrepareChildProcessCreation(std::wstring& error);
     [[nodiscard]] bool CompleteChildProcessCreation(bool processCreated, std::wstring& error);
+    [[nodiscard]] bool ConnectBrokerChild(std::wstring& error);
     [[nodiscard]] bool Start(std::wstring& error);
+    [[nodiscard]] DWORD WaitForOutput() const noexcept;
     void Stop() noexcept;
 
     [[nodiscard]] bool SendResize(COORD size) noexcept;

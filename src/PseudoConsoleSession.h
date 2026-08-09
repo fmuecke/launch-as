@@ -27,8 +27,8 @@ class PseudoConsoleSession final
     PseudoConsoleSession(PseudoConsoleSession&&) = delete;
     PseudoConsoleSession& operator=(PseudoConsoleSession&&) = delete;
 
-    [[nodiscard]] bool Initialize(
-        COORD terminalSize, bool inheritCursor, HANDLE resizeInput, std::wstring& error);
+    [[nodiscard]] bool Initialize(COORD terminalSize, bool inheritCursor, HANDLE parentInput,
+        HANDLE parentOutput, HANDLE resizeInput, std::wstring& error);
     [[nodiscard]] STARTUPINFOW* startupInfo() noexcept;
     [[nodiscard]] HANDLE inputRelayCompleteEvent() const noexcept;
     [[nodiscard]] bool StartRelays(std::wstring& error);

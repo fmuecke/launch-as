@@ -253,14 +253,14 @@ DWORD ConfigureProfile(void* context, const launch_as::broker::BrokerRequest& re
     }
     if (request.operation == launch_as::broker::RequestOperation::Enroll)
     {
-        return policy->registration->Register(request.profileId);
+        return policy->registration->Enroll(request.profileId);
     }
     if (request.operation == launch_as::broker::RequestOperation::Unenroll)
     {
-        return policy->registration->Drop(request.profileId);
+        return policy->registration->Unenroll(request.profileId);
     }
     return request.operation == launch_as::broker::RequestOperation::UnenrollAll
-               ? policy->registration->DropAll()
+               ? policy->registration->UnenrollAll()
                : ERROR_INVALID_PARAMETER;
 }
 
@@ -282,7 +282,27 @@ DWORD LaunchProfile(void* context, const launch_as::broker::BrokerRequest& reque
     {
         return logonError;
     }
-    const DWORD launchError = launch_as::broker::LaunchFixedBrokerProbe(token.get(), child);
+    if (request.arguments.empty())
+    {
+        return ERROR_INVALID_PARAMETER;
+    }
+    std::vector<std::wstring> conhostArguments {
+        L"--internal-pseudoconsole-host",
+        L"--size",
+        std::to_wstring(request.console.columns),
+        std::to_wstring(request.console.rows),
+        L"--pipe-in",
+        request.console.pipeIn,
+        L"--pipe-out",
+        request.console.pipeOut,
+        L"--pipe-resize",
+        request.console.pipeResize,
+        L"--",
+    };
+    conhostArguments.insert(
+        conhostArguments.end(), request.arguments.begin(), request.arguments.end());
+    const DWORD launchError = launch_as::broker::LaunchBrokerConsoleHost(
+        token.get(), conhostArguments, request.workingDirectory, child);
     if (launchError != ERROR_SUCCESS)
     {
         return launchError;
@@ -552,24 +572,18 @@ enum class ConfigurationCommand
 
 void PrintUsage()
 {
-    std::wcerr
-        << L"Usage:\n"
-        << L"  launch-as-broker install                        Create or update the broker "
-           L"service.\n"
-        << L"  launch-as-broker uninstall [--force]            Stop and remove the service; "
-           L"accounts "
-           L"are retained.\n"
-        << L"  launch-as-broker enroll <account> [--force]     Create an account or add an "
-           L"existing. This will change its password.\n"
-        << L"  launch-as-broker list                           Show owned accounts.\n"
-        << L"  launch-as-broker unenroll <account> [--force]   Erase its credential and disable "
-           L"the "
-           L"account.\n"
-        << L"  launch-as-broker unenroll-all [--force]         Unenroll every owned account.\n\n"
-        << L"install and uninstall require elevation. uninstall, enroll, unenroll, and "
-           L"unenroll-all "
-           L"require "
-           L"consent; --force skips the prompt.\n";
+    std::wcerr << LR"usage(Usage:
+  launch-as-broker install                        Create or update the broker service.
+  launch-as-broker uninstall [--force]            Stop and remove the service; accounts are retained.
+  launch-as-broker enroll <account> [--force]     Create an account or add an existing. This will change its password.
+  launch-as-broker list                           Show owned accounts.
+  launch-as-broker unenroll <account> [--force]   Erase its credential and disable the account.
+  launch-as-broker unenroll-all [--force]         Unenroll every owned account.
+
+install and uninstall require elevation. 
+uninstall, enroll, unenroll, and unenroll-all require consent; --force skips the prompt.
+
+)usage";
 }
 
 int RunConfigurationCommand(int argumentCount, wchar_t* arguments[])

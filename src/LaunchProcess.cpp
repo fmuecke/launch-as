@@ -4,6 +4,7 @@
 
 #include "LaunchProcess.h"
 
+#include "BrokerControlClient.h"
 #include "CredentialInput.h"
 #include "Credentials.h"
 #include "PseudoConsoleHost.h"
@@ -290,8 +291,84 @@ bool ValidateRunPaths(const Options& options)
     return true;
 }
 
+ExitCode RunTerminalProcessThroughBroker(const AccountIdentity& account, const Options& options)
+{
+    TerminalBridge terminalBridge;
+    TerminalPipeNames pipeNames;
+    std::wstring terminalError;
+    if (!terminalBridge.InitializeForBroker(account.sid, pipeNames, terminalError))
+    {
+        std::wcerr << terminalError << L"\n";
+        return ExitFailure;
+    }
+
+    std::error_code currentDirectoryError;
+    const std::filesystem::path workingDirectory =
+        options.workingDirectory.empty() ? std::filesystem::current_path(currentDirectoryError)
+                                         : options.workingDirectory;
+    if (currentDirectoryError)
+    {
+        std::wcerr << L"Could not resolve the current working directory: "
+                   << currentDirectoryError.message().c_str() << L"\n";
+        return ExitFailure;
+    }
+    std::vector<std::wstring> arguments;
+    arguments.reserve(options.processArguments.size() + 1);
+    arguments.emplace_back(options.executablePath.native());
+    arguments.insert(
+        arguments.end(), options.processArguments.begin(), options.processArguments.end());
+
+    BrokerControlConnection connection;
+    DWORD processId = 0;
+    const DWORD launchError = LaunchBrokerConsole(account.username,
+        arguments,
+        workingDirectory.native(),
+        pipeNames,
+        terminalBridge.terminalSize(),
+        connection,
+        processId);
+    if (launchError != ERROR_SUCCESS)
+    {
+        std::wcerr << L"Could not launch the enrolled account through the broker: "
+                   << FormatWindowsError(launchError) << L"\n";
+        return ExitFailure;
+    }
+    if (!terminalBridge.ConnectBrokerChild(terminalError))
+    {
+        connection.Reset();
+        std::wcerr << terminalError << L"\n";
+        return ExitFailure;
+    }
+    std::wcout << L"Starting broker terminal session as " << account.qualifiedUsername
+               << L" (host PID " << processId
+               << L"). Output in this pane is controlled by that session until it exits.\n";
+    std::wcout.flush();
+    if (!terminalBridge.Start(terminalError))
+    {
+        connection.Reset();
+        std::wcerr << terminalError << L"\n";
+        return ExitFailure;
+    }
+    const DWORD waitResult = terminalBridge.WaitForOutput();
+    terminalBridge.Stop();
+    connection.Reset();
+    if (waitResult != WAIT_OBJECT_0)
+    {
+        const DWORD waitError = waitResult == WAIT_FAILED ? GetLastError() : ERROR_GEN_FAILURE;
+        std::wcerr << L"Could not wait for the broker terminal output: "
+                   << FormatWindowsError(waitError) << L"\n";
+        return ExitFailure;
+    }
+    std::wcout << L"Broker terminal session ended.\n";
+    return ExitSuccess;
+}
+
 ExitCode RunProcessAsUser(const AccountIdentity& account, const Options& options)
 {
+    if (options.terminal)
+    {
+        return RunTerminalProcessThroughBroker(account, options);
+    }
     STARTUPINFOW standardStartupInfo {};
     standardStartupInfo.cb = sizeof(standardStartupInfo);
     DWORD creationFlags = CREATE_SUSPENDED;

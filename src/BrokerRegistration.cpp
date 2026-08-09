@@ -19,7 +19,7 @@ RegistrationService::RegistrationService(std::wstring_view credentialDirectory)
 {
 }
 
-DWORD RegistrationService::Register(std::wstring_view accountName)
+DWORD RegistrationService::Enroll(std::wstring_view accountName)
 {
     if (!IsValidBrokerAccountName(accountName))
     {
@@ -41,23 +41,22 @@ DWORD RegistrationService::Register(std::wstring_view accountName)
     return storeError;
 }
 
-DWORD RegistrationService::Drop(std::wstring_view accountName)
+DWORD RegistrationService::Unenroll(std::wstring_view accountName)
 {
     if (!IsValidBrokerAccountName(accountName))
     {
         return ERROR_INVALID_PARAMETER;
     }
-    const DWORD credentialError = store_.Remove(accountName);
-    if (credentialError != ERROR_SUCCESS)
+    if (!store_.Exists(accountName))
     {
-        return credentialError;
+        return ERROR_NOT_FOUND;
     }
     const std::wstring name(accountName);
     LPBYTE rawAccount = nullptr;
     const NET_API_STATUS readStatus = NetUserGetInfo(nullptr, name.c_str(), 4, &rawAccount);
     if (readStatus == NERR_UserNotFound)
     {
-        return ERROR_SUCCESS;
+        return store_.Remove(accountName);
     }
     if (readStatus != NERR_Success || rawAccount == nullptr)
     {
@@ -71,10 +70,16 @@ DWORD RegistrationService::Drop(std::wstring_view accountName)
     USER_INFO_1008 flags {};
     flags.usri1008_flags = account->usri4_flags | UF_ACCOUNTDISABLE;
     NetApiBufferFree(rawAccount);
-    return NetUserSetInfo(nullptr, name.c_str(), 1008, reinterpret_cast<LPBYTE>(&flags), nullptr);
+    const NET_API_STATUS disableStatus =
+        NetUserSetInfo(nullptr, name.c_str(), 1008, reinterpret_cast<LPBYTE>(&flags), nullptr);
+    if (disableStatus != NERR_Success)
+    {
+        return disableStatus;
+    }
+    return store_.Remove(accountName);
 }
 
-DWORD RegistrationService::DropAll()
+DWORD RegistrationService::UnenrollAll()
 {
     std::vector<std::wstring> accounts;
     const DWORD listError = store_.List(accounts);
@@ -85,7 +90,7 @@ DWORD RegistrationService::DropAll()
     DWORD firstDropError = ERROR_SUCCESS;
     for (const std::wstring& account : accounts)
     {
-        const DWORD dropError = Drop(account);
+        const DWORD dropError = Unenroll(account);
         if (dropError != ERROR_SUCCESS && firstDropError == ERROR_SUCCESS)
         {
             firstDropError = dropError;

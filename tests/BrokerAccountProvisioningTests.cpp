@@ -123,6 +123,44 @@ class TemporaryDirectory final
     return hasFlags;
 }
 
+[[nodiscard]] bool IsAccountDisabled(const std::wstring& name)
+{
+    LPBYTE buffer = nullptr;
+    const NET_API_STATUS status = NetUserGetInfo(nullptr, name.c_str(), 4, &buffer);
+    if (status != NERR_Success || buffer == nullptr)
+    {
+        if (buffer != nullptr)
+        {
+            NetApiBufferFree(buffer);
+        }
+        return false;
+    }
+    const auto* user = reinterpret_cast<const USER_INFO_4*>(buffer);
+    const bool disabled = (user->usri4_flags & UF_ACCOUNTDISABLE) != 0;
+    NetApiBufferFree(buffer);
+    return disabled;
+}
+
+[[nodiscard]] bool EnableAccount(const std::wstring& name)
+{
+    LPBYTE buffer = nullptr;
+    const NET_API_STATUS status = NetUserGetInfo(nullptr, name.c_str(), 4, &buffer);
+    if (status != NERR_Success || buffer == nullptr)
+    {
+        if (buffer != nullptr)
+        {
+            NetApiBufferFree(buffer);
+        }
+        return false;
+    }
+    const auto* user = reinterpret_cast<const USER_INFO_4*>(buffer);
+    USER_INFO_1008 flags {};
+    flags.usri1008_flags = user->usri4_flags & ~UF_ACCOUNTDISABLE;
+    NetApiBufferFree(buffer);
+    return NetUserSetInfo(nullptr, name.c_str(), 1008, reinterpret_cast<LPBYTE>(&flags), nullptr) ==
+           NERR_Success;
+}
+
 } // namespace
 
 int wmain()
@@ -134,7 +172,6 @@ int wmain()
     {
         return 1;
     }
-
     TemporaryDirectory credentialDirectory;
     if (!Expect(credentialDirectory.created(),
             L"Could not create the disposable credential directory."))
@@ -144,14 +181,14 @@ int wmain()
 
     launch_as::broker::RegistrationService registration(credentialDirectory.path());
     account.MarkCreated();
-    const DWORD initialRegistrationError = registration.Register(account.name());
+    const DWORD initialRegistrationError = registration.Enroll(account.name());
     if (!Expect(initialRegistrationError == ERROR_SUCCESS,
             L"Could not register the disposable local account."))
     {
         std::wcerr << L"Registration status: " << initialRegistrationError << L"\n";
         return 1;
     }
-    const DWORD rotationRegistrationError = registration.Register(account.name());
+    const DWORD rotationRegistrationError = registration.Enroll(account.name());
     if (!Expect(rotationRegistrationError == ERROR_SUCCESS,
             L"Could not rotate the disposable account password."))
     {
@@ -172,10 +209,35 @@ int wmain()
         std::wcerr << L"Broker token status: " << brokerTokenError << L"\n";
         return 1;
     }
-    const NET_API_STATUS removalStatus = account.Remove();
-    if (!Expect(removalStatus == NERR_Success, L"Could not remove the disposable local account."))
+
+    if (!Expect(registration.Unenroll(account.name()) == ERROR_SUCCESS,
+            L"Could not unenroll the disposable account.") ||
+        !Expect(!store.Exists(account.name()), L"Unenrollment retained the credential.") ||
+        !Expect(IsAccountDisabled(account.name()), L"Unenrollment did not disable the account."))
     {
-        std::wcerr << L"Cleanup status: " << removalStatus << L"\n";
+        return 1;
+    }
+
+    if (!Expect(EnableAccount(account.name()),
+            L"Could not re-enable the unregistered disposable account.") ||
+        !Expect(registration.Unenroll(account.name()) == ERROR_NOT_FOUND,
+            L"Broker unenrolled an account without a registration.") ||
+        !Expect(!IsAccountDisabled(account.name()),
+            L"Broker disabled an account without a registration."))
+    {
+        return 1;
+    }
+
+    if (!Expect(registration.Enroll(account.name()) == ERROR_SUCCESS,
+            L"Could not re-enroll the disposable account.") ||
+        !Expect(store.Exists(account.name()), L"Re-enrollment did not restore the credential.") ||
+        !Expect(account.Remove() == NERR_Success,
+            L"Could not externally remove the disposable account.") ||
+        !Expect(registration.Unenroll(account.name()) == ERROR_SUCCESS,
+            L"Could not unenroll a missing registered account.") ||
+        !Expect(!store.Exists(account.name()),
+            L"Unenrollment retained the credential for a missing account."))
+    {
         return 1;
     }
     return 0;

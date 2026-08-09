@@ -31,13 +31,26 @@ namespace
 constexpr std::wstring_view HostArgument = L"--internal-pseudoconsole-host";
 constexpr std::wstring_view SizeArgument = L"--size";
 constexpr std::wstring_view InheritCursorArgument = L"--inherit-cursor";
+constexpr std::wstring_view PipeInArgument = L"--pipe-in";
+constexpr std::wstring_view PipeOutArgument = L"--pipe-out";
+constexpr std::wstring_view PipeResizeArgument = L"--pipe-resize";
 constexpr DWORD ProcessTerminationTimeoutMilliseconds = 5'000;
 
-[[nodiscard]] bool PrepareResizeInput(UniqueHandle& resizeInput, std::wstring& error)
+struct HostInvocation
 {
-    const HANDLE inheritedResizeInput = GetStdHandle(STD_ERROR_HANDLE);
-    const HANDLE inheritedOutput = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (!IsUsableHandle(inheritedResizeInput) || !IsUsableHandle(inheritedOutput))
+    COORD terminalSize {};
+    bool inheritCursor = false;
+    std::filesystem::path executable;
+    std::vector<std::wstring> processArguments;
+    std::wstring pipeIn;
+    std::wstring pipeOut;
+    std::wstring pipeResize;
+};
+
+[[nodiscard]] bool PrepareResizeInput(HANDLE source, HANDLE output, bool redirectDiagnostics,
+    UniqueHandle& resizeInput, std::wstring& error)
+{
+    if (!IsUsableHandle(source) || !IsUsableHandle(output))
     {
         error = L"The pseudoconsole host did not receive usable output and resize handles.";
         return false;
@@ -47,7 +60,7 @@ constexpr DWORD ProcessTerminationTimeoutMilliseconds = 5'000;
     // redirects CRT stderr to stdout, because _dup2 closes the old descriptor.
     HANDLE rawResizeInput = nullptr;
     if (!DuplicateHandle(GetCurrentProcess(),
-            inheritedResizeInput,
+            source,
             GetCurrentProcess(),
             &rawResizeInput,
             0,
@@ -61,12 +74,16 @@ constexpr DWORD ProcessTerminationTimeoutMilliseconds = 5'000;
     }
     resizeInput.reset(rawResizeInput);
 
+    if (!redirectDiagnostics)
+    {
+        return true;
+    }
     if (_dup2(_fileno(stdout), _fileno(stderr)) != 0)
     {
         error = L"Could not redirect pseudoconsole host diagnostics.";
         return false;
     }
-    if (!SetStdHandle(STD_ERROR_HANDLE, inheritedOutput))
+    if (!SetStdHandle(STD_ERROR_HANDLE, output))
     {
         const DWORD redirectError = GetLastError();
         error = L"Could not redirect the pseudoconsole host error handle: " +
@@ -93,23 +110,53 @@ constexpr DWORD ProcessTerminationTimeoutMilliseconds = 5'000;
     return true;
 }
 
-[[nodiscard]] bool ParseHostArguments(std::span<wchar_t*> arguments, COORD& terminalSize,
-    bool& inheritCursor, std::filesystem::path& executable,
-    std::vector<std::wstring>& processArguments)
+[[nodiscard]] bool ParseHostArguments(std::span<wchar_t*> arguments, HostInvocation& invocation)
 {
     if (arguments.size() < 7 || std::wstring_view(arguments[1]) != HostArgument ||
         std::wstring_view(arguments[2]) != SizeArgument ||
-        !ParseDimension(arguments[3], terminalSize.X) ||
-        !ParseDimension(arguments[4], terminalSize.Y))
+        !ParseDimension(arguments[3], invocation.terminalSize.X) ||
+        !ParseDimension(arguments[4], invocation.terminalSize.Y))
     {
         return false;
     }
 
     std::size_t separatorIndex = 5;
-    inheritCursor = std::wstring_view(arguments[separatorIndex]) == InheritCursorArgument;
-    if (inheritCursor)
+    invocation.inheritCursor =
+        std::wstring_view(arguments[separatorIndex]) == InheritCursorArgument;
+    if (invocation.inheritCursor)
     {
         ++separatorIndex;
+    }
+    for (;
+        separatorIndex < arguments.size() && std::wstring_view(arguments[separatorIndex]) != L"--";
+        separatorIndex += 2)
+    {
+        if (separatorIndex + 1 >= arguments.size())
+        {
+            return false;
+        }
+        const std::wstring_view name(arguments[separatorIndex]);
+        const std::wstring_view value(arguments[separatorIndex + 1]);
+        if (value.empty())
+        {
+            return false;
+        }
+        if (name == PipeInArgument && invocation.pipeIn.empty())
+        {
+            invocation.pipeIn = value;
+        }
+        else if (name == PipeOutArgument && invocation.pipeOut.empty())
+        {
+            invocation.pipeOut = value;
+        }
+        else if (name == PipeResizeArgument && invocation.pipeResize.empty())
+        {
+            invocation.pipeResize = value;
+        }
+        else
+        {
+            return false;
+        }
     }
     if (arguments.size() <= separatorIndex + 1 ||
         std::wstring_view(arguments[separatorIndex]) != L"--")
@@ -117,11 +164,34 @@ constexpr DWORD ProcessTerminationTimeoutMilliseconds = 5'000;
         return false;
     }
 
-    executable = arguments[separatorIndex + 1];
+    invocation.executable = arguments[separatorIndex + 1];
     for (std::size_t index = separatorIndex + 2; index < arguments.size(); ++index)
     {
-        processArguments.emplace_back(arguments[index]);
+        invocation.processArguments.emplace_back(arguments[index]);
     }
+    return (invocation.pipeIn.empty() && invocation.pipeOut.empty() &&
+               invocation.pipeResize.empty()) ||
+           (!invocation.pipeIn.empty() && !invocation.pipeOut.empty() &&
+               !invocation.pipeResize.empty());
+}
+
+[[nodiscard]] bool OpenPipeClient(
+    std::wstring_view pipeName, DWORD access, UniqueHandle& pipe, std::wstring& error)
+{
+    HANDLE rawPipe = CreateFileW(pipeName.data(),
+        access,
+        0,
+        nullptr,
+        OPEN_EXISTING,
+        SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS,
+        nullptr);
+    if (rawPipe == INVALID_HANDLE_VALUE)
+    {
+        const DWORD pipeError = GetLastError();
+        error = L"Could not open the broker terminal pipe: " + FormatWindowsError(pipeError);
+        return false;
+    }
+    pipe.reset(rawPipe);
     return true;
 }
 
@@ -134,35 +204,55 @@ bool IsPseudoConsoleHostInvocation(std::span<wchar_t*> arguments) noexcept
 
 ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
 {
-    UniqueHandle resizeInput;
-    std::wstring streamError;
-    if (!PrepareResizeInput(resizeInput, streamError))
-    {
-        std::wcout << streamError << L"\n";
-        return ExitFailure;
-    }
-
-    COORD terminalSize {};
-    bool inheritCursor = false;
-    std::filesystem::path executable;
-    std::vector<std::wstring> processArguments;
-    if (!ParseHostArguments(arguments, terminalSize, inheritCursor, executable, processArguments))
+    HostInvocation invocation;
+    if (!ParseHostArguments(arguments, invocation))
     {
         std::wcerr << L"Invalid internal pseudoconsole-host invocation.\n";
         return ExitUsage;
     }
 
+    UniqueHandle brokerInput;
+    UniqueHandle brokerOutput;
+    UniqueHandle brokerResize;
+    const bool brokerPipes = !invocation.pipeIn.empty();
+    std::wstring pipeError;
+    if (brokerPipes &&
+        (!OpenPipeClient(invocation.pipeIn, GENERIC_READ, brokerInput, pipeError) ||
+            !OpenPipeClient(invocation.pipeOut, GENERIC_WRITE, brokerOutput, pipeError) ||
+            !OpenPipeClient(invocation.pipeResize, GENERIC_READ, brokerResize, pipeError)))
+    {
+        std::wcerr << pipeError << L"\n";
+        return ExitFailure;
+    }
+
+    const HANDLE parentInput = brokerPipes ? brokerInput.get() : GetStdHandle(STD_INPUT_HANDLE);
+    const HANDLE parentOutput = brokerPipes ? brokerOutput.get() : GetStdHandle(STD_OUTPUT_HANDLE);
+    const HANDLE resizeSource = brokerPipes ? brokerResize.get() : GetStdHandle(STD_ERROR_HANDLE);
+    UniqueHandle resizeInput;
+    std::wstring streamError;
+    if (!PrepareResizeInput(resizeSource, parentOutput, !brokerPipes, resizeInput, streamError))
+    {
+        std::wcout << streamError << L"\n";
+        return ExitFailure;
+    }
+
     std::error_code pathError;
-    if (!executable.is_absolute() || !std::filesystem::is_regular_file(executable, pathError))
+    if (!invocation.executable.is_absolute() ||
+        !std::filesystem::is_regular_file(invocation.executable, pathError))
     {
         std::wcerr << L"Pseudoconsole target is not an existing absolute file: "
-                   << executable.c_str() << L"\n";
+                   << invocation.executable.c_str() << L"\n";
         return ExitFailure;
     }
 
     PseudoConsoleSession pseudoConsole;
     std::wstring terminalError;
-    if (!pseudoConsole.Initialize(terminalSize, inheritCursor, resizeInput.get(), terminalError))
+    if (!pseudoConsole.Initialize(invocation.terminalSize,
+            invocation.inheritCursor,
+            parentInput,
+            parentOutput,
+            resizeInput.get(),
+            terminalError))
     {
         std::wcerr << terminalError << L"\n";
         return ExitFailure;
@@ -173,12 +263,13 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
         return ExitFailure;
     }
 
-    std::wstring commandLine = BuildWindowsCommandLine(executable.native(), processArguments);
+    std::wstring commandLine =
+        BuildWindowsCommandLine(invocation.executable.native(), invocation.processArguments);
     std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
     mutableCommandLine.push_back(L'\0');
 
     PROCESS_INFORMATION processInformation {};
-    if (!CreateProcessW(executable.c_str(),
+    if (!CreateProcessW(invocation.executable.c_str(),
             mutableCommandLine.data(),
             nullptr,
             nullptr,

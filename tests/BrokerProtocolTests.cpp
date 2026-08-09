@@ -137,6 +137,24 @@ int wmain()
     {
         return 1;
     }
+    const std::string managementRequest =
+        launch_as::broker::BuildManagementRequest(launch_as::broker::RequestOperation::Rotate,
+            L"123e4567-e89b-12d3-a456-426614174000",
+            L"account with space",
+            true);
+    if (!Expect(launch_as::broker::ParseBrokerRequest(managementRequest, request) ==
+                        launch_as::broker::ParseResult::Success &&
+                    request.operation == launch_as::broker::RequestOperation::Rotate &&
+                    request.profileId == L"account with space" && request.confirmed,
+            L"Built management request was not accepted by the protocol parser.") ||
+        !Expect(launch_as::broker::RequestOperationSuccessReason(
+                    launch_as::broker::RequestOperation::Rotate) == "rotated" &&
+                    launch_as::broker::RequestOperationFailureReason(
+                        launch_as::broker::RequestOperation::Rotate) == "rotation_failed",
+            L"Management operation reasons are not centralized."))
+    {
+        return 1;
+    }
 
     std::string wrongMode(ValidRequest);
     wrongMode.replace(wrongMode.find("\"console\""), 9, "\"interactive\"");

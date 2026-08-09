@@ -52,7 +52,34 @@ DWORD RegistrationService::Rotate(std::wstring_view accountName)
     {
         return ERROR_NOT_FOUND;
     }
-    return Enroll(accountName);
+    const std::wstring name(accountName);
+    LPBYTE account = nullptr;
+    const NET_API_STATUS accountStatus = NetUserGetInfo(nullptr, name.c_str(), 0, &account);
+    if (account != nullptr)
+    {
+        NetApiBufferFree(account);
+    }
+    if (accountStatus != NERR_Success)
+    {
+        return accountStatus;
+    }
+    SecurePassword password;
+    const DWORD passwordError = GenerateBrokerPassword(password);
+    if (passwordError != ERROR_SUCCESS)
+    {
+        return passwordError;
+    }
+    USER_INFO_1003 replacementPassword {};
+    replacementPassword.usri1003_password = const_cast<wchar_t*>(password.c_str());
+    const NET_API_STATUS passwordStatus = NetUserSetInfo(
+        nullptr, name.c_str(), 1003, reinterpret_cast<LPBYTE>(&replacementPassword), nullptr);
+    if (passwordStatus != NERR_Success)
+    {
+        return passwordStatus;
+    }
+    const DWORD storeError = store_.Store(accountName, password.characters());
+    password.Clear();
+    return storeError;
 }
 
 DWORD RegistrationService::Test(std::wstring_view accountName) const

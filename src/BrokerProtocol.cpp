@@ -475,6 +475,95 @@ void AppendJsonString(std::string& output, std::wstring_view value)
 
 } // namespace
 
+std::wstring_view RequestOperationName(RequestOperation operation) noexcept
+{
+    switch (operation)
+    {
+    case RequestOperation::ConsoleLaunch:
+        return L"launch";
+    case RequestOperation::Enroll:
+        return L"enroll";
+    case RequestOperation::Rotate:
+        return L"rotate";
+    case RequestOperation::Test:
+        return L"test";
+    case RequestOperation::List:
+        return L"list";
+    case RequestOperation::Unenroll:
+        return L"unenroll";
+    case RequestOperation::UnenrollAll:
+        return L"unenroll-all";
+    }
+    return L"unknown";
+}
+
+bool IsManagementOperation(RequestOperation operation) noexcept
+{
+    return operation != RequestOperation::ConsoleLaunch;
+}
+
+std::string_view RequestOperationSuccessReason(RequestOperation operation) noexcept
+{
+    switch (operation)
+    {
+    case RequestOperation::Enroll:
+        return "enrolled";
+    case RequestOperation::Rotate:
+        return "rotated";
+    case RequestOperation::Test:
+        return "tested";
+    case RequestOperation::List:
+        return "listed";
+    case RequestOperation::Unenroll:
+    case RequestOperation::UnenrollAll:
+        return "unenrolled";
+    case RequestOperation::ConsoleLaunch:
+        return "launched";
+    }
+    return "unknown";
+}
+
+std::string_view RequestOperationFailureReason(RequestOperation operation) noexcept
+{
+    switch (operation)
+    {
+    case RequestOperation::Enroll:
+        return "enrollment_failed";
+    case RequestOperation::Rotate:
+        return "rotation_failed";
+    case RequestOperation::Test:
+        return "test_failed";
+    case RequestOperation::List:
+        return "list_failed";
+    case RequestOperation::Unenroll:
+    case RequestOperation::UnenrollAll:
+        return "unenrollment_failed";
+    case RequestOperation::ConsoleLaunch:
+        return "launch_failed";
+    }
+    return "invalid_request";
+}
+
+std::string BuildManagementRequest(RequestOperation operation, std::wstring_view requestId,
+    std::wstring_view profileId, bool confirmed)
+{
+    std::string request = "{\"version\":1,\"requestId\":";
+    AppendJsonString(request, requestId);
+    request += ",\"operation\":";
+    AppendJsonString(request, RequestOperationName(operation));
+    if (operation != RequestOperation::List && operation != RequestOperation::UnenrollAll)
+    {
+        request += ",\"profileId\":";
+        AppendJsonString(request, profileId);
+    }
+    if (operation != RequestOperation::List && operation != RequestOperation::Test)
+    {
+        request += confirmed ? ",\"confirmed\":true" : ",\"confirmed\":false";
+    }
+    request += '}';
+    return request;
+}
+
 ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
 {
     request = {};

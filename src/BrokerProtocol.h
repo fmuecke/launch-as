@@ -38,6 +38,11 @@ enum class RequestOperation
     UnenrollAll
 };
 
+[[nodiscard]] std::wstring_view RequestOperationName(RequestOperation operation) noexcept;
+[[nodiscard]] bool IsManagementOperation(RequestOperation operation) noexcept;
+[[nodiscard]] std::string_view RequestOperationSuccessReason(RequestOperation operation) noexcept;
+[[nodiscard]] std::string_view RequestOperationFailureReason(RequestOperation operation) noexcept;
+
 struct BrokerRequest
 {
     RequestOperation operation = RequestOperation::ConsoleLaunch;
@@ -57,6 +62,8 @@ enum class ParseResult
 };
 
 [[nodiscard]] ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request);
+[[nodiscard]] std::string BuildManagementRequest(RequestOperation operation,
+    std::wstring_view requestId, std::wstring_view profileId, bool confirmed);
 [[nodiscard]] std::string BuildErrorResponse(
     std::wstring_view requestId, std::string_view reasonCode, DWORD win32Error);
 [[nodiscard]] std::string BuildSuccessResponse(

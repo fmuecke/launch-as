@@ -102,37 +102,15 @@ class LocalString final
 struct BrokerLaunchPolicy
 {
     explicit BrokerLaunchPolicy(std::wstring_view credentialDirectory)
-        : credentialStore(credentialDirectory)
+        : credentialStore(credentialDirectory), registration(credentialDirectory)
     {
     }
 
     std::vector<BYTE> authorizedCallerSid;
     launch_as::broker::CredentialStore credentialStore;
-    launch_as::broker::RegistrationService* registration = nullptr;
+    launch_as::broker::RegistrationService registration;
+    std::wstring controlPipeDacl;
 };
-
-[[nodiscard]] std::wstring OperationName(launch_as::broker::RequestOperation operation)
-{
-    using launch_as::broker::RequestOperation;
-    switch (operation)
-    {
-    case RequestOperation::ConsoleLaunch:
-        return L"launch";
-    case RequestOperation::Enroll:
-        return L"enroll";
-    case RequestOperation::Rotate:
-        return L"rotate";
-    case RequestOperation::Test:
-        return L"test";
-    case RequestOperation::List:
-        return L"list";
-    case RequestOperation::Unenroll:
-        return L"unenroll";
-    case RequestOperation::UnenrollAll:
-        return L"unenroll-all";
-    }
-    return L"unknown";
-}
 
 [[nodiscard]] std::wstring AuditCallerSid(const launch_as::broker::BrokerCallerIdentity& caller)
 {
@@ -154,7 +132,7 @@ void AuditRequest(launch_as::broker::BrokerAuditEvent event, WORD type,
 {
     const std::vector<std::wstring> fields {
         L"requestId=" + request.requestId,
-        L"operation=" + OperationName(request.operation),
+        L"operation=" + std::wstring(launch_as::broker::RequestOperationName(request.operation)),
         L"account=" + request.profileId,
         L"callerSid=" + AuditCallerSid(caller),
         L"callerSession=" + std::to_wstring(caller.sessionId),
@@ -165,25 +143,32 @@ void AuditRequest(launch_as::broker::BrokerAuditEvent event, WORD type,
     static_cast<void>(launch_as::broker::WriteBrokerAuditEvent(type, event, fields));
 }
 
-[[nodiscard]] launch_as::UniqueHandle CreateControlPipe(
-    const std::vector<BYTE>& authorizedCallerSid)
+[[nodiscard]] DWORD BuildControlPipeDacl(
+    const std::vector<BYTE>& authorizedCallerSid, std::wstring& dacl)
 {
-    std::wstring dacl = L"D:P(A;;GA;;;SY)(A;;GA;;;BA)";
+    dacl = L"D:P(A;;GA;;;SY)(A;;GA;;;BA)";
     if (!authorizedCallerSid.empty())
     {
         LocalString callerSid;
         if (!ConvertSidToStringSidW(
                 const_cast<BYTE*>(authorizedCallerSid.data()), callerSid.address()))
         {
-            return {};
+            const DWORD sidError = GetLastError();
+            return sidError;
         }
         dacl += L"(A;;GRGW;;;";
         dacl += callerSid.get();
         dacl += L")";
     }
+    return ERROR_SUCCESS;
+}
+
+[[nodiscard]] launch_as::UniqueHandle CreateControlPipe(std::wstring_view dacl)
+{
+    const std::wstring daclText(dacl);
     LocalSecurityDescriptor securityDescriptor;
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            dacl.c_str(), SDDL_REVISION_1, securityDescriptor.address(), nullptr))
+            daclText.c_str(), SDDL_REVISION_1, securityDescriptor.address(), nullptr))
     {
         return {};
     }
@@ -212,7 +197,7 @@ void RunPipeServer(BrokerLaunchPolicy& launchPolicy)
 {
     while (WaitForSingleObject(stopEvent, 0) == WAIT_TIMEOUT)
     {
-        launch_as::UniqueHandle pipe(CreateControlPipe(launchPolicy.authorizedCallerSid));
+        launch_as::UniqueHandle pipe(CreateControlPipe(launchPolicy.controlPipeDacl));
         if (!pipe)
         {
             return;
@@ -279,14 +264,14 @@ DWORD ConfigureProfile(void* context, const launch_as::broker::BrokerRequest& re
         return result;
     };
     auto* policy = static_cast<BrokerLaunchPolicy*>(context);
-    if (policy == nullptr || policy->registration == nullptr ||
+    if (policy == nullptr ||
         !launch_as::broker::IsAuthorizedCaller(policy->authorizedCallerSid, caller.userSid))
     {
         return complete(ERROR_ACCESS_DENIED);
     }
     if (request.operation == launch_as::broker::RequestOperation::List)
     {
-        return complete(policy->registration->List(accounts));
+        return complete(policy->registration.List(accounts));
     }
     if (request.operation != launch_as::broker::RequestOperation::Test && !request.confirmed)
     {
@@ -298,22 +283,22 @@ DWORD ConfigureProfile(void* context, const launch_as::broker::BrokerRequest& re
     }
     if (request.operation == launch_as::broker::RequestOperation::Enroll)
     {
-        return complete(policy->registration->Enroll(request.profileId));
+        return complete(policy->registration.Enroll(request.profileId));
     }
     if (request.operation == launch_as::broker::RequestOperation::Rotate)
     {
-        return complete(policy->registration->Rotate(request.profileId));
+        return complete(policy->registration.Rotate(request.profileId));
     }
     if (request.operation == launch_as::broker::RequestOperation::Test)
     {
-        return complete(policy->registration->Test(request.profileId));
+        return complete(policy->registration.Test(request.profileId));
     }
     if (request.operation == launch_as::broker::RequestOperation::Unenroll)
     {
-        return complete(policy->registration->Unenroll(request.profileId));
+        return complete(policy->registration.Unenroll(request.profileId));
     }
     return complete(request.operation == launch_as::broker::RequestOperation::UnenrollAll
-                        ? policy->registration->UnenrollAll()
+                        ? policy->registration.UnenrollAll()
                         : ERROR_INVALID_PARAMETER);
 }
 
@@ -413,7 +398,6 @@ void WINAPI ServiceMain(DWORD, wchar_t**)
         ReportServiceStatus(SERVICE_STOPPED, credentialDirectoryError);
         return;
     }
-    launch_as::broker::RegistrationService registration(credentialDirectory);
     std::wstring dataDirectory;
     const DWORD dataDirectoryError = launch_as::broker::GetBrokerDataDirectory(dataDirectory);
     if (dataDirectoryError != ERROR_SUCCESS)
@@ -422,10 +406,16 @@ void WINAPI ServiceMain(DWORD, wchar_t**)
         return;
     }
     BrokerLaunchPolicy launchPolicy(credentialDirectory);
-    launchPolicy.registration = &registration;
     static_cast<void>(launch_as::broker::LoadAuthorizedCallerSid(
         launch_as::broker::GetAuthorizedCallerPolicyPath(dataDirectory),
         launchPolicy.authorizedCallerSid));
+    const DWORD daclError =
+        BuildControlPipeDacl(launchPolicy.authorizedCallerSid, launchPolicy.controlPipeDacl);
+    if (daclError != ERROR_SUCCESS)
+    {
+        ReportServiceStatus(SERVICE_STOPPED, daclError);
+        return;
+    }
     ReportServiceStatus(SERVICE_RUNNING);
     RunPipeServer(launchPolicy);
     ReportServiceStatus(SERVICE_STOPPED);
@@ -446,17 +436,7 @@ void WINAPI ServiceMain(DWORD, wchar_t**)
     return std::wstring(formatted + 1, 36);
 }
 
-enum class ConfigurationCommand
-{
-    Enroll,
-    Rotate,
-    Test,
-    List,
-    Unenroll,
-    UnenrollAll
-};
-
-[[nodiscard]] DWORD ForwardConfigurationRequest(ConfigurationCommand command,
+[[nodiscard]] DWORD ForwardManagementRequest(launch_as::broker::RequestOperation operation,
     std::wstring_view accountName, bool confirmed, std::vector<std::wstring>* accounts)
 {
     const std::optional<std::wstring> requestId = CreateRequestId();
@@ -464,54 +444,8 @@ enum class ConfigurationCommand
     {
         return ERROR_GEN_FAILURE;
     }
-    std::string requestIdUtf8;
-    requestIdUtf8.reserve(requestId->size());
-    for (const wchar_t character : *requestId)
-    {
-        requestIdUtf8.push_back(static_cast<char>(character));
-    }
-    const std::string operation = command == ConfigurationCommand::Enroll     ? "enroll"
-                                  : command == ConfigurationCommand::Rotate   ? "rotate"
-                                  : command == ConfigurationCommand::Test     ? "test"
-                                  : command == ConfigurationCommand::List     ? "list"
-                                  : command == ConfigurationCommand::Unenroll ? "unenroll"
-                                                                              : "unenroll-all";
-    std::string request = "{\"version\":1,\"requestId\":\"" + requestIdUtf8 +
-                          "\",\"operation\":\"" + operation + "\"";
-    if (command != ConfigurationCommand::List && command != ConfigurationCommand::UnenrollAll)
-    {
-        std::string accountNameUtf8;
-        const int accountCharacters = WideCharToMultiByte(CP_UTF8,
-            WC_ERR_INVALID_CHARS,
-            accountName.data(),
-            static_cast<int>(accountName.size()),
-            nullptr,
-            0,
-            nullptr,
-            nullptr);
-        if (accountCharacters <= 0)
-        {
-            return ERROR_INVALID_PARAMETER;
-        }
-        accountNameUtf8.resize(static_cast<std::size_t>(accountCharacters));
-        if (WideCharToMultiByte(CP_UTF8,
-                WC_ERR_INVALID_CHARS,
-                accountName.data(),
-                static_cast<int>(accountName.size()),
-                accountNameUtf8.data(),
-                accountCharacters,
-                nullptr,
-                nullptr) != accountCharacters)
-        {
-            return ERROR_INVALID_PARAMETER;
-        }
-        request += ",\"profileId\":\"" + accountNameUtf8 + "\"";
-    }
-    if (command != ConfigurationCommand::List && command != ConfigurationCommand::Test)
-    {
-        request += confirmed ? ",\"confirmed\":true" : ",\"confirmed\":false";
-    }
-    request += "}";
+    const std::string request =
+        launch_as::broker::BuildManagementRequest(operation, *requestId, accountName, confirmed);
 
     HANDLE rawPipe = nullptr;
     const DWORD openError = launch_as::broker::OpenBrokerControlPipe(rawPipe);
@@ -543,18 +477,15 @@ enum class ConfigurationCommand
         return readError;
     }
     const std::string response(responseBuffer.data(), bytesRead);
-    if (command == ConfigurationCommand::List)
+    if (operation == launch_as::broker::RequestOperation::List)
     {
         return accounts != nullptr &&
                        launch_as::broker::ParseListResponse(response, *requestId, *accounts)
                    ? ERROR_SUCCESS
                    : ERROR_INVALID_DATA;
     }
-    const char* successReason = command == ConfigurationCommand::Enroll   ? "enrolled"
-                                : command == ConfigurationCommand::Rotate ? "rotated"
-                                : command == ConfigurationCommand::Test   ? "tested"
-                                                                          : "unenrolled";
-    if (response == launch_as::broker::BuildSuccessResponse(*requestId, successReason))
+    if (response == launch_as::broker::BuildSuccessResponse(
+                        *requestId, launch_as::broker::RequestOperationSuccessReason(operation)))
     {
         return ERROR_SUCCESS;
     }
@@ -638,8 +569,8 @@ int RunConfigurationCommand(int argumentCount, wchar_t* arguments[])
     if (argumentCount == 2 && std::wstring_view(arguments[1]) == L"list")
     {
         std::vector<std::wstring> accounts;
-        const DWORD listError =
-            ForwardConfigurationRequest(ConfigurationCommand::List, L"", false, &accounts);
+        const DWORD listError = ForwardManagementRequest(
+            launch_as::broker::RequestOperation::List, L"", false, &accounts);
         if (listError == ERROR_SUCCESS)
         {
             if (accounts.empty())
@@ -704,12 +635,12 @@ int RunConfigurationCommand(int argumentCount, wchar_t* arguments[])
         {
             return ERROR_CANCELLED;
         }
-        const ConfigurationCommand configurationCommand =
-            isEnrollment ? ConfigurationCommand::Enroll
-            : isRotation ? ConfigurationCommand::Rotate
-                         : ConfigurationCommand::Unenroll;
+        const launch_as::broker::RequestOperation operation =
+            isEnrollment ? launch_as::broker::RequestOperation::Enroll
+            : isRotation ? launch_as::broker::RequestOperation::Rotate
+                         : launch_as::broker::RequestOperation::Unenroll;
         const DWORD configurationError =
-            ForwardConfigurationRequest(configurationCommand, accountName, true, nullptr);
+            ForwardManagementRequest(operation, accountName, true, nullptr);
         if (configurationError == ERROR_SUCCESS)
         {
             std::wcout << (isEnrollment    ? L"Enrolled "
@@ -742,8 +673,8 @@ int RunConfigurationCommand(int argumentCount, wchar_t* arguments[])
             PrintUsage();
             return ERROR_INVALID_PARAMETER;
         }
-        const DWORD testError =
-            ForwardConfigurationRequest(ConfigurationCommand::Test, accountName, false, nullptr);
+        const DWORD testError = ForwardManagementRequest(
+            launch_as::broker::RequestOperation::Test, accountName, false, nullptr);
         if (testError == ERROR_SUCCESS)
         {
             std::wcout << L"Stored broker credential for " << accountName << L" is valid.\n";
@@ -764,8 +695,8 @@ int RunConfigurationCommand(int argumentCount, wchar_t* arguments[])
         {
             return ERROR_CANCELLED;
         }
-        const DWORD dropError =
-            ForwardConfigurationRequest(ConfigurationCommand::UnenrollAll, L"", true, nullptr);
+        const DWORD dropError = ForwardManagementRequest(
+            launch_as::broker::RequestOperation::UnenrollAll, L"", true, nullptr);
         if (dropError == ERROR_SUCCESS)
         {
             std::wcout << L"Unenrolled all broker accounts.\n";

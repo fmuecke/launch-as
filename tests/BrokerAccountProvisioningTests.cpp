@@ -241,6 +241,8 @@ int wmain()
         !Expect(store.Exists(account.name()), L"Re-enrollment did not restore the credential.") ||
         !Expect(account.Remove() == NERR_Success,
             L"Could not externally remove the disposable account.") ||
+        !Expect(registration.Rotate(account.name()) == NERR_UserNotFound,
+            L"Broker rotation recreated a missing enrolled account.") ||
         !Expect(registration.Unenroll(account.name()) == ERROR_SUCCESS,
             L"Could not unenroll a missing registered account.") ||
         !Expect(!store.Exists(account.name()),

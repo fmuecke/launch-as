@@ -312,6 +312,8 @@ void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
         response = BuildErrorResponse(L"", "invalid_request", ERROR_INVALID_DATA);
     }
     else if (request.operation == RequestOperation::Enroll ||
+             request.operation == RequestOperation::Rotate ||
+             request.operation == RequestOperation::Test ||
              request.operation == RequestOperation::List ||
              request.operation == RequestOperation::Unenroll ||
              request.operation == RequestOperation::UnenrollAll)
@@ -327,9 +329,11 @@ void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
                 configurationRequestHandler(configurationContext, request, caller, accounts);
             if (configurationError != ERROR_SUCCESS)
             {
-                const char* reasonCode = request.operation == RequestOperation::Enroll
-                                             ? "enrollment_failed"
-                                             : "unenrollment_failed";
+                const char* reasonCode =
+                    request.operation == RequestOperation::Enroll   ? "enrollment_failed"
+                    : request.operation == RequestOperation::Rotate ? "rotation_failed"
+                    : request.operation == RequestOperation::Test   ? "test_failed"
+                                                                    : "unenrollment_failed";
                 response = BuildErrorResponse(request.requestId, reasonCode, configurationError);
             }
             else if (request.operation == RequestOperation::List)
@@ -338,8 +342,12 @@ void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
             }
             else
             {
-                response = BuildSuccessResponse(request.requestId,
-                    request.operation == RequestOperation::Enroll ? "enrolled" : "unenrolled");
+                const char* reasonCode = request.operation == RequestOperation::Enroll ? "enrolled"
+                                         : request.operation == RequestOperation::Rotate ? "rotated"
+                                         : request.operation == RequestOperation::Test
+                                             ? "tested"
+                                             : "unenrolled";
+                response = BuildSuccessResponse(request.requestId, reasonCode);
             }
         }
     }

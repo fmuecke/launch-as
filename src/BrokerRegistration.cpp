@@ -5,6 +5,7 @@
 #include "BrokerRegistration.h"
 
 #include "BrokerAccountProvisioner.h"
+#include "BrokerLogonToken.h"
 #include "BrokerPassword.h"
 
 #include <Lm.h>
@@ -39,6 +40,29 @@ DWORD RegistrationService::Enroll(std::wstring_view accountName)
     const DWORD storeError = store_.Store(accountName, password.characters());
     password.Clear();
     return storeError;
+}
+
+DWORD RegistrationService::Rotate(std::wstring_view accountName)
+{
+    if (!IsValidBrokerAccountName(accountName))
+    {
+        return ERROR_INVALID_PARAMETER;
+    }
+    if (!store_.Exists(accountName))
+    {
+        return ERROR_NOT_FOUND;
+    }
+    return Enroll(accountName);
+}
+
+DWORD RegistrationService::Test(std::wstring_view accountName) const
+{
+    if (!IsValidBrokerAccountName(accountName))
+    {
+        return ERROR_INVALID_PARAMETER;
+    }
+    BrokerLogonToken token;
+    return LogOnBrokerProfile(accountName, accountName, store_, token);
 }
 
 DWORD RegistrationService::Unenroll(std::wstring_view accountName)

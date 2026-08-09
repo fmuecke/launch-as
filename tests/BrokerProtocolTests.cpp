@@ -53,6 +53,21 @@ constexpr char UnenrollAllRequest[] = R"json({
   "confirmed": true
 })json";
 
+constexpr char RotateRequest[] = R"json({
+  "version": 1,
+  "requestId": "123e4567-e89b-12d3-a456-426614174000",
+  "operation": "rotate",
+  "profileId": "agent-sandbox",
+  "confirmed": true
+})json";
+
+constexpr char TestRequest[] = R"json({
+  "version": 1,
+  "requestId": "123e4567-e89b-12d3-a456-426614174000",
+  "operation": "test",
+  "profileId": "agent-sandbox"
+})json";
+
 constexpr char UnconfirmedEnrollRequest[] = R"json({
   "version": 1,
   "requestId": "123e4567-e89b-12d3-a456-426614174000",
@@ -102,6 +117,17 @@ int wmain()
                         launch_as::broker::ParseResult::Success &&
                     request.operation == launch_as::broker::RequestOperation::UnenrollAll,
             L"Unenroll-all request was rejected."))
+    {
+        return 1;
+    }
+    if (!Expect(launch_as::broker::ParseBrokerRequest(RotateRequest, request) ==
+                        launch_as::broker::ParseResult::Success &&
+                    request.operation == launch_as::broker::RequestOperation::Rotate,
+            L"Rotate request was rejected.") ||
+        !Expect(launch_as::broker::ParseBrokerRequest(TestRequest, request) ==
+                        launch_as::broker::ParseResult::Success &&
+                    request.operation == launch_as::broker::RequestOperation::Test,
+            L"Credential test request was rejected."))
     {
         return 1;
     }

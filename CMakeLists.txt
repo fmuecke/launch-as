@@ -143,6 +143,8 @@ set_target_properties(launch_as_conhost PROPERTIES
 add_executable(launch_as_broker
     src/BrokerAccountProvisioner.cpp
     src/BrokerAccountProvisioner.h
+    src/BrokerAudit.cpp
+    src/BrokerAudit.h
     src/BrokerCallerPolicy.cpp
     src/BrokerCallerPolicy.h
     src/BrokerControlPipe.cpp
@@ -372,10 +374,36 @@ if(BUILD_TESTING)
         LABELS "broker;integration"
     )
 
+    add_executable(LauncherBrokerAuditTests
+        tests/BrokerAuditTests.cpp
+        src/BrokerAudit.cpp
+        src/BrokerAudit.h
+    )
+    target_include_directories(LauncherBrokerAuditTests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(LauncherBrokerAuditTests PRIVATE
+        Advapi32
+    )
+    configure_launch_as_target(LauncherBrokerAuditTests)
+
+    add_test(
+        NAME launcher.broker_audit
+        COMMAND "$<TARGET_FILE:LauncherBrokerAuditTests>"
+    )
+    set_tests_properties(launcher.broker_audit PROPERTIES
+        LABELS "broker;integration"
+    )
+
     add_executable(LauncherBrokerProcessAccessProbe
         tests/BrokerProcessAccessProbe.cpp
     )
     configure_launch_as_target(LauncherBrokerProcessAccessProbe)
+
+    add_executable(LauncherBrokerChildIdentityProbe
+        tests/BrokerChildIdentityProbe.cpp
+    )
+    configure_launch_as_target(LauncherBrokerChildIdentityProbe)
 
     add_executable(LauncherBrokerAccountProvisioningTests
         tests/BrokerAccountProvisioningTests.cpp
@@ -403,6 +431,8 @@ if(BUILD_TESTING)
 
     add_executable(LauncherBrokerServiceInstallerTests
         tests/BrokerServiceInstallerTests.cpp
+        src/BrokerAudit.cpp
+        src/BrokerAudit.h
         src/BrokerCallerPolicy.cpp
         src/BrokerCallerPolicy.h
         src/BrokerDataDirectory.cpp

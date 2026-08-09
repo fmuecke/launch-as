@@ -601,14 +601,24 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
     {
         return ParseResult::InvalidRequest;
     }
-    if (operationName == L"enroll")
+    if (operationName == L"enroll" || operationName == L"rotate")
     {
         if (modeSeen || argumentsSeen || workingDirectorySeen || consoleSeen || !confirmedSeen ||
             !confirmed)
         {
             return ParseResult::InvalidRequest;
         }
-        request.operation = RequestOperation::Enroll;
+        request.operation =
+            operationName == L"enroll" ? RequestOperation::Enroll : RequestOperation::Rotate;
+        return ParseResult::Success;
+    }
+    if (operationName == L"test")
+    {
+        if (modeSeen || argumentsSeen || workingDirectorySeen || consoleSeen || confirmedSeen)
+        {
+            return ParseResult::InvalidRequest;
+        }
+        request.operation = RequestOperation::Test;
         return ParseResult::Success;
     }
     if (operationName == L"unenroll")

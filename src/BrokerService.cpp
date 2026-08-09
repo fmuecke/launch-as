@@ -3,6 +3,7 @@
 // Project: https://github.com/fmuecke/launch-as
 
 #include "BrokerAccountProvisioner.h"
+#include "BrokerAudit.h"
 #include "BrokerCallerPolicy.h"
 #include "BrokerControlPipe.h"
 #include "BrokerDataDirectory.h"
@@ -110,6 +111,60 @@ struct BrokerLaunchPolicy
     launch_as::broker::RegistrationService* registration = nullptr;
 };
 
+[[nodiscard]] std::wstring OperationName(launch_as::broker::RequestOperation operation)
+{
+    using launch_as::broker::RequestOperation;
+    switch (operation)
+    {
+    case RequestOperation::ConsoleLaunch:
+        return L"launch";
+    case RequestOperation::Enroll:
+        return L"enroll";
+    case RequestOperation::Rotate:
+        return L"rotate";
+    case RequestOperation::Test:
+        return L"test";
+    case RequestOperation::List:
+        return L"list";
+    case RequestOperation::Unenroll:
+        return L"unenroll";
+    case RequestOperation::UnenrollAll:
+        return L"unenroll-all";
+    }
+    return L"unknown";
+}
+
+[[nodiscard]] std::wstring AuditCallerSid(const launch_as::broker::BrokerCallerIdentity& caller)
+{
+    if (caller.userSid.empty() || !IsValidSid(const_cast<BYTE*>(caller.userSid.data())))
+    {
+        return L"unknown";
+    }
+    LocalString value;
+    if (!ConvertSidToStringSidW(const_cast<BYTE*>(caller.userSid.data()), value.address()))
+    {
+        return L"unknown";
+    }
+    return value.get();
+}
+
+void AuditRequest(launch_as::broker::BrokerAuditEvent event, WORD type,
+    const launch_as::broker::BrokerRequest& request,
+    const launch_as::broker::BrokerCallerIdentity& caller, DWORD result, DWORD processId = 0)
+{
+    const std::vector<std::wstring> fields {
+        L"requestId=" + request.requestId,
+        L"operation=" + OperationName(request.operation),
+        L"account=" + request.profileId,
+        L"callerSid=" + AuditCallerSid(caller),
+        L"callerSession=" + std::to_wstring(caller.sessionId),
+        L"result=" + std::wstring(result == ERROR_SUCCESS ? L"allowed" : L"rejected"),
+        L"processId=" + std::to_wstring(processId),
+        L"win32Error=" + std::to_wstring(result),
+    };
+    static_cast<void>(launch_as::broker::WriteBrokerAuditEvent(type, event, fields));
+}
+
 [[nodiscard]] launch_as::UniqueHandle CreateControlPipe(
     const std::vector<BYTE>& authorizedCallerSid)
 {
@@ -212,58 +267,88 @@ void RunPipeServer(BrokerLaunchPolicy& launchPolicy)
 DWORD ConfigureProfile(void* context, const launch_as::broker::BrokerRequest& request,
     const launch_as::broker::BrokerCallerIdentity& caller, std::vector<std::wstring>& accounts)
 {
+    const auto complete = [&](DWORD result)
+    {
+        AuditRequest(result == ERROR_SUCCESS
+                         ? launch_as::broker::BrokerAuditEvent::ConfigurationChanged
+                         : launch_as::broker::BrokerAuditEvent::ConfigurationRejected,
+            result == ERROR_SUCCESS ? EVENTLOG_INFORMATION_TYPE : EVENTLOG_WARNING_TYPE,
+            request,
+            caller,
+            result);
+        return result;
+    };
     auto* policy = static_cast<BrokerLaunchPolicy*>(context);
     if (policy == nullptr || policy->registration == nullptr ||
         !launch_as::broker::IsAuthorizedCaller(policy->authorizedCallerSid, caller.userSid))
     {
-        return ERROR_ACCESS_DENIED;
+        return complete(ERROR_ACCESS_DENIED);
     }
     if (request.operation == launch_as::broker::RequestOperation::List)
     {
-        return policy->registration->List(accounts);
+        return complete(policy->registration->List(accounts));
     }
-    if (!request.confirmed)
+    if (request.operation != launch_as::broker::RequestOperation::Test && !request.confirmed)
     {
-        return ERROR_CANCELLED;
+        return complete(ERROR_CANCELLED);
     }
     if (!caller.isElevated)
     {
-        return ERROR_ELEVATION_REQUIRED;
+        return complete(ERROR_ELEVATION_REQUIRED);
     }
     if (request.operation == launch_as::broker::RequestOperation::Enroll)
     {
-        return policy->registration->Enroll(request.profileId);
+        return complete(policy->registration->Enroll(request.profileId));
+    }
+    if (request.operation == launch_as::broker::RequestOperation::Rotate)
+    {
+        return complete(policy->registration->Rotate(request.profileId));
+    }
+    if (request.operation == launch_as::broker::RequestOperation::Test)
+    {
+        return complete(policy->registration->Test(request.profileId));
     }
     if (request.operation == launch_as::broker::RequestOperation::Unenroll)
     {
-        return policy->registration->Unenroll(request.profileId);
+        return complete(policy->registration->Unenroll(request.profileId));
     }
-    return request.operation == launch_as::broker::RequestOperation::UnenrollAll
-               ? policy->registration->UnenrollAll()
-               : ERROR_INVALID_PARAMETER;
+    return complete(request.operation == launch_as::broker::RequestOperation::UnenrollAll
+                        ? policy->registration->UnenrollAll()
+                        : ERROR_INVALID_PARAMETER);
 }
 
 DWORD LaunchProfile(void* context, const launch_as::broker::BrokerRequest& request,
     const launch_as::broker::BrokerCallerIdentity& caller,
     launch_as::broker::BrokerChildProcess& child)
 {
+    const auto complete = [&](DWORD result)
+    {
+        AuditRequest(result == ERROR_SUCCESS ? launch_as::broker::BrokerAuditEvent::LaunchAllowed
+                                             : launch_as::broker::BrokerAuditEvent::LaunchRejected,
+            result == ERROR_SUCCESS ? EVENTLOG_INFORMATION_TYPE : EVENTLOG_WARNING_TYPE,
+            request,
+            caller,
+            result,
+            child.processId());
+        return result;
+    };
     const auto* policy = static_cast<const BrokerLaunchPolicy*>(context);
     if (policy == nullptr ||
         request.operation != launch_as::broker::RequestOperation::ConsoleLaunch ||
         !launch_as::broker::IsAuthorizedCaller(policy->authorizedCallerSid, caller.userSid))
     {
-        return ERROR_ACCESS_DENIED;
+        return complete(ERROR_ACCESS_DENIED);
     }
     launch_as::broker::BrokerLogonToken token;
     const DWORD logonError = launch_as::broker::LogOnBrokerProfile(
         request.profileId, request.profileId, policy->credentialStore, token);
     if (logonError != ERROR_SUCCESS)
     {
-        return logonError;
+        return complete(logonError);
     }
     if (request.arguments.empty())
     {
-        return ERROR_INVALID_PARAMETER;
+        return complete(ERROR_INVALID_PARAMETER);
     }
     std::vector<std::wstring> conhostArguments {
         L"--internal-pseudoconsole-host",
@@ -284,16 +369,21 @@ DWORD LaunchProfile(void* context, const launch_as::broker::BrokerRequest& reque
         token.get(), conhostArguments, request.workingDirectory, child);
     if (launchError != ERROR_SUCCESS)
     {
-        return launchError;
+        return complete(launchError);
     }
     const DWORD validationError =
         launch_as::broker::ValidateChildLogonSid(child.process(), caller.logonSid);
     if (validationError != ERROR_SUCCESS)
     {
         child.Reset();
-        return validationError;
+        return complete(validationError);
     }
-    return ERROR_SUCCESS;
+    const DWORD resumeError = child.Resume();
+    if (resumeError != ERROR_SUCCESS)
+    {
+        child.Reset();
+    }
+    return complete(resumeError);
 }
 
 void WINAPI ServiceMain(DWORD, wchar_t**)
@@ -359,6 +449,8 @@ void WINAPI ServiceMain(DWORD, wchar_t**)
 enum class ConfigurationCommand
 {
     Enroll,
+    Rotate,
+    Test,
     List,
     Unenroll,
     UnenrollAll
@@ -379,6 +471,8 @@ enum class ConfigurationCommand
         requestIdUtf8.push_back(static_cast<char>(character));
     }
     const std::string operation = command == ConfigurationCommand::Enroll     ? "enroll"
+                                  : command == ConfigurationCommand::Rotate   ? "rotate"
+                                  : command == ConfigurationCommand::Test     ? "test"
                                   : command == ConfigurationCommand::List     ? "list"
                                   : command == ConfigurationCommand::Unenroll ? "unenroll"
                                                                               : "unenroll-all";
@@ -413,7 +507,7 @@ enum class ConfigurationCommand
         }
         request += ",\"profileId\":\"" + accountNameUtf8 + "\"";
     }
-    if (command != ConfigurationCommand::List)
+    if (command != ConfigurationCommand::List && command != ConfigurationCommand::Test)
     {
         request += confirmed ? ",\"confirmed\":true" : ",\"confirmed\":false";
     }
@@ -456,7 +550,10 @@ enum class ConfigurationCommand
                    ? ERROR_SUCCESS
                    : ERROR_INVALID_DATA;
     }
-    const char* successReason = command == ConfigurationCommand::Enroll ? "enrolled" : "unenrolled";
+    const char* successReason = command == ConfigurationCommand::Enroll   ? "enrolled"
+                                : command == ConfigurationCommand::Rotate ? "rotated"
+                                : command == ConfigurationCommand::Test   ? "tested"
+                                                                          : "unenrolled";
     if (response == launch_as::broker::BuildSuccessResponse(*requestId, successReason))
     {
         return ERROR_SUCCESS;
@@ -489,12 +586,14 @@ void PrintUsage()
   launch-as-broker install                        Create or update the broker service.
   launch-as-broker uninstall [--force]            Stop and remove the service; accounts are retained.
   launch-as-broker enroll <account> [--force]     Create an account or add an existing. This will change its password.
+  launch-as-broker rotate <account> [--force]     Replace an enrolled account's broker-owned password.
+  launch-as-broker test <account>                 Test an enrolled account's stored credential.
   launch-as-broker list                           Show owned accounts.
   launch-as-broker unenroll <account> [--force]   Erase its credential and disable the account.
   launch-as-broker unenroll-all [--force]         Unenroll every owned account.
 
-install and uninstall require elevation. 
-uninstall, enroll, unenroll, and unenroll-all require consent; --force skips the prompt.
+install, uninstall, enroll, rotate, test, unenroll, and unenroll-all require elevation.
+uninstall, enroll, rotate, unenroll, and unenroll-all require consent; --force skips the prompt.
 
 )usage";
 }
@@ -564,6 +663,7 @@ int RunConfigurationCommand(int argumentCount, wchar_t* arguments[])
     }
     if ((argumentCount == 3 || argumentCount == 4) &&
         (std::wstring_view(arguments[1]) == L"enroll" ||
+            std::wstring_view(arguments[1]) == L"rotate" ||
             std::wstring_view(arguments[1]) == L"unenroll") &&
         (argumentCount == 3 || std::wstring_view(arguments[3]) == L"--force"))
     {
@@ -574,7 +674,9 @@ int RunConfigurationCommand(int argumentCount, wchar_t* arguments[])
             PrintUsage();
             return ERROR_INVALID_PARAMETER;
         }
-        const bool isEnrollment = std::wstring_view(arguments[1]) == L"enroll";
+        const std::wstring_view command(arguments[1]);
+        const bool isEnrollment = command == L"enroll";
+        const bool isRotation = command == L"rotate";
         if (isEnrollment)
         {
             const DWORD validationError =
@@ -596,19 +698,24 @@ int RunConfigurationCommand(int argumentCount, wchar_t* arguments[])
         const std::wstring action =
             isEnrollment
                 ? L"Enroll " + std::wstring(accountName) + L" and create or rotate its password"
-                : L"Unenroll " + std::wstring(accountName) + L" and disable the account";
+            : isRotation ? L"Rotate the broker-owned password for " + std::wstring(accountName)
+                         : L"Unenroll " + std::wstring(accountName) + L" and disable the account";
         if (!forced && !ConfirmDestructiveOperation(action))
         {
             return ERROR_CANCELLED;
         }
-        const DWORD configurationError = ForwardConfigurationRequest(
-            isEnrollment ? ConfigurationCommand::Enroll : ConfigurationCommand::Unenroll,
-            accountName,
-            true,
-            nullptr);
+        const ConfigurationCommand configurationCommand =
+            isEnrollment ? ConfigurationCommand::Enroll
+            : isRotation ? ConfigurationCommand::Rotate
+                         : ConfigurationCommand::Unenroll;
+        const DWORD configurationError =
+            ForwardConfigurationRequest(configurationCommand, accountName, true, nullptr);
         if (configurationError == ERROR_SUCCESS)
         {
-            std::wcout << (isEnrollment ? L"Enrolled " : L"Unenrolled ") << accountName << L".\n";
+            std::wcout << (isEnrollment    ? L"Enrolled "
+                              : isRotation ? L"Rotated "
+                                           : L"Unenrolled ")
+                       << accountName << L".\n";
         }
         else if (isEnrollment && configurationError == ERROR_MEMBER_IN_GROUP)
         {
@@ -617,11 +724,36 @@ int RunConfigurationCommand(int argumentCount, wchar_t* arguments[])
         }
         else
         {
-            std::wcerr << L"Broker " << (isEnrollment ? L"enrollment" : L"unenrollment")
+            std::wcerr << L"Broker "
+                       << (isEnrollment    ? L"enrollment"
+                              : isRotation ? L"rotation"
+                                           : L"unenrollment")
                        << L" failed: " << launch_as::FormatWindowsError(configurationError)
                        << L"\n";
         }
         return static_cast<int>(configurationError);
+    }
+    if (argumentCount == 3 && std::wstring_view(arguments[1]) == L"test")
+    {
+        const std::wstring_view accountName(arguments[2]);
+        if (!launch_as::broker::IsValidBrokerAccountName(accountName))
+        {
+            std::wcerr << L"Invalid account name: " << accountName << L"\n";
+            PrintUsage();
+            return ERROR_INVALID_PARAMETER;
+        }
+        const DWORD testError =
+            ForwardConfigurationRequest(ConfigurationCommand::Test, accountName, false, nullptr);
+        if (testError == ERROR_SUCCESS)
+        {
+            std::wcout << L"Stored broker credential for " << accountName << L" is valid.\n";
+        }
+        else
+        {
+            std::wcerr << L"Broker credential test failed: "
+                       << launch_as::FormatWindowsError(testError) << L"\n";
+        }
+        return static_cast<int>(testError);
     }
     if ((argumentCount == 2 || argumentCount == 3) &&
         std::wstring_view(arguments[1]) == L"unenroll-all" &&

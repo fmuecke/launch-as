@@ -43,6 +43,11 @@ int wmain()
     {
         return 1;
     }
+    if (!Expect(child.Resume() == ERROR_INVALID_HANDLE,
+            L"The broker resumed a child that was not created."))
+    {
+        return 1;
+    }
     HANDLE token = nullptr;
     if (!Expect(OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token),
             L"Could not open the current process token."))

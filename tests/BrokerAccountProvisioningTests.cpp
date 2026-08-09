@@ -194,7 +194,7 @@ int wmain()
         std::wcerr << L"Registration status: " << initialRegistrationError << L"\n";
         return 1;
     }
-    const DWORD rotationRegistrationError = registration.Enroll(account.name());
+    const DWORD rotationRegistrationError = registration.Rotate(account.name());
     if (!Expect(rotationRegistrationError == ERROR_SUCCESS,
             L"Could not rotate the disposable account password."))
     {
@@ -207,6 +207,8 @@ int wmain()
     const DWORD brokerTokenError =
         launch_as::broker::LogOnBrokerProfile(account.name(), account.name(), store, token);
     if (!Expect(HasRequiredFlags(account.name()), L"Disposable account flags are not hardened.") ||
+        !Expect(registration.Test(account.name()) == ERROR_SUCCESS,
+            L"Could not verify the stored disposable account credential.") ||
         !Expect(store.Load(account.name(), storedPassword) == ERROR_SUCCESS,
             L"Could not load the stored disposable account password.") ||
         !Expect(brokerTokenError == ERROR_SUCCESS && static_cast<bool>(token),

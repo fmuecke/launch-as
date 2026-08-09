@@ -173,6 +173,21 @@ BrokerChildProcess::operator bool() const noexcept
     return job_ != nullptr && process_ != nullptr && thread_ != nullptr;
 }
 
+DWORD BrokerChildProcess::Resume() noexcept
+{
+    if (thread_ == nullptr)
+    {
+        return ERROR_INVALID_HANDLE;
+    }
+    const DWORD suspendedCount = ResumeThread(thread_);
+    if (suspendedCount == static_cast<DWORD>(-1))
+    {
+        const DWORD resumeError = GetLastError();
+        return resumeError;
+    }
+    return suspendedCount == 1 ? ERROR_SUCCESS : ERROR_INVALID_STATE;
+}
+
 void BrokerChildProcess::Reset() noexcept
 {
     if (thread_ != nullptr)
@@ -274,7 +289,7 @@ DWORD LaunchBrokerConsoleHost(HANDLE token, std::span<const std::wstring> argume
             nullptr,
             nullptr,
             FALSE,
-            CREATE_NO_WINDOW,
+            CREATE_NO_WINDOW | CREATE_SUSPENDED,
             nullptr,
             directory.c_str(),
             &startupInfo,
@@ -334,7 +349,7 @@ DWORD LaunchFixedBrokerProbe(HANDLE token, BrokerChildProcess& child)
             nullptr,
             nullptr,
             FALSE,
-            CREATE_NO_WINDOW,
+            CREATE_NO_WINDOW | CREATE_SUSPENDED,
             nullptr,
             nullptr,
             &startupInfo,
@@ -354,7 +369,12 @@ DWORD LaunchFixedBrokerProbe(HANDLE token, BrokerChildProcess& child)
         return assignmentError;
     }
     child.SetProcess(processInfo.hProcess, processInfo.hThread);
-    return ERROR_SUCCESS;
+    const DWORD resumeError = child.Resume();
+    if (resumeError != ERROR_SUCCESS)
+    {
+        child.Reset();
+    }
+    return resumeError;
 }
 
 DWORD GetTokenLogonSid(HANDLE token, std::vector<BYTE>& logonSid)

@@ -26,6 +26,7 @@ class BrokerChildProcess final
     [[nodiscard]] HANDLE process() const noexcept;
     [[nodiscard]] DWORD processId() const noexcept;
     [[nodiscard]] explicit operator bool() const noexcept;
+    [[nodiscard]] DWORD Resume() noexcept;
     void Reset() noexcept;
 
   private:

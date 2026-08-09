@@ -31,6 +31,8 @@ enum class RequestOperation
 {
     ConsoleLaunch,
     Enroll,
+    Rotate,
+    Test,
     List,
     Unenroll,
     UnenrollAll

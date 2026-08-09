@@ -4,6 +4,7 @@
 
 #include "BrokerServiceInstaller.h"
 
+#include "BrokerAudit.h"
 #include "BrokerCallerPolicy.h"
 #include "BrokerDataDirectory.h"
 
@@ -329,6 +330,11 @@ DWORD InstallBrokerService()
     {
         return serviceError;
     }
+    const DWORD eventSourceError = RegisterBrokerEventSource();
+    if (eventSourceError != ERROR_SUCCESS)
+    {
+        return eventSourceError;
+    }
     std::wstring dataDirectory;
     const DWORD dataDirectoryError = GetBrokerDataDirectory(dataDirectory);
     if (dataDirectoryError != ERROR_SUCCESS)
@@ -470,7 +476,15 @@ DWORD InstallDemandStartBrokerService(
     return ERROR_SUCCESS;
 }
 
-DWORD UninstallBrokerService() { return UninstallDemandStartBrokerService(L"launch-as-broker"); }
+DWORD UninstallBrokerService()
+{
+    const DWORD serviceError = UninstallDemandStartBrokerService(L"launch-as-broker");
+    if (serviceError != ERROR_SUCCESS)
+    {
+        return serviceError;
+    }
+    return UnregisterBrokerEventSource();
+}
 
 DWORD UninstallDemandStartBrokerService(std::wstring_view serviceName)
 {

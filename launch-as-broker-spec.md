@@ -10,7 +10,7 @@ Move restricted-account credentials **and** privileged process creation out of t
 
 The service provides one narrow operation:
 
-> An authorised interactive user asks the broker to start a predefined program as a predefined restricted Windows account, in a chosen session mode.
+> An authorised interactive user asks the broker to start a program of their choice as an enrolled restricted Windows account, in a chosen session mode.
 
 The caller never receives, reads, or decrypts the restricted account password, and the resulting child process never carries the interactive user's logon SID.
 
@@ -100,7 +100,7 @@ All config/credential/binary paths: ACL `SYSTEM:F`, `Administrators:F`, `Users:R
         console     → noninteractive station + ConPTY
 ```
 
-**Architectural stance:** the broker is a **capability broker**, not a remote `runas`. The client selects a *profile* and a *mode*; it cannot specify an arbitrary account, executable, or password.
+**Architectural stance:** the broker is a general-purpose alternate-account launcher for enrolled accounts. The client selects an enrolled account and a mode, then supplies the executable, arguments, and working directory. It cannot read or supply the account password. Per-account execution restrictions are optional future hardening, not a current security boundary.
 
 ---
 
@@ -208,10 +208,9 @@ accountName            ".\AgentSandbox"
 accountSid             (resolved, pinned)
 credentialRef          → credentials\agent-sandbox.blob
 authorisedCallerSids   [ SID, … ]           (who may launch)
-executablePath         canonical, fixed per profile
-argumentPolicy         allow-list / passthrough flag
-workingDirRoots        [ approved root, … ]
-environmentPolicy      allow-list
+executionPolicy        passthrough (general-purpose); optional future restrictions
+workingDirectoryPolicy any existing directory; optional future root restrictions
+environmentPolicy      inherited; optional future allow-list
 sessionMode            "console" | "interactive"
 profileLoad            bool (LoadUserProfile)
 jobLifetime            "control-connection" | "detached"
@@ -345,7 +344,7 @@ Credential / authorization:
 
 - an authorised caller can launch the profile; an unauthorised caller cannot connect or launch;
 - neither an interactive-user process nor an agent process can read the stored password via any supported interface;
-- arbitrary executables cannot be launched through the fixed profile; path-traversal / reparse tricks are rejected;
+- authorised callers may launch arbitrary executables through an enrolled account; this is intentional general-purpose behaviour, not an executable-policy bypass;
 - passwords never appear in logs, command lines, environment, or IPC captures;
 - killing the client exposes no broker resources; concurrent requests cannot mix caller identities/profiles; failed impersonation → immediate rejection;
 - service restart preserves the credential but no plaintext; rotation invalidates the old blob; uninstall leaves no service or IPC endpoint.
@@ -365,7 +364,7 @@ Credential / authorization:
 **Phase 1 — broker + boundary, `console` (ConPTY) mode only:**
 service scaffold (SCM, demand-start, `sc sdset` delegation), named-pipe IPC with impersonation-based auth, single fixed profile, broker-owned SYSTEM-scope DPAPI credential + `enroll`/`rotate`/`test`, `LogonUser` + `CreateProcessAsUserW`, Job object, Event Log audit. Ship the **`console` (ConPTY) adapter** on the default noninteractive station, reusing the existing `TerminalBridge`/`PseudoConsoleHost` with the child-creation call moved behind the broker (client owns the terminal and the SID-DACL'd data pipes). This is the daily-driver path (Claude Code) and closes **both** surfaces, so it validates the full trust boundary end-to-end. Run the §6.1 token-graft probe. Client: remove all credential/`CreateProcessWithLogonW` logic; relocate the two token-validation checks into the broker.
 
-**Phase 2 — `interactive` (GUI) adapter + hardened policy:** the GUI adapter (§7.2) — session resolution, `SetTokenInformation(TokenSessionId)`, child-logon-SID `WinSta0`/`Default` ACEs with teardown, `LoadUserProfile`/`CreateEnvironmentBlock`, `detached` Job lifetime — launching e.g. VS Code into the caller's session (Surface 2 closed, Surface 1 accepted). Plus: multi-profile config + admin tool, executable allow-listing, canonical-path/ACL checks, working-dir + environment policy, credential rotation schedule, config integrity protection, concurrency/rate limits, optional `LocalService` downgrade if §6.1 passes.
+**Phase 2 — `interactive` (GUI) adapter + optional hardened policy:** the GUI adapter (§7.2) — session resolution, `SetTokenInformation(TokenSessionId)`, child-logon-SID `WinSta0`/`Default` ACEs with teardown, `LoadUserProfile`/`CreateEnvironmentBlock`, `detached` Job lifetime — launching e.g. VS Code into the caller's session (Surface 2 closed, Surface 1 accepted). Plus: multi-profile config + admin tool, optional executable allow-listing, canonical-path/ACL checks, working-dir + environment policy, credential rotation schedule, config integrity protection, concurrency/rate limits, optional `LocalService` downgrade if §6.1 passes.
 
 **Phase 3 — Surface-1 hardening for GUI (postponed):** evaluate a private window station/desktop or a separate session for GUI where feasible; `SetWindowDisplayAffinity`-style mitigations are out of the child's control, so this likely means a dedicated session rather than co-locating on the human's desktop.
 
@@ -409,6 +408,6 @@ The current broker implementation is not the decision record for these points. R
 - Define account eligibility beyond Administrators membership: built-in, domain, protected, service, scheduled-task, and loaded-profile accounts.
 - Never pass a supplied password on a command line or log it. Define secure interactive input and an explicit automation input path; zero plaintext buffers after validation and storage.
 - Make account changes and DPAPI/metadata updates recoverable when one step succeeds and a later step fails.
-- Define per-profile caller authorisation, fixed executable policy, and account-selection semantics. Supporting multiple accounts must not permit arbitrary executable launches.
+- Define per-profile caller authorisation and account-selection semantics. The default execution policy remains general-purpose; add profile-specific restrictions only if a future use case requires them.
 - Specify `unenroll-all` preview, confirmation, partial-failure reporting, and audit records.
 - Audit attach, take-over, create, password rotation, disable, unregister, and deletion without recording secrets.

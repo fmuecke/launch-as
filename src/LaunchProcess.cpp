@@ -7,7 +7,6 @@
 #include "BrokerControlClient.h"
 #include "CredentialInput.h"
 #include "Credentials.h"
-#include "PseudoConsoleHost.h"
 #include "TerminalBridge.h"
 #include "Win32Support.h"
 #include "WindowsCommandLine.h"
@@ -351,16 +350,25 @@ ExitCode RunTerminalProcessThroughBroker(const AccountIdentity& account, const O
     }
     const DWORD waitResult = terminalBridge.WaitForOutput();
     terminalBridge.Stop();
-    connection.Reset();
     if (waitResult != WAIT_OBJECT_0)
     {
+        connection.Reset();
         const DWORD waitError = waitResult == WAIT_FAILED ? GetLastError() : ERROR_GEN_FAILURE;
         std::wcerr << L"Could not wait for the broker terminal output: "
                    << FormatWindowsError(waitError) << L"\n";
         return ExitFailure;
     }
+    DWORD childExitCode = 0;
+    const DWORD exitError = WaitForBrokerConsoleExit(connection, childExitCode);
+    connection.Reset();
+    if (exitError != ERROR_SUCCESS)
+    {
+        std::wcerr << L"Could not read the broker terminal exit code: "
+                   << FormatWindowsError(exitError) << L"\n";
+        return ExitFailure;
+    }
     std::wcout << L"Broker terminal session ended.\n";
-    return ExitSuccess;
+    return childExitCode;
 }
 
 ExitCode RunProcessAsUser(const AccountIdentity& account, const Options& options)
@@ -372,34 +380,6 @@ ExitCode RunProcessAsUser(const AccountIdentity& account, const Options& options
     STARTUPINFOW standardStartupInfo {};
     standardStartupInfo.cb = sizeof(standardStartupInfo);
     DWORD creationFlags = CREATE_SUSPENDED;
-    std::filesystem::path applicationPath = options.executablePath;
-    std::vector<std::wstring> terminalHostArguments;
-    const std::vector<std::wstring>* processArguments = &options.processArguments;
-    TerminalBridge terminalBridge;
-
-    if (options.terminal)
-    {
-        creationFlags |= CREATE_NO_WINDOW;
-
-        std::wstring launcherPathError;
-        applicationPath = GetLauncherExecutablePath(launcherPathError);
-        if (applicationPath.empty())
-        {
-            std::wcerr << launcherPathError << L"\n";
-            return ExitFailure;
-        }
-
-        std::wstring terminalError;
-        if (!terminalBridge.Initialize(standardStartupInfo, terminalError))
-        {
-            std::wcerr << terminalError << L"\n";
-            return ExitFailure;
-        }
-
-        terminalHostArguments = BuildPseudoConsoleHostArguments(
-            options, terminalBridge.terminalSize(), terminalBridge.supportsCursorInheritance());
-        processArguments = &terminalHostArguments;
-    }
 
     SecretBuffer password;
     bool fromStoredCredential = false;
@@ -420,27 +400,16 @@ ExitCode RunProcessAsUser(const AccountIdentity& account, const Options& options
     for (;;)
     {
         std::wstring commandLine =
-            BuildWindowsCommandLine(applicationPath.native(), *processArguments);
+            BuildWindowsCommandLine(options.executablePath.native(), options.processArguments);
         std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
         mutableCommandLine.push_back(L'\0');
-
-        if (options.terminal)
-        {
-            std::wstring terminalError;
-            if (!terminalBridge.PrepareChildProcessCreation(terminalError))
-            {
-                password.clear();
-                std::wcerr << terminalError << L"\n";
-                return ExitFailure;
-            }
-        }
 
         processInfo = {};
         created = CreateProcessWithLogonW(account.username.c_str(),
             L".",
             password.data(),
             LOGON_WITH_PROFILE,
-            applicationPath.c_str(),
+            options.executablePath.c_str(),
             mutableCommandLine.data(),
             creationFlags,
             nullptr,
@@ -448,23 +417,6 @@ ExitCode RunProcessAsUser(const AccountIdentity& account, const Options& options
             &standardStartupInfo,
             &processInfo);
         launchError = created ? ERROR_SUCCESS : GetLastError();
-        if (options.terminal)
-        {
-            std::wstring terminalError;
-            if (!terminalBridge.CompleteChildProcessCreation(created != FALSE, terminalError))
-            {
-                password.clear();
-                if (created)
-                {
-                    TerminateProcess(processInfo.hProcess, ExitFailure);
-                    WaitForSingleObject(processInfo.hProcess, 5'000);
-                    CloseHandle(processInfo.hThread);
-                    CloseHandle(processInfo.hProcess);
-                }
-                std::wcerr << terminalError << L"\n";
-                return ExitFailure;
-            }
-        }
         if (created || launchError != ERROR_LOGON_FAILURE ||
             options.credentialMode != CredentialMode::Auto || !fromStoredCredential)
         {
@@ -523,28 +475,11 @@ ExitCode RunProcessAsUser(const AccountIdentity& account, const Options& options
     }
     password.clear();
 
-    if (options.terminal)
-    {
-        std::wcout << L"Starting terminal session as " << account.qualifiedUsername
-                   << L". Output in this pane is controlled by that session until it exits.\n";
-        std::wcout.flush();
-
-        std::wstring terminalError;
-        if (!terminalBridge.Start(terminalError))
-        {
-            TerminateProcess(process.get(), ExitFailure);
-            WaitForSingleObject(process.get(), 5'000);
-            std::wcerr << terminalError << L"\n";
-            return ExitFailure;
-        }
-    }
-
     if (ResumeThread(thread.get()) == static_cast<DWORD>(-1))
     {
         const DWORD resumeError = GetLastError();
         TerminateProcess(process.get(), ExitFailure);
         WaitForSingleObject(process.get(), 5'000);
-        terminalBridge.Stop();
         std::wcerr << L"Could not start the child process: " << FormatWindowsError(resumeError)
                    << L"\n";
         return ExitFailure;
@@ -556,12 +491,10 @@ ExitCode RunProcessAsUser(const AccountIdentity& account, const Options& options
         const DWORD waitError = GetLastError();
         TerminateProcess(process.get(), ExitFailure);
         WaitForSingleObject(process.get(), 5'000);
-        terminalBridge.Stop();
         std::wcerr << L"Could not wait for the child process: " << FormatWindowsError(waitError)
                    << L"\n";
         return ExitFailure;
     }
-    terminalBridge.Stop();
 
     DWORD childExitCode = 0;
     if (!GetExitCodeProcess(process.get(), &childExitCode))

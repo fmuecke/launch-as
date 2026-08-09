@@ -4,85 +4,20 @@
 
 #include "BrokerControlClient.h"
 
+#include "BrokerControlPipe.h"
 #include "BrokerProtocol.h"
 
 #include <Windows.h>
 #include <array>
 #include <objbase.h>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace launch_as
 {
 namespace
 {
-
-constexpr wchar_t ServiceName[] = L"launch-as-broker";
-constexpr DWORD BrokerStartTimeoutMilliseconds = 5'000;
-
-class ServiceHandle final
-{
-  public:
-    explicit ServiceHandle(SC_HANDLE value = nullptr) noexcept : value_(value) {}
-    ~ServiceHandle()
-    {
-        if (value_ != nullptr)
-        {
-            CloseServiceHandle(value_);
-        }
-    }
-
-    ServiceHandle(const ServiceHandle&) = delete;
-    ServiceHandle& operator=(const ServiceHandle&) = delete;
-
-    [[nodiscard]] SC_HANDLE get() const noexcept { return value_; }
-    [[nodiscard]] explicit operator bool() const noexcept { return value_ != nullptr; }
-
-  private:
-    SC_HANDLE value_ = nullptr;
-};
-
-[[nodiscard]] DWORD StartBrokerService()
-{
-    ServiceHandle manager(OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT));
-    if (!manager)
-    {
-        const DWORD managerError = GetLastError();
-        return managerError;
-    }
-    ServiceHandle service(OpenServiceW(manager.get(), ServiceName, SERVICE_START));
-    if (!service)
-    {
-        const DWORD serviceError = GetLastError();
-        return serviceError;
-    }
-    if (StartServiceW(service.get(), 0, nullptr))
-    {
-        return ERROR_SUCCESS;
-    }
-    const DWORD startError = GetLastError();
-    return startError == ERROR_SERVICE_ALREADY_RUNNING ? ERROR_SUCCESS : startError;
-}
-
-[[nodiscard]] DWORD WaitForControlPipe()
-{
-    const ULONGLONG deadline = GetTickCount64() + BrokerStartTimeoutMilliseconds;
-    DWORD waitError = ERROR_FILE_NOT_FOUND;
-    do
-    {
-        if (WaitNamedPipeW(broker::ControlPipeName.data(), 0))
-        {
-            return ERROR_SUCCESS;
-        }
-        waitError = GetLastError();
-        if (waitError != ERROR_FILE_NOT_FOUND && waitError != ERROR_PIPE_BUSY)
-        {
-            return waitError;
-        }
-        Sleep(50);
-    } while (GetTickCount64() < deadline);
-    return waitError;
-}
 
 [[nodiscard]] bool AppendUtf8(std::wstring_view value, std::string& output)
 {
@@ -197,47 +132,19 @@ class ServiceHandle final
     return request.size() <= broker::MaximumMessageBytes;
 }
 
-[[nodiscard]] DWORD OpenControlPipe(BrokerControlConnection& connection)
-{
-    if (!WaitNamedPipeW(broker::ControlPipeName.data(), 0))
-    {
-        const DWORD waitError = GetLastError();
-        if (waitError != ERROR_FILE_NOT_FOUND)
-        {
-            return waitError;
-        }
-        const DWORD startError = StartBrokerService();
-        if (startError != ERROR_SUCCESS)
-        {
-            return startError;
-        }
-        const DWORD readyError = WaitForControlPipe();
-        if (readyError != ERROR_SUCCESS)
-        {
-            return readyError;
-        }
-    }
-    HANDLE rawPipe = CreateFileW(broker::ControlPipeName.data(),
-        GENERIC_READ | GENERIC_WRITE,
-        0,
-        nullptr,
-        OPEN_EXISTING,
-        0,
-        nullptr);
-    const DWORD openError = rawPipe == INVALID_HANDLE_VALUE ? GetLastError() : ERROR_SUCCESS;
-    if (rawPipe == INVALID_HANDLE_VALUE)
-    {
-        return openError;
-    }
-    connection.Reset(rawPipe);
-    return ERROR_SUCCESS;
-}
-
 } // namespace
 
 HANDLE BrokerControlConnection::get() const noexcept { return pipe_.get(); }
 
-void BrokerControlConnection::Reset(HANDLE pipe) noexcept { pipe_.reset(pipe); }
+std::wstring_view BrokerControlConnection::requestId() const noexcept { return requestId_; }
+
+void BrokerControlConnection::SetRequestId(std::wstring value) { requestId_ = std::move(value); }
+
+void BrokerControlConnection::Reset(HANDLE pipe) noexcept
+{
+    pipe_.reset(pipe);
+    requestId_.clear();
+}
 
 DWORD LaunchBrokerConsole(std::wstring_view profileId, std::span<const std::wstring> arguments,
     std::wstring_view workingDirectory, const TerminalPipeNames& pipes, COORD terminalSize,
@@ -263,11 +170,14 @@ DWORD LaunchBrokerConsole(std::wstring_view profileId, std::span<const std::wstr
     {
         return ERROR_INVALID_PARAMETER;
     }
-    const DWORD pipeError = OpenControlPipe(connection);
+    HANDLE rawPipe = nullptr;
+    const DWORD pipeError = broker::OpenBrokerControlPipe(rawPipe);
     if (pipeError != ERROR_SUCCESS)
     {
         return pipeError;
     }
+    connection.Reset(rawPipe);
+    connection.SetRequestId(requestId);
     DWORD bytesWritten = 0;
     const BOOL wroteRequest = WriteFile(connection.get(),
         request.data(),
@@ -305,6 +215,38 @@ DWORD LaunchBrokerConsole(std::wstring_view profileId, std::span<const std::wstr
         return brokerError;
     }
     connection.Reset();
+    return ERROR_INVALID_DATA;
+}
+
+DWORD WaitForBrokerConsoleExit(BrokerControlConnection& connection, DWORD& exitCode)
+{
+    exitCode = 0;
+    if (!connection.get())
+    {
+        return ERROR_INVALID_HANDLE;
+    }
+    std::array<char, broker::MaximumMessageBytes> responseBuffer {};
+    DWORD bytesRead = 0;
+    const BOOL readResponse = ReadFile(connection.get(),
+        responseBuffer.data(),
+        static_cast<DWORD>(responseBuffer.size()),
+        &bytesRead,
+        nullptr);
+    const DWORD readError = readResponse ? ERROR_SUCCESS : GetLastError();
+    if (!readResponse)
+    {
+        return readError;
+    }
+    const std::string_view response(responseBuffer.data(), bytesRead);
+    if (broker::ParseLaunchExitResponse(response, connection.requestId(), exitCode))
+    {
+        return ERROR_SUCCESS;
+    }
+    DWORD brokerError = ERROR_INVALID_DATA;
+    if (broker::ParseErrorResponse(response, connection.requestId(), brokerError))
+    {
+        return brokerError;
+    }
     return ERROR_INVALID_DATA;
 }
 

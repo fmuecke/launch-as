@@ -96,6 +96,34 @@ void BeginOverlappedOperation(OVERLAPPED& overlapped, HANDLE event)
     return bytesWritten == response.size();
 }
 
+[[nodiscard]] bool WaitForBrokerChildExit(HANDLE pipe, HANDLE stopEvent, HANDLE childProcess)
+{
+    UniqueHandle operationEvent(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+    if (!operationEvent)
+    {
+        return false;
+    }
+    OVERLAPPED overlapped {};
+    BeginOverlappedOperation(overlapped, operationEvent.get());
+    char ignored = '\0';
+    DWORD bytesRead = 0;
+    if (ReadFile(pipe, &ignored, 1, &bytesRead, &overlapped))
+    {
+        return false;
+    }
+    const DWORD readError = GetLastError();
+    if (readError != ERROR_IO_PENDING)
+    {
+        return false;
+    }
+    const std::array waitHandles {stopEvent, childProcess, operationEvent.get()};
+    const DWORD wait = WaitForMultipleObjects(
+        static_cast<DWORD>(waitHandles.size()), waitHandles.data(), FALSE, INFINITE);
+    CancelIoEx(pipe, &overlapped);
+    static_cast<void>(GetOverlappedResult(pipe, &overlapped, &bytesRead, TRUE));
+    return wait == WAIT_OBJECT_0 + 1;
+}
+
 void WaitForControlConnectionClose(HANDLE pipe, HANDLE stopEvent)
 {
     UniqueHandle operationEvent(CreateEventW(nullptr, TRUE, FALSE, nullptr));
@@ -340,9 +368,28 @@ void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
     {
         response = BuildErrorResponse(request.requestId, "invalid_request", ERROR_INVALID_DATA);
     }
-    if (WriteResponse(pipe, stopEvent, response) && child)
+    if (WriteResponse(pipe, stopEvent, response) && child &&
+        WaitForBrokerChildExit(pipe, stopEvent, child.process()))
     {
-        WaitForControlConnectionClose(pipe, stopEvent);
+        DWORD exitCode = 0;
+        if (GetExitCodeProcess(child.process(), &exitCode))
+        {
+            if (WriteResponse(
+                    pipe, stopEvent, BuildLaunchExitResponse(request.requestId, exitCode)))
+            {
+                WaitForControlConnectionClose(pipe, stopEvent);
+            }
+        }
+        else
+        {
+            const DWORD exitCodeError = GetLastError();
+            if (WriteResponse(pipe,
+                    stopEvent,
+                    BuildErrorResponse(request.requestId, "exit_code_failed", exitCodeError)))
+            {
+                WaitForControlConnectionClose(pipe, stopEvent);
+            }
+        }
     }
 }
 

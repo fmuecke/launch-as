@@ -35,6 +35,8 @@ configure_file(
 )
 
 add_executable(launch_as
+    src/BrokerControlPipe.cpp
+    src/BrokerControlPipe.h
     src/BrokerControlClient.cpp
     src/BrokerControlClient.h
     src/BrokerProtocol.cpp
@@ -92,6 +94,7 @@ function(configure_launch_as_target target)
         _UNICODE
         WIN32_LEAN_AND_MEAN
         NOMINMAX
+        "$<$<NOT:$<CONFIG:Debug>>:NDEBUG>"
     )
 
     set_target_properties(${target} PROPERTIES
@@ -142,6 +145,8 @@ add_executable(launch_as_broker
     src/BrokerAccountProvisioner.h
     src/BrokerCallerPolicy.cpp
     src/BrokerCallerPolicy.h
+    src/BrokerControlPipe.cpp
+    src/BrokerControlPipe.h
     src/BrokerCredentialStore.cpp
     src/BrokerCredentialStore.h
     src/BrokerDataDirectory.cpp
@@ -485,6 +490,33 @@ if(BUILD_TESTING)
         LABELS "launcher;integration;terminal"
         PASS_REGULAR_EXPRESSION "conpty-smoke-256"
         TIMEOUT 15
+    )
+
+    add_executable(LauncherBrokerTerminalBridgeTests
+        tests/BrokerTerminalBridgeTests.cpp
+        src/TerminalBridge.cpp
+        src/TerminalBridge.h
+        src/TerminalIO.cpp
+        src/TerminalIO.h
+        src/Win32Support.cpp
+        src/Win32Support.h
+    )
+    target_include_directories(LauncherBrokerTerminalBridgeTests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_link_libraries(LauncherBrokerTerminalBridgeTests PRIVATE
+        Advapi32
+        Ole32
+    )
+    configure_launch_as_target(LauncherBrokerTerminalBridgeTests)
+
+    add_test(
+        NAME launcher.broker_terminal_bridge
+        COMMAND "$<TARGET_FILE:LauncherBrokerTerminalBridgeTests>"
+    )
+    set_tests_properties(launcher.broker_terminal_bridge PROPERTIES
+        LABELS "broker;integration"
+        TIMEOUT 7
     )
 
     add_executable(LauncherTerminalDisconnectTests

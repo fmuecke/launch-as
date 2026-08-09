@@ -459,7 +459,7 @@ $null = Invoke-Launcher `
     $missingExecutable
 ) `
     -ExpectedExitCodes 1 `
-    -ExpectedOutput 'Executable is not an existing absolute file'
+    -ExpectedOutput 'Pseudoconsole target is not an existing absolute file'
 
 $validInvocationResult = Invoke-Launcher `
     -Name 'Relative executable is rejected before credential access' `

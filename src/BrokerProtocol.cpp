@@ -890,4 +890,85 @@ bool ParseLaunchSuccessResponse(
     return true;
 }
 
+std::string BuildLaunchExitResponse(std::wstring_view requestId, DWORD exitCode)
+{
+    std::string response = "{\"version\":1,\"requestId\":";
+    AppendJsonString(response, requestId);
+    response += ",\"status\":\"ok\",\"exitCode\":" + std::to_string(exitCode);
+    response += ",\"reasonCode\":\"exited\",\"win32Error\":0}";
+    return response;
+}
+
+bool ParseLaunchExitResponse(
+    std::string_view response, std::wstring_view requestId, DWORD& exitCode)
+{
+    exitCode = 0;
+    JsonReader reader(response);
+    if (!reader.Consume('{'))
+    {
+        return false;
+    }
+    bool version = false;
+    bool responseId = false;
+    bool status = false;
+    bool exit = false;
+    bool reason = false;
+    bool error = false;
+    for (;;)
+    {
+        std::wstring name;
+        if (!reader.String(name) || !reader.Consume(':'))
+        {
+            return false;
+        }
+        if (name == L"version" && !version)
+        {
+            DWORD value = 0;
+            version = reader.Unsigned(value) && value == 1;
+        }
+        else if (name == L"requestId" && !responseId)
+        {
+            std::wstring value;
+            responseId = reader.String(value) && value == requestId;
+        }
+        else if (name == L"status" && !status)
+        {
+            std::wstring value;
+            status = reader.String(value) && value == L"ok";
+        }
+        else if (name == L"exitCode" && !exit)
+        {
+            exit = reader.Unsigned(exitCode);
+        }
+        else if (name == L"reasonCode" && !reason)
+        {
+            std::wstring value;
+            reason = reader.String(value) && value == L"exited";
+        }
+        else if (name == L"win32Error" && !error)
+        {
+            DWORD value = 0;
+            error = reader.Unsigned(value) && value == ERROR_SUCCESS;
+        }
+        else
+        {
+            return false;
+        }
+        if (reader.Consume('}'))
+        {
+            break;
+        }
+        if (!reader.Consume(','))
+        {
+            return false;
+        }
+    }
+    if (!(reader.End() && version && responseId && status && exit && reason && error))
+    {
+        exitCode = 0;
+        return false;
+    }
+    return true;
+}
+
 } // namespace launch_as::broker

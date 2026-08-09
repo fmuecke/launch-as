@@ -68,5 +68,8 @@ enum class ParseResult
 [[nodiscard]] std::string BuildLaunchSuccessResponse(std::wstring_view requestId, DWORD processId);
 [[nodiscard]] bool ParseLaunchSuccessResponse(
     std::string_view response, std::wstring_view requestId, DWORD& processId);
+[[nodiscard]] std::string BuildLaunchExitResponse(std::wstring_view requestId, DWORD exitCode);
+[[nodiscard]] bool ParseLaunchExitResponse(
+    std::string_view response, std::wstring_view requestId, DWORD& exitCode);
 
 } // namespace launch_as::broker

@@ -186,6 +186,9 @@ int wmain()
     const std::string launchResponse =
         launch_as::broker::BuildLaunchSuccessResponse(L"123e4567-e89b-12d3-a456-426614174000", 456);
     DWORD processId = 0;
+    const std::string exitResponse =
+        launch_as::broker::BuildLaunchExitResponse(L"123e4567-e89b-12d3-a456-426614174000", 37);
+    DWORD exitCode = 0;
     return Expect(launchResponse ==
                       "{\"version\":1,\"requestId\":\"123e4567-e89b-12d3-a456-426614174000\","
                       "\"status\":\"ok\",\"processId\":456,\"reasonCode\":\"launched\","
@@ -194,7 +197,17 @@ int wmain()
                    Expect(launch_as::broker::ParseLaunchSuccessResponse(
                               launchResponse, L"123e4567-e89b-12d3-a456-426614174000", processId) &&
                               processId == 456,
-                       L"Launch success response was not decoded.")
+                       L"Launch success response was not decoded.") &&
+                   Expect(
+                       exitResponse ==
+                           "{\"version\":1,\"requestId\":\"123e4567-e89b-12d3-a456-426614174000\","
+                           "\"status\":\"ok\",\"exitCode\":37,\"reasonCode\":\"exited\","
+                           "\"win32Error\":0}",
+                       L"Launch exit response is not stable.") &&
+                   Expect(launch_as::broker::ParseLaunchExitResponse(
+                              exitResponse, L"123e4567-e89b-12d3-a456-426614174000", exitCode) &&
+                              exitCode == 37,
+                       L"Launch exit response was not decoded.")
                ? 0
                : 1;
 }

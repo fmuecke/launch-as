@@ -4,7 +4,9 @@
 
 [CmdletBinding()]
 param(
-    [string]$Account = 'AgentSandbox'
+    [string]$Account = 'AgentSandbox',
+    [ValidateRange(0, [int]::MaxValue)]
+    [int]$ExpectedExitCode = 0
 )
 
 $caller = [System.Security.Principal.WindowsPrincipal]::new(
@@ -21,8 +23,18 @@ if (-not (Test-Path -LiteralPath $workingDirectory -PathType Container)) {
 }
 
 Write-Host "Launching cmd.exe as enrolled account $Account. The output must identify $Account and show a logon SID."
-& $launcher.Path --user $Account --working-directory $workingDirectory --terminal -- `
-    $cmd /d /c 'whoami & whoami /logonid'
-if ($LASTEXITCODE -ne 0) {
-    throw "Broker console launch failed with exit code $LASTEXITCODE."
+$output = & $launcher.Path --user $Account --working-directory $workingDirectory --terminal -- `
+    $cmd /d /c "whoami & whoami /logonid & exit $ExpectedExitCode"
+$exitCode = $LASTEXITCODE
+$output | Write-Host
+
+$accountPattern = '(?im)^.+\\' + [regex]::Escape($Account) + '\s*$'
+if (-not ($output -match $accountPattern)) {
+    throw "Broker console output did not identify the enrolled account $Account."
+}
+if (-not ($output -match '(?m)^S-1-5-5-\d+-\d+\s*$')) {
+    throw 'Broker console output did not include a logon SID.'
+}
+if ($exitCode -ne $ExpectedExitCode) {
+    throw "Broker console launch returned exit code $exitCode; expected $ExpectedExitCode."
 }

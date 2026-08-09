@@ -23,6 +23,7 @@ namespace
 
 constexpr DWORD PipeMode =
     PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS;
+constexpr DWORD BrokerPipeConnectionTimeoutMilliseconds = 5'000;
 
 struct LocalFreeDeleter
 {
@@ -223,7 +224,7 @@ enum class PipeDirection
     const DWORD serverAccess =
         direction == PipeDirection::ParentWrites ? PIPE_ACCESS_OUTBOUND : PIPE_ACCESS_INBOUND;
     HANDLE rawServer = CreateNamedPipeW(childPipeName.c_str(),
-        serverAccess | FILE_FLAG_FIRST_PIPE_INSTANCE,
+        serverAccess | FILE_FLAG_FIRST_PIPE_INSTANCE | FILE_FLAG_OVERLAPPED,
         PipeMode,
         1,
         RelayBufferBytes,
@@ -244,7 +245,17 @@ enum class PipeDirection
 [[nodiscard]] bool ConnectTerminalPipeServer(
     HANDLE server, std::wstring_view purpose, std::wstring& error)
 {
-    if (ConnectNamedPipe(server, nullptr))
+    UniqueHandle operationEvent(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+    if (!operationEvent)
+    {
+        const DWORD eventError = GetLastError();
+        error = L"Could not create the broker terminal " + std::wstring(purpose) +
+                L" connection event: " + FormatWindowsError(eventError);
+        return false;
+    }
+    OVERLAPPED overlapped {};
+    overlapped.hEvent = operationEvent.get();
+    if (ConnectNamedPipe(server, &overlapped))
     {
         return true;
     }
@@ -253,8 +264,42 @@ enum class PipeDirection
     {
         return true;
     }
+    if (connectError != ERROR_IO_PENDING)
+    {
+        error = L"Could not connect the broker terminal " + std::wstring(purpose) + L" server: " +
+                FormatWindowsError(connectError);
+        return false;
+    }
+
+    const DWORD wait =
+        WaitForSingleObject(operationEvent.get(), BrokerPipeConnectionTimeoutMilliseconds);
+    if (wait != WAIT_OBJECT_0)
+    {
+        const DWORD waitError = wait == WAIT_FAILED ? GetLastError() : ERROR_TIMEOUT;
+        CancelIoEx(server, &overlapped);
+        DWORD ignored = 0;
+        static_cast<void>(GetOverlappedResult(server, &overlapped, &ignored, TRUE));
+        if (wait == WAIT_TIMEOUT)
+        {
+            error = L"Timed out waiting for the broker terminal " + std::wstring(purpose) +
+                    L" client to connect.";
+        }
+        else
+        {
+            error = L"Could not wait for the broker terminal " + std::wstring(purpose) +
+                    L" client: " + FormatWindowsError(waitError);
+        }
+        return false;
+    }
+
+    DWORD ignored = 0;
+    if (GetOverlappedResult(server, &overlapped, &ignored, FALSE))
+    {
+        return true;
+    }
+    const DWORD completionError = GetLastError();
     error = L"Could not connect the broker terminal " + std::wstring(purpose) + L" server: " +
-            FormatWindowsError(connectError);
+            FormatWindowsError(completionError);
     return false;
 }
 

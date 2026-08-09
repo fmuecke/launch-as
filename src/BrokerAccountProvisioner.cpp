@@ -6,6 +6,7 @@
 
 #include <Lm.h>
 #include <Lmcons.h>
+#include <algorithm>
 #include <array>
 #include <string>
 
@@ -103,7 +104,10 @@ bool IsValidBrokerAccountName(std::wstring_view accountName) noexcept
 {
     constexpr std::wstring_view InvalidCharacters = L"\\/[]:;|=,+*?<>\"";
     return !accountName.empty() && accountName.size() <= UNLEN &&
-           accountName.find_first_of(InvalidCharacters) == std::wstring_view::npos;
+           accountName.find_first_of(InvalidCharacters) == std::wstring_view::npos &&
+           std::all_of(accountName.begin(),
+               accountName.end(),
+               [](wchar_t character) { return character >= L' '; });
 }
 
 DWORD ValidateBrokerAccountForRegistration(std::wstring_view accountName)

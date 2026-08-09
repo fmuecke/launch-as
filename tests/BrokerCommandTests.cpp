@@ -17,6 +17,9 @@
 namespace
 {
 
+constexpr int SkipInstalledBrokerService = 77;
+constexpr wchar_t BrokerServiceName[] = L"launch-as-broker";
+
 [[nodiscard]] bool Expect(bool condition, const wchar_t* message)
 {
     if (!condition)
@@ -64,6 +67,25 @@ namespace
     return exitCode;
 }
 
+[[nodiscard]] bool IsBrokerServiceInstalled()
+{
+    const SC_HANDLE manager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+    if (manager == nullptr)
+    {
+        return false;
+    }
+    const SC_HANDLE service = OpenServiceW(manager, BrokerServiceName, 0);
+    if (service != nullptr)
+    {
+        CloseServiceHandle(service);
+        CloseServiceHandle(manager);
+        return true;
+    }
+    const DWORD serviceError = GetLastError();
+    CloseServiceHandle(manager);
+    return serviceError == ERROR_ACCESS_DENIED;
+}
+
 struct CommandResult
 {
     DWORD exitCode = ERROR_GEN_FAILURE;
@@ -96,7 +118,7 @@ struct CommandResult
     STARTUPINFOW startupInfo {};
     startupInfo.cb = sizeof(startupInfo);
     startupInfo.dwFlags = STARTF_USESTDHANDLES;
-    startupInfo.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    startupInfo.hStdInput = nullptr;
     startupInfo.hStdOutput = write.get();
     startupInfo.hStdError = write.get();
     PROCESS_INFORMATION processInfo {};
@@ -211,11 +233,24 @@ int wmain(int argumentCount, wchar_t* arguments[])
         std::wcerr << L"Expected the launch-as-broker executable path.\n";
         return 1;
     }
+    if (IsBrokerServiceInstalled())
+    {
+        std::wcout << L"Skipped: the broker service is installed.\n";
+        return SkipInstalledBrokerService;
+    }
 
-    if (!Expect(RunCommand(arguments[1], L"enroll arbitrary-profile") == ERROR_INVALID_PARAMETER,
-            L"Broker enroll accepted an arbitrary profile.") ||
-        !Expect(RunCommand(arguments[1], L"unenroll arbitrary-profile") == ERROR_INVALID_PARAMETER,
-            L"Broker unenroll accepted an arbitrary profile."))
+    const CommandResult unconfirmedEnroll =
+        RunCommandAndCapture(arguments[1], L"enroll arbitrary-profile");
+    const CommandResult unconfirmedUnenroll =
+        RunCommandAndCapture(arguments[1], L"unenroll arbitrary-profile");
+    if (!Expect(unconfirmedEnroll.exitCode == ERROR_CANCELLED &&
+                    unconfirmedEnroll.output.find(L"without an interactive console") !=
+                        std::wstring::npos,
+            L"Broker enroll did not refuse a non-interactive destructive command.") ||
+        !Expect(unconfirmedUnenroll.exitCode == ERROR_CANCELLED &&
+                    unconfirmedUnenroll.output.find(L"without an interactive console") !=
+                        std::wstring::npos,
+            L"Broker unenroll did not refuse a non-interactive destructive command."))
     {
         return 1;
     }
@@ -235,7 +270,7 @@ int wmain(int argumentCount, wchar_t* arguments[])
     }
 
     launch_as::UniqueHandle server(CreateNamedPipeW(launch_as::broker::ControlPipeName.data(),
-        PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+        PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE | FILE_FLAG_OVERLAPPED,
         PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
         1,
         static_cast<DWORD>(launch_as::broker::MaximumMessageBytes),
@@ -243,8 +278,19 @@ int wmain(int argumentCount, wchar_t* arguments[])
         0,
         nullptr));
     launch_as::UniqueHandle stopEvent(CreateEventW(nullptr, TRUE, FALSE, nullptr));
-    if (!Expect(static_cast<bool>(server) && static_cast<bool>(stopEvent),
-            L"Could not create the broker control pipe."))
+    if (!server)
+    {
+        const DWORD pipeError = GetLastError();
+        if (pipeError == ERROR_ACCESS_DENIED)
+        {
+            std::wcout << L"Skipped: another broker instance owns the control pipe.\n";
+            return SkipInstalledBrokerService;
+        }
+        std::wcerr << L"Could not create the broker control pipe: "
+                   << launch_as::FormatWindowsError(pipeError) << L"\n";
+        return 1;
+    }
+    if (!Expect(static_cast<bool>(stopEvent), L"Could not create the broker stop event."))
     {
         return 1;
     }

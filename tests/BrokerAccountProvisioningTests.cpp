@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Project: https://github.com/fmuecke/launch-as
 
+#include "BrokerAccountProvisioner.h"
 #include "BrokerLogonToken.h"
 #include "BrokerRegistration.h"
 #include "Win32Support.h"
@@ -165,6 +166,11 @@ class TemporaryDirectory final
 
 int wmain()
 {
+    if (!Expect(!launch_as::broker::IsValidBrokerAccountName(L"invalid\naccount"),
+            L"Broker account validation accepted a control character."))
+    {
+        return 1;
+    }
     TestAccount account(L"lab" + std::to_wstring(GetCurrentProcessId()) + L"-" +
                         std::to_wstring(GetTickCount() % 100'000'000));
     if (!Expect(

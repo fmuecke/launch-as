@@ -258,6 +258,8 @@ if(BUILD_TESTING)
     )
     set_tests_properties(launcher.broker_command PROPERTIES
         LABELS "broker;integration"
+        SKIP_RETURN_CODE 77
+        TIMEOUT 15
     )
 
     add_executable(LauncherBrokerCredentialStoreTests

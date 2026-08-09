@@ -12,6 +12,7 @@ namespace launch_as::broker
 
 [[nodiscard]] DWORD InstallBrokerService();
 [[nodiscard]] DWORD UninstallBrokerService();
+[[nodiscard]] DWORD RemoveBrokerInstallFiles(std::wstring_view installDirectory);
 [[nodiscard]] DWORD InstallDemandStartBrokerService(
     std::wstring_view serviceName, std::wstring_view executablePath);
 [[nodiscard]] DWORD UninstallDemandStartBrokerService(std::wstring_view serviceName);

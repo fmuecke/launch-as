@@ -483,7 +483,60 @@ DWORD UninstallBrokerService()
     {
         return serviceError;
     }
-    return UnregisterBrokerEventSource();
+    const DWORD eventSourceError = UnregisterBrokerEventSource();
+    if (eventSourceError != ERROR_SUCCESS)
+    {
+        return eventSourceError;
+    }
+    std::wstring installDirectory;
+    const DWORD directoryError = GetBrokerInstallDirectory(installDirectory);
+    if (directoryError != ERROR_SUCCESS)
+    {
+        return directoryError;
+    }
+    return RemoveBrokerInstallFiles(installDirectory);
+}
+
+DWORD RemoveBrokerInstallFiles(std::wstring_view installDirectory)
+{
+    if (installDirectory.empty())
+    {
+        return ERROR_INVALID_PARAMETER;
+    }
+    const std::wstring directory(installDirectory);
+    const DWORD attributes = GetFileAttributesW(directory.c_str());
+    const DWORD attributesError =
+        attributes == INVALID_FILE_ATTRIBUTES ? GetLastError() : ERROR_SUCCESS;
+    if (attributes == INVALID_FILE_ATTRIBUTES)
+    {
+        return attributesError == ERROR_FILE_NOT_FOUND || attributesError == ERROR_PATH_NOT_FOUND
+                   ? ERROR_SUCCESS
+                   : attributesError;
+    }
+    if ((attributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+    {
+        return ERROR_DIRECTORY;
+    }
+
+    for (const wchar_t* fileName : {BrokerExecutableName, BrokerConhostExecutableName})
+    {
+        const std::wstring path = directory + L"\\" + fileName;
+        if (!DeleteFileW(path.c_str()))
+        {
+            const DWORD deleteError = GetLastError();
+            if (deleteError != ERROR_FILE_NOT_FOUND)
+            {
+                return deleteError;
+            }
+        }
+    }
+    if (RemoveDirectoryW(directory.c_str()))
+    {
+        return ERROR_SUCCESS;
+    }
+    const DWORD removeError = GetLastError();
+    return removeError == ERROR_DIR_NOT_EMPTY || removeError == ERROR_PATH_NOT_FOUND ? ERROR_SUCCESS
+                                                                                     : removeError;
 }
 
 DWORD UninstallDemandStartBrokerService(std::wstring_view serviceName)

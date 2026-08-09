@@ -475,6 +475,14 @@ if(BUILD_TESTING)
     )
     configure_launch_as_target(LauncherBrokerServiceInstallerTests)
 
+    add_test(
+        NAME launcher.broker_install_files
+        COMMAND "$<TARGET_FILE:LauncherBrokerServiceInstallerTests>" --files
+    )
+    set_tests_properties(launcher.broker_install_files PROPERTIES
+        LABELS "broker;integration"
+    )
+
     add_executable(LauncherArgvProbe
         tests/ArgvProbe.cpp
     )

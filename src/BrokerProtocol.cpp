@@ -385,6 +385,7 @@ class JsonReader final
     bool pipeResize = false;
     bool columns = false;
     bool rows = false;
+    bool inheritCursorSeen = false;
     for (;;)
     {
         std::wstring name;
@@ -403,6 +404,10 @@ class JsonReader final
         else if (name == L"pipeResize" && !pipeResize)
         {
             pipeResize = reader.String(console.pipeResize);
+        }
+        else if (name == L"inheritCursor" && !inheritCursorSeen)
+        {
+            inheritCursorSeen = reader.Boolean(console.inheritCursor);
         }
         else
         {

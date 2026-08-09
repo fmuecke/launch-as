@@ -35,8 +35,8 @@ class BrokerControlConnection final
 
 [[nodiscard]] DWORD LaunchBrokerConsole(std::wstring_view profileId,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
-    const TerminalPipeNames& pipes, COORD terminalSize, BrokerControlConnection& connection,
-    DWORD& processId);
+    const TerminalPipeNames& pipes, COORD terminalSize, bool inheritCursor,
+    BrokerControlConnection& connection, DWORD& processId);
 [[nodiscard]] DWORD WaitForBrokerConsoleExit(BrokerControlConnection& connection, DWORD& exitCode);
 
 } // namespace launch_as

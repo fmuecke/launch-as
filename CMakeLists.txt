@@ -408,6 +408,28 @@ if(BUILD_TESTING)
     )
     configure_launch_as_target(LauncherBrokerChildIdentityProbe)
 
+    add_executable(LauncherBrokerChildIdentityProbeTests
+        tests/BrokerChildIdentityProbeTests.cpp
+        src/Win32Support.cpp
+        src/Win32Support.h
+        src/WindowsCommandLine.cpp
+        src/WindowsCommandLine.h
+    )
+    target_include_directories(LauncherBrokerChildIdentityProbeTests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    configure_launch_as_target(LauncherBrokerChildIdentityProbeTests)
+
+    add_test(
+        NAME launcher.broker_child_identity_probe
+        COMMAND
+            "$<TARGET_FILE:LauncherBrokerChildIdentityProbeTests>"
+            "$<TARGET_FILE:LauncherBrokerChildIdentityProbe>"
+    )
+    set_tests_properties(launcher.broker_child_identity_probe PROPERTIES
+        LABELS "broker;integration"
+    )
+
     add_executable(LauncherBrokerAccountProvisioningTests
         tests/BrokerAccountProvisioningTests.cpp
         src/BrokerAccountProvisioner.cpp
@@ -535,6 +557,8 @@ if(BUILD_TESTING)
         src/TerminalIO.h
         src/Win32Support.cpp
         src/Win32Support.h
+        src/WindowsCommandLine.cpp
+        src/WindowsCommandLine.h
     )
     target_include_directories(LauncherBrokerTerminalBridgeTests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
@@ -547,11 +571,11 @@ if(BUILD_TESTING)
 
     add_test(
         NAME launcher.broker_terminal_bridge
-        COMMAND "$<TARGET_FILE:LauncherBrokerTerminalBridgeTests>"
+        COMMAND "$<TARGET_FILE:LauncherBrokerTerminalBridgeTests>" "$<TARGET_FILE:launch_as>"
     )
     set_tests_properties(launcher.broker_terminal_bridge PROPERTIES
         LABELS "broker;integration"
-        TIMEOUT 7
+        TIMEOUT 15
     )
 
     add_executable(LauncherTerminalDisconnectTests

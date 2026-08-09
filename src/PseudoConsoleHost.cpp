@@ -5,6 +5,7 @@
 #include "PseudoConsoleHost.h"
 
 #include "PseudoConsoleSession.h"
+#include "TerminalIO.h"
 #include "Win32Support.h"
 #include "WindowsCommandLine.h"
 
@@ -233,6 +234,11 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
     if (!PrepareResizeInput(resizeSource, parentOutput, !brokerPipes, resizeInput, streamError))
     {
         std::wcout << streamError << L"\n";
+        return ExitFailure;
+    }
+    if (brokerPipes && !ReadTerminalSize(resizeInput.get(), invocation.terminalSize))
+    {
+        std::wcerr << L"Could not read the initial broker terminal size.\n";
         return ExitFailure;
     }
 

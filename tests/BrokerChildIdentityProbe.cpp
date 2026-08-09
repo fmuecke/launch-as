@@ -7,6 +7,7 @@
 #include <cwchar>
 #include <iostream>
 #include <sddl.h>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -106,18 +107,75 @@ BOOL CALLBACK FindExpectedWindow(HWND window, LPARAM value)
     return ERROR_SUCCESS;
 }
 
+[[nodiscard]] DWORD WriteReport(std::wstring_view path, std::wstring_view report)
+{
+    if (path.empty())
+    {
+        return ERROR_SUCCESS;
+    }
+    const std::wstring filePath(path);
+    HANDLE file = CreateFileW(
+        filePath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+    {
+        const DWORD createError = GetLastError();
+        return createError;
+    }
+
+    const int bytes = WideCharToMultiByte(CP_UTF8,
+        WC_ERR_INVALID_CHARS,
+        report.data(),
+        static_cast<int>(report.size()),
+        nullptr,
+        0,
+        nullptr,
+        nullptr);
+    if (bytes <= 0)
+    {
+        const DWORD conversionError = GetLastError();
+        CloseHandle(file);
+        return conversionError;
+    }
+    std::vector<char> utf8(static_cast<std::size_t>(bytes));
+    if (WideCharToMultiByte(CP_UTF8,
+            WC_ERR_INVALID_CHARS,
+            report.data(),
+            static_cast<int>(report.size()),
+            utf8.data(),
+            bytes,
+            nullptr,
+            nullptr) != bytes)
+    {
+        const DWORD conversionError = GetLastError();
+        CloseHandle(file);
+        return conversionError;
+    }
+    DWORD bytesWritten = 0;
+    const BOOL wrote =
+        WriteFile(file, utf8.data(), static_cast<DWORD>(utf8.size()), &bytesWritten, nullptr);
+    const DWORD writeError = wrote ? ERROR_SUCCESS : GetLastError();
+    CloseHandle(file);
+    return wrote && bytesWritten == utf8.size() ? ERROR_SUCCESS
+                                                : (wrote ? ERROR_WRITE_FAULT : writeError);
+}
+
 } // namespace
 
 int wmain(int argumentCount, wchar_t* arguments[])
 {
-    if (argumentCount != 7 || std::wstring_view(arguments[1]) != L"--window" ||
+    const bool hasOutput = argumentCount == 9;
+    if ((argumentCount != 7 && !hasOutput) || std::wstring_view(arguments[1]) != L"--window" ||
         std::wstring_view(arguments[3]) != L"--process" ||
-        std::wstring_view(arguments[5]) != L"--exit-code")
+        std::wstring_view(arguments[5]) != L"--exit-code" ||
+        (hasOutput && (std::wstring_view(arguments[7]) != L"--output" ||
+                          std::wstring_view(arguments[8]).empty())))
     {
         std::wcerr << L"Usage: BrokerChildIdentityProbe --window <hwnd> --process <pid> "
-                      L"--exit-code <code>\n";
+                      L"--exit-code <code> [--output <path>]\n";
         return 1;
     }
+
+    const std::wstring_view reportPath = hasOutput ? arguments[8] : L"";
 
     unsigned long long windowValue = 0;
     unsigned long long processValue = 0;
@@ -149,35 +207,42 @@ int wmain(int argumentCount, wchar_t* arguments[])
     SetLastError(ERROR_SUCCESS);
     const BOOL enumerated = EnumWindows(FindExpectedWindow, reinterpret_cast<LPARAM>(&search));
     const DWORD enumerationError = enumerated ? ERROR_SUCCESS : GetLastError();
-    const auto printEnvironment = [](const wchar_t* name)
+    std::wostringstream report;
+    const auto printEnvironment = [&report](const wchar_t* name)
     {
         wchar_t* value = nullptr;
         std::size_t characters = 0;
         if (_wdupenv_s(&value, &characters, name) != 0 || value == nullptr)
         {
-            std::wcout << name << L"=\n";
+            report << name << L"=\n";
             return;
         }
-        std::wcout << name << L"=" << value << L"\n";
+        report << name << L"=" << value << L"\n";
         free(value);
     };
-    std::wcout << L"account=" << accountName << L"\n";
+    report << L"account=" << accountName << L"\n";
     printEnvironment(L"USERNAME");
     printEnvironment(L"APPDATA");
     printEnvironment(L"LOCALAPPDATA");
     printEnvironment(L"USERPROFILE");
-    std::wcout << L"logonSid=" << logonSid << L"\n";
-    std::wcout << L"interactiveWindowVisible=" << (search.found ? L"true" : L"false") << L"\n";
-    std::wcout << L"enumWindowsError=" << enumerationError << L"\n";
-    std::wcout << L"interactiveProcessVmReadDenied="
-               << (IsProcessAccessDenied(static_cast<DWORD>(processValue), PROCESS_VM_READ)
-                          ? L"true"
-                          : L"false")
-               << L"\n";
-    std::wcout << L"interactiveProcessTerminateDenied="
-               << (IsProcessAccessDenied(static_cast<DWORD>(processValue), PROCESS_TERMINATE)
-                          ? L"true"
-                          : L"false")
-               << L"\n";
+    report << L"logonSid=" << logonSid << L"\n";
+    report << L"interactiveWindowVisible=" << (search.found ? L"true" : L"false") << L"\n";
+    report << L"enumWindowsError=" << enumerationError << L"\n";
+    report << L"interactiveProcessVmReadDenied="
+           << (IsProcessAccessDenied(static_cast<DWORD>(processValue), PROCESS_VM_READ) ? L"true"
+                                                                                        : L"false")
+           << L"\n";
+    report << L"interactiveProcessTerminateDenied="
+           << (IsProcessAccessDenied(static_cast<DWORD>(processValue), PROCESS_TERMINATE)
+                      ? L"true"
+                      : L"false")
+           << L"\n";
+    std::wcout << report.str();
+    const DWORD reportError = WriteReport(reportPath, report.str());
+    if (reportError != ERROR_SUCCESS)
+    {
+        std::wcerr << L"Could not write the probe report: " << reportError << L"\n";
+        return 1;
+    }
     return static_cast<int>(exitCode);
 }

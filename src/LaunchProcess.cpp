@@ -165,6 +165,7 @@ ExitCode RunBrokerConsole(const AccountIdentity& account, const Options& options
         workingDirectory.native(),
         pipeNames,
         terminalBridge.terminalSize(),
+        terminalBridge.supportsCursorInheritance(),
         connection,
         processId);
     if (launchError != ERROR_SUCCESS)
@@ -179,16 +180,16 @@ ExitCode RunBrokerConsole(const AccountIdentity& account, const Options& options
         std::wcerr << terminalError << L"\n";
         return ExitFailure;
     }
-    std::wcout << L"Starting broker terminal session as " << account.qualifiedUsername
-               << L" (host PID " << processId
-               << L"). Output in this pane is controlled by that session until it exits.\n";
-    std::wcout.flush();
     if (!terminalBridge.Start(terminalError))
     {
         connection.Reset();
         std::wcerr << terminalError << L"\n";
         return ExitFailure;
     }
+    std::wcout << L"Starting broker terminal session as " << account.qualifiedUsername
+               << L" (host PID " << processId
+               << L"). Output in this pane is controlled by that session until it exits.\n";
+    std::wcout.flush();
     const DWORD waitResult = terminalBridge.WaitForOutput();
     terminalBridge.Stop();
     if (waitResult != WAIT_OBJECT_0)

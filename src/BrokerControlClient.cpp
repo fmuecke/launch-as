@@ -78,7 +78,7 @@ namespace
 
 [[nodiscard]] bool BuildLaunchRequest(std::wstring_view requestId, std::wstring_view profileId,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
-    const TerminalPipeNames& pipes, COORD terminalSize, std::string& request)
+    const TerminalPipeNames& pipes, COORD terminalSize, bool inheritCursor, std::string& request)
 {
     if (profileId.empty() || arguments.empty() || workingDirectory.empty() || pipes.input.empty() ||
         pipes.output.empty() || pipes.resize.empty() || terminalSize.X <= 0 || terminalSize.Y <= 0)
@@ -128,7 +128,8 @@ namespace
         return false;
     }
     request += ",\"cols\":" + std::to_string(terminalSize.X) +
-               ",\"rows\":" + std::to_string(terminalSize.Y) + "}}";
+               ",\"rows\":" + std::to_string(terminalSize.Y) +
+               ",\"inheritCursor\":" + (inheritCursor ? "true" : "false") + "}}";
     return request.size() <= broker::MaximumMessageBytes;
 }
 
@@ -148,7 +149,7 @@ void BrokerControlConnection::Reset(HANDLE pipe) noexcept
 
 DWORD LaunchBrokerConsole(std::wstring_view profileId, std::span<const std::wstring> arguments,
     std::wstring_view workingDirectory, const TerminalPipeNames& pipes, COORD terminalSize,
-    BrokerControlConnection& connection, DWORD& processId)
+    bool inheritCursor, BrokerControlConnection& connection, DWORD& processId)
 {
     connection.Reset();
     processId = 0;
@@ -165,8 +166,14 @@ DWORD LaunchBrokerConsole(std::wstring_view profileId, std::span<const std::wstr
     }
     const std::wstring requestId(requestIdBuffer + 1, 36);
     std::string request;
-    if (!BuildLaunchRequest(
-            requestId, profileId, arguments, workingDirectory, pipes, terminalSize, request))
+    if (!BuildLaunchRequest(requestId,
+            profileId,
+            arguments,
+            workingDirectory,
+            pipes,
+            terminalSize,
+            inheritCursor,
+            request))
     {
         return ERROR_INVALID_PARAMETER;
     }
@@ -204,12 +211,12 @@ DWORD LaunchBrokerConsole(std::wstring_view profileId, std::span<const std::wstr
         return readError;
     }
     const std::string_view response(responseBuffer.data(), bytesRead);
-    if (broker::ParseLaunchSuccessResponse(response, requestId, processId))
+    if (broker::ParseLaunchSuccessResponse(response, connection.requestId(), processId))
     {
         return ERROR_SUCCESS;
     }
     DWORD brokerError = ERROR_INVALID_DATA;
-    if (broker::ParseErrorResponse(response, requestId, brokerError))
+    if (broker::ParseErrorResponse(response, connection.requestId(), brokerError))
     {
         connection.Reset();
         return brokerError;

@@ -337,14 +337,19 @@ DWORD LaunchProfile(void* context, const launch_as::broker::BrokerRequest& reque
         L"--size",
         std::to_wstring(request.console.columns),
         std::to_wstring(request.console.rows),
-        L"--pipe-in",
-        request.console.pipeIn,
-        L"--pipe-out",
-        request.console.pipeOut,
-        L"--pipe-resize",
-        request.console.pipeResize,
-        L"--",
     };
+    if (request.console.inheritCursor)
+    {
+        conhostArguments.emplace_back(L"--inherit-cursor");
+    }
+    conhostArguments.insert(conhostArguments.end(),
+        {L"--pipe-in",
+            request.console.pipeIn,
+            L"--pipe-out",
+            request.console.pipeOut,
+            L"--pipe-resize",
+            request.console.pipeResize,
+            L"--"});
     conhostArguments.insert(
         conhostArguments.end(), request.arguments.begin(), request.arguments.end());
     const DWORD launchError = launch_as::broker::LaunchBrokerConsoleHost(

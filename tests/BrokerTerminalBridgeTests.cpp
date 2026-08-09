@@ -3,10 +3,15 @@
 // Project: https://github.com/fmuecke/launch-as
 
 #include "TerminalBridge.h"
+#include "Win32Support.h"
+#include "WindowsCommandLine.h"
 
 #include <Windows.h>
+#include <array>
+#include <filesystem>
 #include <iostream>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -20,10 +25,110 @@ namespace
     return condition;
 }
 
+[[nodiscard]] bool VerifyHostWaitsForInitialResize(const std::filesystem::path& launcherPath)
+{
+    launch_as::TerminalBridge terminalBridge;
+    launch_as::TerminalPipeNames pipeNames;
+    std::wstring error;
+    if (!terminalBridge.InitializeForBroker(L"", pipeNames, error))
+    {
+        std::wcerr << error << L"\n";
+        return false;
+    }
+
+    std::array<wchar_t, MAX_PATH> systemDirectory {};
+    if (GetSystemDirectoryW(systemDirectory.data(), static_cast<UINT>(systemDirectory.size())) == 0)
+    {
+        std::wcerr << L"Could not find the Windows system directory.\n";
+        return false;
+    }
+    const std::filesystem::path commandProcessor =
+        std::filesystem::path(systemDirectory.data()) / L"cmd.exe";
+    const std::vector<std::wstring> arguments {
+        L"--internal-pseudoconsole-host",
+        L"--size",
+        L"120",
+        L"30",
+        L"--pipe-in",
+        pipeNames.input,
+        L"--pipe-out",
+        pipeNames.output,
+        L"--pipe-resize",
+        pipeNames.resize,
+        L"--",
+        commandProcessor.native(),
+        L"/d",
+        L"/c",
+        L"exit 0",
+    };
+    std::wstring commandLine = launch_as::BuildWindowsCommandLine(launcherPath.native(), arguments);
+    std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
+    mutableCommandLine.push_back(L'\0');
+
+    STARTUPINFOW startupInformation {};
+    startupInformation.cb = sizeof(startupInformation);
+    PROCESS_INFORMATION processInformation {};
+    if (!CreateProcessW(launcherPath.c_str(),
+            mutableCommandLine.data(),
+            nullptr,
+            nullptr,
+            FALSE,
+            CREATE_NO_WINDOW,
+            nullptr,
+            nullptr,
+            &startupInformation,
+            &processInformation))
+    {
+        const DWORD processError = GetLastError();
+        std::wcerr << L"Could not start the broker pseudoconsole host: "
+                   << launch_as::FormatWindowsError(processError) << L"\n";
+        return false;
+    }
+    launch_as::UniqueHandle process(processInformation.hProcess);
+    launch_as::UniqueHandle thread(processInformation.hThread);
+
+    if (!terminalBridge.ConnectBrokerChild(error))
+    {
+        TerminateProcess(process.get(), 1);
+        WaitForSingleObject(process.get(), 5'000);
+        std::wcerr << error << L"\n";
+        return false;
+    }
+    if (WaitForSingleObject(process.get(), 250) != WAIT_TIMEOUT)
+    {
+        TerminateProcess(process.get(), 1);
+        WaitForSingleObject(process.get(), 5'000);
+        std::wcerr << L"The broker pseudoconsole host did not wait for the initial resize.\n";
+        return false;
+    }
+    if (!terminalBridge.Start(error))
+    {
+        TerminateProcess(process.get(), 1);
+        WaitForSingleObject(process.get(), 5'000);
+        std::wcerr << error << L"\n";
+        return false;
+    }
+    const DWORD hostWait = WaitForSingleObject(process.get(), 5'000);
+    terminalBridge.Stop();
+    return Expect(hostWait == WAIT_OBJECT_0,
+        L"The broker pseudoconsole host did not finish after receiving its initial resize.");
+}
+
 } // namespace
 
-int wmain()
+int wmain(int argumentCount, wchar_t* arguments[])
 {
+    if (argumentCount != 2)
+    {
+        std::wcerr << L"Expected the launcher path.\n";
+        return 1;
+    }
+    const std::filesystem::path launcherPath(arguments[1]);
+    if (!launcherPath.is_absolute() || !std::filesystem::is_regular_file(launcherPath))
+    {
+        std::wcerr << L"The launcher path is invalid.\n";
+        return 1;
+    }
     launch_as::TerminalBridge terminalBridge;
     launch_as::TerminalPipeNames pipeNames;
     std::wstring error;
@@ -40,7 +145,8 @@ int wmain()
                    Expect(elapsed < 7'000,
                        L"The broker terminal bridge did not time out when the host was absent.") &&
                    Expect(error.find(L"Timed out") != std::wstring::npos,
-                       L"The broker terminal bridge did not report its connection timeout.")
+                       L"The broker terminal bridge did not report its connection timeout.") &&
+                   VerifyHostWaitsForInitialResize(launcherPath)
                ? 0
                : 1;
 }

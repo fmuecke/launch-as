@@ -28,9 +28,13 @@ constexpr char ValidRequest[] = R"json({
     "pipeOut": "\\\\.\\pipe\\launch-as-123-out",
     "pipeResize": "\\\\.\\pipe\\launch-as-123-resize",
     "cols": 120,
-    "rows": 30
+    "rows": 30,
+    "inheritCursor": true
   }
 })json";
+
+constexpr char LegacyConsoleRequest[] =
+    R"json({"version":1,"requestId":"123e4567-e89b-12d3-a456-426614174000","operation":"launch","profileId":"agent-sandbox","mode":"console","arguments":[],"workingDirectory":"C:\\repo","console":{"pipeIn":"\\\\.\\pipe\\launch-as-123-in","pipeOut":"\\\\.\\pipe\\launch-as-123-out","pipeResize":"\\\\.\\pipe\\launch-as-123-resize","cols":120,"rows":30}})json";
 
 constexpr char ListRequest[] = R"json({
   "version": 1,
@@ -97,7 +101,15 @@ int wmain()
             L"Unicode argument was not decoded.") ||
         !Expect(request.console.columns == 120 && request.console.rows == 30,
             L"Console size was not decoded.") ||
+        !Expect(request.console.inheritCursor, L"Cursor-inheritance capability was not decoded.") ||
         !Expect(request.profileId == L"agent-sandbox", L"Profile id was not decoded."))
+    {
+        return 1;
+    }
+    if (!Expect(launch_as::broker::ParseBrokerRequest(LegacyConsoleRequest, request) ==
+                        launch_as::broker::ParseResult::Success &&
+                    !request.console.inheritCursor,
+            L"A console request without cursor inheritance did not default to false."))
     {
         return 1;
     }

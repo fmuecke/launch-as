@@ -25,6 +25,7 @@ struct ConsoleRequest
     std::wstring pipeResize;
     SHORT columns = 0;
     SHORT rows = 0;
+    bool inheritCursor = false;
 };
 
 enum class RequestOperation

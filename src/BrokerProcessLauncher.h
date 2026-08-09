@@ -31,20 +31,25 @@ class BrokerChildProcess final
 
   private:
     void SetProcess(HANDLE process, HANDLE thread) noexcept;
+    void SetUserProfile(HANDLE token, HANDLE profile) noexcept;
 
     HANDLE job_ = nullptr;
     HANDLE process_ = nullptr;
     HANDLE thread_ = nullptr;
+    HANDLE profileToken_ = nullptr;
+    HANDLE profile_ = nullptr;
 
     friend DWORD CreateBrokerJob(BrokerChildProcess& child);
-    friend DWORD LaunchBrokerConsoleHost(HANDLE token, std::span<const std::wstring> arguments,
-        std::wstring_view workingDirectory, BrokerChildProcess& child);
+    friend DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,
+        std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
+        BrokerChildProcess& child);
     friend DWORD LaunchFixedBrokerProbe(HANDLE token, BrokerChildProcess& child);
 };
 
 [[nodiscard]] DWORD CreateBrokerJob(BrokerChildProcess& child);
-[[nodiscard]] DWORD LaunchBrokerConsoleHost(HANDLE token, std::span<const std::wstring> arguments,
-    std::wstring_view workingDirectory, BrokerChildProcess& child);
+[[nodiscard]] DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,
+    std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
+    BrokerChildProcess& child);
 [[nodiscard]] DWORD LaunchFixedBrokerProbe(HANDLE token, BrokerChildProcess& child);
 [[nodiscard]] DWORD GetTokenLogonSid(HANDLE token, std::vector<BYTE>& logonSid);
 [[nodiscard]] DWORD ValidateChildLogonSid(HANDLE process, const std::vector<BYTE>& callerLogonSid);

@@ -114,6 +114,10 @@ All config/credential/binary paths: ACL `SYSTEM:F`, `Administrators:F`, `Users:R
 
 Before or during Phase 1, verify empirically whether `CreateProcessWithTokenW` (needs only `SeImpersonate`, held by `LocalService`) also grafts the interactive logon SID. Method: launch a child via `LogonUser` + `CreateProcessWithTokenW`, dump `TokenGroups`, check for the interactive user's logon SID, and run the Surface-2 probe (§18). If it does **not** graft, a later hardening step MAY downgrade the service identity from `LocalSystem` to `LocalService`. Until proven, `LocalSystem` + `CreateProcessAsUserW` is the baseline. Record the result in the repo.
 
+**Current record:** not yet measured. Phase 1 therefore remains on the `LocalSystem` +
+`CreateProcessAsUserW` baseline; this experiment is a prerequisite for considering, not performing,
+a future `LocalService` downgrade.
+
 ---
 
 ## 7. Session modes (adapters)

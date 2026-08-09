@@ -18,12 +18,10 @@ struct AccountIdentity
     std::wstring username;
     std::wstring qualifiedUsername;
     std::wstring sid;
-    std::wstring testCredentialTag;
 };
 
 [[nodiscard]] std::optional<AccountIdentity> ResolveLocalAccount(const std::wstring& username);
-[[nodiscard]] bool ValidateNonAdministrativeToken(HANDLE token, const AccountIdentity& account);
 [[nodiscard]] bool ValidateRunPaths(const Options& options);
-[[nodiscard]] ExitCode RunProcessAsUser(const AccountIdentity& account, const Options& options);
+[[nodiscard]] ExitCode RunBrokerConsole(const AccountIdentity& account, const Options& options);
 
 } // namespace launch_as

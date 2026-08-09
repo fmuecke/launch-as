@@ -33,18 +33,30 @@ if ($null -eq (Get-Command ninja -ErrorAction SilentlyContinue)) {
     throw 'Ninja was not found on PATH. Install Ninja and rerun build.ps1.'
 }
 
-$requiredMsvcEnvironment = 'VCToolsInstallDir', 'INCLUDE', 'LIB'
-$missingMsvcEnvironment = @(
-    $requiredMsvcEnvironment | Where-Object {
-        [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_))
+if ([string]::IsNullOrWhiteSpace($env:INCLUDE)) {
+    $vsWhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+    if (-not (Test-Path -LiteralPath $vsWhere -PathType Leaf)) {
+        throw 'Could not find Visual Studio. Install the MSVC C++ build tools and rerun build.ps1.'
     }
-)
-if ($missingMsvcEnvironment.Count -ne 0) {
-    throw (
-        'The MSVC x64 build environment is not initialized. Start a Developer PowerShell ' +
-        'or x64 Native Tools Command Prompt for Visual Studio, then rerun build.ps1. ' +
-        "Missing: $($missingMsvcEnvironment -join ', ')."
-    )
+
+    $installationPath = & $vsWhere -latest -products '*' `
+        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+    $developerCommand = Join-Path $installationPath.Trim() 'Common7\Tools\VsDevCmd.bat'
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $developerCommand -PathType Leaf)) {
+        throw 'Could not find Visual Studio MSVC x64 build tools.'
+    }
+
+    $environment = & cmd.exe /c "call `"$developerCommand`" -no_logo -arch=x64 -host_arch=x64 >nul && set"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not initialize the MSVC build environment (exit code $LASTEXITCODE)."
+    }
+    foreach ($entry in $environment) {
+        $separator = $entry.IndexOf('=')
+        if ($separator -gt 0) {
+            Set-Item -LiteralPath "Env:$($entry.Substring(0, $separator))" `
+                -Value $entry.Substring($separator + 1)
+        }
+    }
 }
 
 Write-Host 'Formatting native C++ sources'

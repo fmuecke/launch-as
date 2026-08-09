@@ -34,7 +34,7 @@ if ($interactiveLogonSid -notmatch '^S-1-5-5-\d+-\d+$') {
 $windowHandle = [uint64]$interactiveWindow.MainWindowHandle.ToInt64()
 
 Write-Host "Launching the identity probe as enrolled account $Account. It must report a different logon SID and not access this interactive process or enumerate its window."
-$output = & $launcher.Path --user $Account --working-directory $workingDirectory --terminal -- `
+$output = & $launcher.Path --user $Account --working-directory $workingDirectory -- `
     $probe.Path --window $windowHandle --process $PID --exit-code $ExpectedExitCode
 $exitCode = $LASTEXITCODE
 $output | Write-Host
@@ -43,6 +43,12 @@ $outputText = $output -join [Environment]::NewLine
 $childLogonSid = [regex]::Match($outputText, '(?i)logonSid\s*=\s*(S-1-5-5-\d+-\d+)').Groups[1].Value
 if ($outputText -notmatch ('(?i)account\s*=\s*' + [regex]::Escape($Account))) {
     throw "Broker console output did not identify the enrolled account $Account."
+}
+if ($outputText -notmatch ('(?i)username\s*=\s*' + [regex]::Escape($Account))) {
+    throw "Broker child did not receive the enrolled account USERNAME. Output:`n$outputText"
+}
+if ($outputText -match '(?i)(appdata|localappdata|userprofile)\s*=.*systemprofile') {
+    throw "Broker child inherited the service profile environment. Output:`n$outputText"
 }
 if ([string]::IsNullOrWhiteSpace($childLogonSid)) {
     throw 'Broker console output did not include the child logon SID.'

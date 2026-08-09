@@ -1,84 +1,81 @@
 # launch-as
 
-A small Windows launcher that runs any executable as a **different local
-standard user**, without retyping a password every time.
+`launch-as` starts a console program as an **enrolled local standard account** through the
+`launch-as-broker` Windows service. The client never accepts, reads, stores, or transmits the
+account password. The broker creates an independent interactive logon session, which prevents the
+child from inheriting the caller's logon SID and from using that SID to read or terminate the
+caller's processes.
 
-`launch-as` signs in with `CreateProcessWithLogonW`, optionally caches the
-target account's password in the current user's Windows Credential Manager, and
-can host the launched program right inside your existing terminal pane through
-ConPTY — so a nested shell under another identity feels like a normal tab.
+The broker is a general-purpose alternate-account launcher: an authorised caller may choose an
+enrolled account and an absolute executable. Per-account executable restrictions are deliberately
+not part of Phase 1.
 
-**Scope:** `launch-as` is for a trusted regular Windows user who wants to run
-tools such as coding agents in separate restricted local identities. It is not
-an elevation tool: it never launches a program as Administrator and rejects
-administrative target accounts.
+## Setup
+
+Run these elevated, once per computer or when changing enrolled accounts:
 
 ```powershell
-# Store the target account's password once
-.\launch-as.exe register --user RestrictedUser
-
-# Run something as that user, reusing the stored credential
-.\launch-as.exe --user RestrictedUser -- C:\Windows\System32\cmd.exe
-
-# Or open a nested shell in the current Windows Terminal / VS Code pane
-.\launch-as.exe --user RestrictedUser --terminal `
-    -- C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoExit
+.\out\build\Release\launch-as-broker.exe install
+.\out\build\Release\launch-as-broker.exe enroll AgentSandbox
+.\out\build\Release\launch-as-broker.exe test AgentSandbox
 ```
 
-## Why
-
-Running a build, tool, or shell under a restricted local account is a simple way
-to contain what it can touch. Doing that repeatedly usually means a password
-prompt every time or a plaintext secret in a script. `launch-as` keeps the
-convenience of a one-time setup while keeping the password out of your scripts.
-
-This matters most for processes that act on their own. AI coding agents such as
-**Claude Code** or **GitHub Copilot** run commands, edit files, and invoke tools
-with whatever rights their host shell holds. Launching them under a dedicated
-restricted user separates the agent's identity from your own: it acts as its own
-account, reaches only the resources you grant that account, and its actions stay
-attributable to it rather than blending into your session — all without giving up
-the convenience of your normal terminal.
-
-## Features
-
-- **Run as another local user** from an absolute executable path, with an
-  optional working directory and full argument pass-through after `--`.
-- **Credential Manager integration** — register a password once; later launches
-  reuse it with no prompt. Stale passwords are detected and can be refreshed.
-- **Flexible credential modes** — `auto` (prompt if missing), `stored`
-  (unattended, never shows UI), and `prompt` (ephemeral, never saved).
-- **Terminal mode (`--terminal`)** hosts an interactive process through ConPTY in
-  your current terminal pane, follows pane resizing, and avoids a separate
-  console window.
-- **Safe by construction** — refuses administrative target accounts, verifies the
-  child's token SID before resuming it, and zeroes password buffers after use.
-
-## Requirements
-
-- Windows 10 version 1809 or newer (terminal mode requires the same minimum)
-- Visual Studio with the MSVC C++ toolchain and a Windows SDK
-- CMake 3.25 or newer, `clang-format` on `PATH`, and PowerShell
-
-## Build
+`enroll` creates a missing non-administrative local account or takes over an existing one by
+setting a broker-owned password. It prompts before changing the account; `--force` is the explicit
+non-interactive override. `unenroll` deletes the broker credential and disables the account, but
+does not delete the Windows account.
 
 ```powershell
-.\build.ps1                              # configure + build x64 Release
+.\out\build\Release\launch-as-broker.exe list
+.\out\build\Release\launch-as-broker.exe rotate AgentSandbox
+.\out\build\Release\launch-as-broker.exe unenroll AgentSandbox
+.\out\build\Release\launch-as-broker.exe uninstall
+```
+
+## Launch
+
+From a normal terminal, launch an enrolled account in the current pane:
+
+```powershell
+.\out\build\Release\launch-as.exe `
+    --user AgentSandbox `
+    --working-directory C:\dev\project `
+    -- C:\Windows\System32\cmd.exe /d /k
+```
+
+`run` is an optional spelling of the same command. The client starts the demand-start broker,
+creates the terminal data pipes, and returns the target program's exit code. The broker owns the
+credential and kills the console job when the client control connection closes.
+
+## Build and test
+
+Run `build.ps1` from a Visual Studio Developer PowerShell or x64 Native Tools Command Prompt. It
+requires `ninja` on `PATH` and builds the Ninja Multi-Config Release target by default.
+
+```powershell
+.\build.ps1
 .\build.ps1 -Configuration Debug
-.\build.ps1 -Configuration Release -Test  # build and run the CTest suite
+.\build.ps1 -RunTests
 ```
 
-The release binary links the static MSVC runtime, so it needs no separately
-installed Visual C++ Redistributable.
+`-RunTests` runs every non-elevated CTest test. The installed-service acceptance checks remain
+explicit because they require elevation and an enrolled account:
 
-## Documentation
+```powershell
+.\tests\Invoke-BrokerConsoleAcceptanceTest.ps1 -Account AgentSandbox -ExpectedExitCode 37
+.\tests\Invoke-BrokerProbeAcceptanceTest.ps1 -Account AgentSandbox
+```
 
-See **[DESIGN-DECISIONS.md](DESIGN-DECISIONS.md)** for the complete reference: every CLI option, the
-credential and security model, the ConPTY / named-pipe terminal bridge, and the
-build and acceptance test details. See [CHANGELOG.md](CHANGELOG.md) for release
-notes.
+The probe confirms a distinct logon SID, no interactive windows, and denied `VM_READ` and
+`TERMINATE` access to the caller's process. These are blast-radius controls, not protection from a
+local administrator or kernel-level attacker.
+
+## Design
+
+[launch-as-broker-spec.md](launch-as-broker-spec.md) is the Phase 1 implementation specification.
+The `interactive` GUI adapter is deliberately deferred to Phase 2; Phase 1 provides console
+(ConPTY) launches only.
 
 ## License
 
 `launch-as` is licensed under the GNU General Public License version 3 only.
-See [LICENSE](LICENSE).

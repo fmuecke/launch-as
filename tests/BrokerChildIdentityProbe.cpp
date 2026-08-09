@@ -3,6 +3,7 @@
 // Project: https://github.com/fmuecke/launch-as
 
 #include <Windows.h>
+#include <cstdlib>
 #include <cwchar>
 #include <iostream>
 #include <sddl.h>
@@ -148,7 +149,23 @@ int wmain(int argumentCount, wchar_t* arguments[])
     SetLastError(ERROR_SUCCESS);
     const BOOL enumerated = EnumWindows(FindExpectedWindow, reinterpret_cast<LPARAM>(&search));
     const DWORD enumerationError = enumerated ? ERROR_SUCCESS : GetLastError();
+    const auto printEnvironment = [](const wchar_t* name)
+    {
+        wchar_t* value = nullptr;
+        std::size_t characters = 0;
+        if (_wdupenv_s(&value, &characters, name) != 0 || value == nullptr)
+        {
+            std::wcout << name << L"=\n";
+            return;
+        }
+        std::wcout << name << L"=" << value << L"\n";
+        free(value);
+    };
     std::wcout << L"account=" << accountName << L"\n";
+    printEnvironment(L"USERNAME");
+    printEnvironment(L"APPDATA");
+    printEnvironment(L"LOCALAPPDATA");
+    printEnvironment(L"USERPROFILE");
     std::wcout << L"logonSid=" << logonSid << L"\n";
     std::wcout << L"interactiveWindowVisible=" << (search.found ? L"true" : L"false") << L"\n";
     std::wcout << L"enumWindowsError=" << enumerationError << L"\n";

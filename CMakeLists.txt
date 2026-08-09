@@ -41,10 +41,6 @@ add_executable(launch_as
     src/BrokerControlClient.h
     src/BrokerProtocol.cpp
     src/BrokerProtocol.h
-    src/CredentialInput.cpp
-    src/CredentialInput.h
-    src/Credentials.cpp
-    src/Credentials.h
     src/launch_as.cpp
     src/LauncherOptions.cpp
     src/LauncherOptions.h
@@ -104,7 +100,6 @@ endfunction()
 
 target_link_libraries(launch_as PRIVATE
     Advapi32
-    Credui
     Ole32
 )
 if(MSVC)
@@ -184,6 +179,7 @@ target_link_libraries(launch_as_broker PRIVATE
     Netapi32
     Ole32
     Shell32
+    Userenv
 )
 configure_launch_as_target(launch_as_broker)
 set_target_properties(launch_as_broker PROPERTIES
@@ -225,6 +221,7 @@ if(BUILD_TESTING)
     )
     target_link_libraries(LauncherBrokerPipeTests PRIVATE
         Advapi32
+        Userenv
     )
     configure_launch_as_target(LauncherBrokerPipeTests)
 
@@ -253,6 +250,7 @@ if(BUILD_TESTING)
     )
     target_link_libraries(LauncherBrokerCommandTests PRIVATE
         Advapi32
+        Userenv
     )
     configure_launch_as_target(LauncherBrokerCommandTests)
 
@@ -367,6 +365,7 @@ if(BUILD_TESTING)
     )
     target_link_libraries(LauncherBrokerProcessLauncherTests PRIVATE
         Advapi32
+        Userenv
     )
     configure_launch_as_target(LauncherBrokerProcessLauncherTests)
 
@@ -602,8 +601,6 @@ if(BUILD_TESTING)
             "$<TARGET_FILE:launch_as>"
             -ExpectedVersion
             "${PROJECT_VERSION}"
-            -ExpectedTestCredentialTagVisibility
-            "$<IF:$<CONFIG:Debug>,Visible,Hidden>"
     )
     set_tests_properties(launcher.behavior PROPERTIES
         LABELS "launcher;behavior"

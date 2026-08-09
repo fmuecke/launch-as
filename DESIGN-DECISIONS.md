@@ -1,3 +1,9 @@
+# Historical pre-broker design
+
+This document describes the retired Credential Manager and `CreateProcessWithLogonW` launcher.
+It is retained only as historical context and does not describe the current CLI or security
+boundary. For the current broker design, see [launch-as-broker-spec.md](launch-as-broker-spec.md).
+
 # launch-as
 
 `launch-as` is a Windows C++ launcher that runs a caller-selected executable as

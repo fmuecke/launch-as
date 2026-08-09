@@ -9,6 +9,7 @@
 #include <array>
 #include <filesystem>
 #include <string>
+#include <userenv.h>
 #include <vector>
 
 namespace launch_as::broker
@@ -82,6 +83,33 @@ class EnabledProcessPrivileges final
     HANDLE token_ = nullptr;
     std::array<TOKEN_PRIVILEGES, 2> previous_ {};
     DWORD enabledCount_ = 0;
+};
+
+class UserEnvironmentBlock final
+{
+  public:
+    ~UserEnvironmentBlock()
+    {
+        if (environment_ != nullptr)
+        {
+            DestroyEnvironmentBlock(environment_);
+        }
+    }
+
+    [[nodiscard]] DWORD Create(HANDLE token)
+    {
+        if (!CreateEnvironmentBlock(&environment_, token, FALSE))
+        {
+            const DWORD environmentError = GetLastError();
+            return environmentError;
+        }
+        return ERROR_SUCCESS;
+    }
+
+    [[nodiscard]] void* get() const noexcept { return environment_; }
+
+  private:
+    void* environment_ = nullptr;
 };
 
 [[nodiscard]] DWORD GetProbeExecutablePath(std::wstring& path)
@@ -190,6 +218,14 @@ DWORD BrokerChildProcess::Resume() noexcept
 
 void BrokerChildProcess::Reset() noexcept
 {
+    if (profile_ != nullptr)
+    {
+        UnloadUserProfile(profileToken_, profile_);
+    }
+    if (profileToken_ != nullptr)
+    {
+        CloseHandle(profileToken_);
+    }
     if (thread_ != nullptr)
     {
         CloseHandle(thread_);
@@ -205,6 +241,8 @@ void BrokerChildProcess::Reset() noexcept
     job_ = nullptr;
     process_ = nullptr;
     thread_ = nullptr;
+    profileToken_ = nullptr;
+    profile_ = nullptr;
 }
 
 void BrokerChildProcess::SetProcess(HANDLE process, HANDLE thread) noexcept
@@ -219,6 +257,12 @@ void BrokerChildProcess::SetProcess(HANDLE process, HANDLE thread) noexcept
     }
     process_ = process;
     thread_ = thread;
+}
+
+void BrokerChildProcess::SetUserProfile(HANDLE token, HANDLE profile) noexcept
+{
+    profileToken_ = token;
+    profile_ = profile;
 }
 
 DWORD CreateBrokerJob(BrokerChildProcess& child)
@@ -242,10 +286,11 @@ DWORD CreateBrokerJob(BrokerChildProcess& child)
     return ERROR_SUCCESS;
 }
 
-DWORD LaunchBrokerConsoleHost(HANDLE token, std::span<const std::wstring> arguments,
-    std::wstring_view workingDirectory, BrokerChildProcess& child)
+DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,
+    std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
+    BrokerChildProcess& child)
 {
-    if (token == nullptr || arguments.empty() || arguments.front().empty() ||
+    if (token == nullptr || accountName.empty() || arguments.empty() || arguments.front().empty() ||
         workingDirectory.empty())
     {
         return ERROR_INVALID_PARAMETER;
@@ -283,19 +328,38 @@ DWORD LaunchBrokerConsoleHost(HANDLE token, std::span<const std::wstring> argume
     startupInfo.cb = sizeof(startupInfo);
     PROCESS_INFORMATION processInfo {};
     const std::wstring directory(workingDirectory);
+    std::wstring mutableAccountName(accountName);
+    PROFILEINFOW profileInfo {};
+    profileInfo.dwSize = sizeof(profileInfo);
+    profileInfo.lpUserName = mutableAccountName.data();
+    if (!LoadUserProfileW(token, &profileInfo))
+    {
+        const DWORD profileError = GetLastError();
+        child.Reset();
+        return profileError;
+    }
+    UserEnvironmentBlock environment;
+    const DWORD environmentError = environment.Create(token);
+    if (environmentError != ERROR_SUCCESS)
+    {
+        UnloadUserProfile(token, profileInfo.hProfile);
+        child.Reset();
+        return environmentError;
+    }
     if (!CreateProcessAsUserW(token,
             conhostPath.c_str(),
             mutableCommandLine.data(),
             nullptr,
             nullptr,
             FALSE,
-            CREATE_NO_WINDOW | CREATE_SUSPENDED,
-            nullptr,
+            CREATE_NO_WINDOW | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
+            environment.get(),
             directory.c_str(),
             &startupInfo,
             &processInfo))
     {
         const DWORD processError = GetLastError();
+        UnloadUserProfile(token, profileInfo.hProfile);
         child.Reset();
         return processError;
     }
@@ -305,10 +369,29 @@ DWORD LaunchBrokerConsoleHost(HANDLE token, std::span<const std::wstring> argume
         TerminateProcess(processInfo.hProcess, ERROR_CANCELLED);
         CloseHandle(processInfo.hThread);
         CloseHandle(processInfo.hProcess);
+        UnloadUserProfile(token, profileInfo.hProfile);
         child.Reset();
         return assignmentError;
     }
+    HANDLE profileToken = nullptr;
+    if (!DuplicateHandle(GetCurrentProcess(),
+            token,
+            GetCurrentProcess(),
+            &profileToken,
+            0,
+            FALSE,
+            DUPLICATE_SAME_ACCESS))
+    {
+        const DWORD duplicateError = GetLastError();
+        TerminateProcess(processInfo.hProcess, ERROR_CANCELLED);
+        CloseHandle(processInfo.hThread);
+        CloseHandle(processInfo.hProcess);
+        UnloadUserProfile(token, profileInfo.hProfile);
+        child.Reset();
+        return duplicateError;
+    }
     child.SetProcess(processInfo.hProcess, processInfo.hThread);
+    child.SetUserProfile(profileToken, profileInfo.hProfile);
     return ERROR_SUCCESS;
 }
 

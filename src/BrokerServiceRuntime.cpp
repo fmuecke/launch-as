@@ -348,7 +348,7 @@ DWORD LaunchProfile(void* context, const launch_as::broker::BrokerRequest& reque
     conhostArguments.insert(
         conhostArguments.end(), request.arguments.begin(), request.arguments.end());
     const DWORD launchError = launch_as::broker::LaunchBrokerConsoleHost(
-        token.get(), conhostArguments, request.workingDirectory, child);
+        token.get(), request.profileId, conhostArguments, request.workingDirectory, child);
     if (launchError != ERROR_SUCCESS)
     {
         return complete(launchError);

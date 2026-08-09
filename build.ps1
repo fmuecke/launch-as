@@ -28,6 +28,25 @@ $launcherPath = Join-Path `
     $buildDirectory `
     "$Configuration\launch-as.exe"
 
+$ninjaGenerator = 'Ninja Multi-Config'
+if ($null -eq (Get-Command ninja -ErrorAction SilentlyContinue)) {
+    throw 'Ninja was not found on PATH. Install Ninja and rerun build.ps1.'
+}
+
+$requiredMsvcEnvironment = 'VCToolsInstallDir', 'INCLUDE', 'LIB'
+$missingMsvcEnvironment = @(
+    $requiredMsvcEnvironment | Where-Object {
+        [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_))
+    }
+)
+if ($missingMsvcEnvironment.Count -ne 0) {
+    throw (
+        'The MSVC x64 build environment is not initialized. Start a Developer PowerShell ' +
+        'or x64 Native Tools Command Prompt for Visual Studio, then rerun build.ps1. ' +
+        "Missing: $($missingMsvcEnvironment -join ', ')."
+    )
+}
+
 Write-Host 'Formatting native C++ sources'
 $nativeSourceRoots = @(
     (Join-Path $projectRoot 'src')
@@ -47,8 +66,8 @@ if ($LASTEXITCODE -ne 0) {
     throw "clang-format failed with exit code $LASTEXITCODE."
 }
 
-Write-Host "Configuring x64 build in $buildDirectory"
-& cmake -S $projectRoot -B $buildDirectory -A x64
+Write-Host "Configuring Ninja Multi-Config build in $buildDirectory"
+& cmake -S $projectRoot -B $buildDirectory -G $ninjaGenerator
 if ($LASTEXITCODE -ne 0) {
     throw "CMake configure failed with exit code $LASTEXITCODE."
 }
@@ -67,10 +86,11 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if ($RunTests) {
-    Write-Host "Running unattended launcher tests ($Configuration)"
+    Write-Host "Running all non-elevated CTest tests ($Configuration)"
     & ctest `
         --test-dir $buildDirectory `
         -C $Configuration `
+        --label-exclude 'elevated|interactive' `
         --output-on-failure
     if ($LASTEXITCODE -ne 0) {
         throw "CTest failed with exit code $LASTEXITCODE."

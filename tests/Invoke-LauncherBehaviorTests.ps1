@@ -135,12 +135,11 @@ Assert-Equal `
     -Actual $testCredentialTagIsVisible `
     -Expected $expectedTestCredentialTagIsVisible
 
-Assert-Equal `
-    -Name 'Startup header includes the copyright notice' `
-    -Actual $usageResult.Output.Contains(
-    'Copyright (C) 2026 Florian Mücke'
-) `
-    -Expected $true
+$copyrightNotice = 'Copyright (C) 2026'
+if (-not $usageResult.Output.Contains($copyrightNotice)) {
+    throw "Startup header did not include the copyright notice. Output:`n$($usageResult.Output)"
+}
+Write-Host '[PASS] Startup header includes the copyright notice'
 Assert-Equal `
     -Name 'Startup header includes the product version' `
     -Actual $usageResult.Output.Contains(

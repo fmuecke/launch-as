@@ -15,6 +15,10 @@
 namespace
 {
 
+constexpr wchar_t BrokerServiceDisplayName[] = L"launch-as Broker";
+constexpr wchar_t BrokerServiceDescription[] =
+    L"Launches enrolled accounts in isolated console sessions.";
+
 class ServiceHandle final
 {
   public:
@@ -104,8 +108,39 @@ class TemporaryDirectory final
         return false;
     }
     return configuration->dwStartType == SERVICE_DEMAND_START &&
+           std::wstring_view(configuration->lpDisplayName) == BrokerServiceDisplayName &&
            std::wstring_view(configuration->lpServiceStartName) == L"LocalSystem" &&
            std::wstring_view(configuration->lpBinaryPathName) == L"\"" + executablePath + L"\"";
+}
+
+[[nodiscard]] bool HasExpectedDescription(const std::wstring& name)
+{
+    ServiceHandle manager(OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT));
+    ServiceHandle service(
+        manager ? OpenServiceW(manager.get(), name.c_str(), SERVICE_QUERY_CONFIG) : nullptr);
+    if (!service)
+    {
+        return false;
+    }
+    DWORD requiredBytes = 0;
+    QueryServiceConfig2W(service.get(), SERVICE_CONFIG_DESCRIPTION, nullptr, 0, &requiredBytes);
+    const DWORD sizeError = GetLastError();
+    if (sizeError != ERROR_INSUFFICIENT_BUFFER || requiredBytes == 0)
+    {
+        return false;
+    }
+    std::vector<BYTE> buffer(requiredBytes);
+    if (!QueryServiceConfig2W(service.get(),
+            SERVICE_CONFIG_DESCRIPTION,
+            buffer.data(),
+            requiredBytes,
+            &requiredBytes))
+    {
+        return false;
+    }
+    const auto* description = reinterpret_cast<const SERVICE_DESCRIPTIONW*>(buffer.data());
+    return description->lpDescription != nullptr &&
+           std::wstring_view(description->lpDescription) == BrokerServiceDescription;
 }
 
 [[nodiscard]] bool CreateEmptyFile(const std::filesystem::path& path)
@@ -203,7 +238,9 @@ int wmain(int argumentCount, wchar_t* arguments[])
         return 1;
     }
     return Expect(HasExpectedConfiguration(service.name(), arguments[1]),
-               L"Disposable service configuration does not match the broker contract.")
+               L"Disposable service configuration does not match the broker contract.") &&
+                   Expect(HasExpectedDescription(service.name()),
+                       L"Disposable service description does not match the broker contract.")
                ? 0
                : 1;
 }

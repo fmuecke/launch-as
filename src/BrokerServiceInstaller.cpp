@@ -23,6 +23,9 @@ namespace
 constexpr wchar_t BrokerInstallDirectoryName[] = L"launch-as";
 constexpr wchar_t BrokerExecutableName[] = L"launch-as-broker.exe";
 constexpr wchar_t BrokerConhostExecutableName[] = L"launch-as-conhost.exe";
+constexpr wchar_t BrokerServiceDisplayName[] = L"launch-as Broker";
+constexpr wchar_t BrokerServiceDescription[] =
+    L"Launches enrolled accounts in isolated console sessions.";
 constexpr wchar_t BrokerInstallDacl[] = L"D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200A9;;;BU)";
 constexpr DWORD ServiceStopTimeoutMilliseconds = 10'000;
 
@@ -471,7 +474,7 @@ DWORD InstallDemandStartBrokerService(
     const std::wstring commandLine = L"\"" + path + L"\"";
     SC_HANDLE rawService = CreateServiceW(manager.get(),
         name.c_str(),
-        name.c_str(),
+        BrokerServiceDisplayName,
         SERVICE_ALL_ACCESS,
         SERVICE_WIN32_OWN_PROCESS,
         SERVICE_DEMAND_START,
@@ -508,10 +511,21 @@ DWORD InstallDemandStartBrokerService(
                         nullptr,
                         L"LocalSystem",
                         nullptr,
-                        name.c_str()))
+                        BrokerServiceDisplayName))
     {
         const DWORD configurationError = GetLastError();
         return configurationError;
+    }
+    SERVICE_DESCRIPTIONW description {};
+    description.lpDescription = const_cast<LPWSTR>(BrokerServiceDescription);
+    if (!ChangeServiceConfig2W(service.get(), SERVICE_CONFIG_DESCRIPTION, &description))
+    {
+        const DWORD descriptionError = GetLastError();
+        if (created)
+        {
+            DeleteService(service.get());
+        }
+        return descriptionError;
     }
     if (!SetServiceObjectSecurity(service.get(), DACL_SECURITY_INFORMATION, &descriptor))
     {

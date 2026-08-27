@@ -14,6 +14,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$exitCancelled = 1223 # ERROR_CANCELLED
 
 function Test-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -38,7 +39,17 @@ if (-not (Test-Administrator)) {
     }
     $process = Start-Process -FilePath (Get-Command pwsh -ErrorAction Stop).Source `
         -ArgumentList $arguments -Verb RunAs -Wait -PassThru
-    exit $process.ExitCode
+    $exitCode = $process.ExitCode
+    if ($exitCode -eq 0) {
+        Write-Host 'Elevated setup completed successfully (exit code 0).' -ForegroundColor Green
+    }
+    elseif ($exitCode -eq $exitCancelled) {
+        Write-Host "Elevated setup was cancelled (exit code $exitCancelled)." -ForegroundColor Yellow
+    }
+    else {
+        Write-Host "Elevated setup failed (exit code $exitCode)." -ForegroundColor Red
+    }
+    exit $exitCode
 }
 
 $admin = Join-Path $PSScriptRoot 'out\build\Release\launch-as-admin.exe'
@@ -49,7 +60,7 @@ if (-not (Test-Path -LiteralPath $admin -PathType Leaf)) {
 $service = Get-Service -Name 'launch-as-broker' -ErrorAction SilentlyContinue
 if ($null -eq $service) {
     if (-not (Confirm-Action 'Install launch-as-broker')) {
-        return
+        exit $exitCancelled
     }
     & $admin install
     if ($LASTEXITCODE -ne 0) {
@@ -59,7 +70,8 @@ if ($null -eq $service) {
         & $admin enroll $DefaultAccount --force
         exit $LASTEXITCODE
     }
-    return
+    Write-Host 'Broker installation completed, but account enrollment was cancelled.' -ForegroundColor Yellow
+    exit $exitCancelled
 }
 
 Write-Host "Existing launch-as-broker service detected ($($service.Status))."
@@ -67,19 +79,19 @@ $choice = if ($Force) { 'update' } else { Read-Host 'Choose update, uninstall, o
 switch ($choice.ToLowerInvariant()) {
     'update' {
         if (-not (Confirm-Action 'Update the broker and stop any active broker sessions')) {
-            return
+            exit $exitCancelled
         }
         & $admin install
         exit $LASTEXITCODE
     }
     'uninstall' {
         if (-not (Confirm-Action 'Uninstall the broker service and its installed binaries')) {
-            return
+            exit $exitCancelled
         }
         & $admin uninstall --force
         exit $LASTEXITCODE
     }
     default {
-        return
+        exit $exitCancelled
     }
 }

@@ -24,12 +24,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Florian Mücke\0"
             VALUE "FileDescription", "@LAUNCH_AS_FILE_DESCRIPTION@\0"
-            VALUE "FileVersion", "@PROJECT_VERSION@\0"
+            VALUE "FileVersion", "@LAUNCH_AS_VERSION@\0"
             VALUE "InternalName", "@LAUNCH_AS_INTERNAL_NAME@\0"
             VALUE "LegalCopyright", "Copyright (c) 2026 Florian Mücke\0"
             VALUE "OriginalFilename", "@LAUNCH_AS_ORIGINAL_FILENAME@\0"
             VALUE "ProductName", "launch-as\0"
-            VALUE "ProductVersion", "@PROJECT_VERSION@\0"
+            VALUE "ProductVersion", "@LAUNCH_AS_VERSION@\0"
         END
     END
     BLOCK "VarFileInfo"

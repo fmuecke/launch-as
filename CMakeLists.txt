@@ -10,6 +10,7 @@ project(
     LANGUAGES CXX RC
 )
 
+set(LAUNCH_AS_VERSION "${PROJECT_VERSION}-preview")
 set(LAUNCH_AS_VERSION_TWEAK 0)
 
 if(NOT WIN32)
@@ -31,7 +32,7 @@ endfunction()
 
 configure_launch_as_version_resource(
     LauncherVersion.rc
-    "Launcher for repeatable least-privilege execution on Windows"
+    "Least-privilege launcher"
     "launch-as"
     "launch-as.exe"
 )
@@ -716,7 +717,7 @@ if(BUILD_TESTING)
             -ConhostPath
             "$<TARGET_FILE:launch_as_conhost>"
             -ExpectedVersion
-            "${PROJECT_VERSION}"
+            "${LAUNCH_AS_VERSION}"
     )
     set_tests_properties(launcher.behavior PROPERTIES
         LABELS "launcher;behavior"

@@ -25,8 +25,7 @@ void ConfigureUserFacingOutput()
 
 void PrintLicenseHeader()
 {
-    std::wcerr << L"\nlaunch-as v" << launch_as::LauncherVersion
-               << L" - Launcher for repeatable least-privilege execution on Windows\n"
+    std::wcerr << L"\nlaunch-as v" << launch_as::LauncherVersion << L" - Least-privilege Launcher\n"
                << L"Copyright (C) 2026 Florian Mücke\n"
                << L"This program comes with ABSOLUTELY NO WARRANTY.\n"
                //<< L"This is free software, and you are welcome to redistribute it under the\n"

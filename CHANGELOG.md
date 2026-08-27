@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.0.0] - 2026-08-09
+## [1.0.0-preview] - 2026-08-09
 
 - Added: Passwordless, same-pane console launches as an enrolled local standard account.
 - Added: Separate logon sessions and a noninteractive desktop for launched console tools; they
@@ -35,7 +35,7 @@
 - Added: `--terminal` for Windows Terminal and VS Code panes.
 - Changed: Direct invocation is supported alongside the explicit `run` subcommand.
 
-[1.0.0]: https://github.com/fmuecke/launch-as/releases/tag/v1.0.0
+[1.0.0-preview]: https://github.com/fmuecke/launch-as/releases/tag/v1.0.0-preview
 [0.3.2]: https://github.com/fmuecke/launch-as/releases/tag/v0.3.2
 [0.3.1]: https://github.com/fmuecke/launch-as/releases/tag/v0.3.1
 [0.3.0]: https://github.com/fmuecke/launch-as/releases/tag/v0.3.0

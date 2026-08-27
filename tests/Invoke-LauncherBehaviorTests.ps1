@@ -22,7 +22,7 @@ param(
 
     [Parameter()]
     [ValidateNotNullOrEmpty()]
-    [string] $ExpectedVersion = '1.0.0'
+    [string] $ExpectedVersion = '1.0.0-preview'
 )
 
 Set-StrictMode -Version Latest
@@ -157,7 +157,7 @@ Invoke-Launcher `
 
 Assert-VersionMetadata `
     -Path $script:ResolvedLauncher `
-    -Description 'Launcher for repeatable least-privilege execution on Windows' `
+    -Description 'Least-privilege launcher' `
     -OriginalFilename 'launch-as.exe'
 Assert-VersionMetadata `
     -Path ([IO.Path]::GetFullPath($BrokerPath)) `

@@ -9,6 +9,6 @@
 namespace launch_as
 {
 
-inline constexpr std::wstring_view LauncherVersion = L"@PROJECT_VERSION@";
+inline constexpr std::wstring_view LauncherVersion = L"@LAUNCH_AS_VERSION@";
 
 } // namespace launch_as

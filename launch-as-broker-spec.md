@@ -4,9 +4,18 @@ Status: draft for implementation · Language: C++ (native Windows service) · Su
 
 ---
 
-## 1. Objective
+## 1. Phases and delivery order
 
-Move restricted-account credentials **and** privileged process creation out of the interactive `launch-as` client into a dedicated Windows service (`launch-as-broker`), so that an agent process is launched under a **clean, independent logon session** instead of one derived from the interactive user's logon.
+**Phase 1 — ship a working console-agent path now:** move restricted-account credentials **and**
+privileged process creation out of the interactive `launch-as` client into a dedicated Windows service
+(`launch-as-broker`). Ship the **`console` (ConPTY) mode** as a usable daily-driver path for console
+agents, with a clean, independent logon session instead of one derived from the interactive user's
+logon. Console mode requires **no interactive-desktop support**: it does not enter the caller's
+session or request access to `WinSta0` or `Default`.
+
+**Phase n — GUI applications, when selected later:** support applications such as VS Code or Claude
+Desktop. GUI support is not a prerequisite for shipping Phase 1 and retains its distinct shared-desktop
+security residual until separately designed and accepted.
 
 The service provides one narrow operation:
 
@@ -29,7 +38,7 @@ There is also **Surface 1** (UI/desktop reach): any process on `WinSta0\Default`
 
 **Primary goal of this service:** close Surface 2 for all launches, by never deriving the child token from the interactive logon.
 **Secondary goal:** keep the account password out of the client and out of IPC (broker-owned credential).
-**Explicitly in scope but not hardened yet:** Surface 1 for the GUI mode — see §7.
+**Later GUI phase:** Surface 1 for GUI mode remains a documented residual — see §7.
 
 ---
 
@@ -47,7 +56,7 @@ First version does **not** protect against:
 - a compromised local administrator or kernel-level malware;
 - a compromised service binary or installer;
 - LSASS credential theft by an administrator;
-- **Surface 1 in `interactive` (GUI) mode** — a GUI child shares the caller's desktop by necessity. Documented residual, hardening postponed.
+- **GUI applications** — support for VS Code, Claude Desktop, and other interactive applications is a later phase. A GUI child shares the caller's desktop by necessity; this documented residual requires separate acceptance.
 
 ---
 
@@ -114,24 +123,30 @@ All config/enrollment/binary paths: ACL `SYSTEM:F`, `Administrators:F`, `Users:R
 
 Before or during Phase 1, verify empirically whether `CreateProcessWithTokenW` (needs only `SeImpersonate`, held by `LocalService`) also grafts the interactive logon SID. Method: launch a child via `LogonUser` + `CreateProcessWithTokenW`, dump `TokenGroups`, check for the interactive user's logon SID, and run the Surface-2 probe (§18). If it does **not** graft, a later hardening step MAY downgrade the service identity from `LocalSystem` to `LocalService`. Until proven, `LocalSystem` + `CreateProcessAsUserW` is the baseline. Record the result in the repo.
 
-**Current record:** not yet measured. Phase 1 therefore remains on the `LocalSystem` +
-`CreateProcessAsUserW` baseline; this experiment is a prerequisite for considering, not performing,
-a future `LocalService` downgrade.
+**Current record (2026-08-27):** measured in the temporary `LocalSystem` broker experiment. The
+broker successfully created the direct identity-probe process with `LogonUserW(INTERACTIVE)` +
+`CreateProcessWithTokenW`, but the child exited `0xC0000142` (`STATUS_DLL_INIT_FAILED`) before it
+could emit its `TokenGroups` or Surface-2 report. This does not establish whether the interactive
+logon SID would be grafted, but it does show that this primitive is not usable for the current
+console path in this environment. Phase 1 therefore remains on the `LocalSystem` +
+`CreateProcessAsUserW` baseline; no `LocalService` downgrade is justified by this result.
 
 ---
 
-## 7. Session modes (adapters)
+## 7. Session modes (current and later adapters)
 
 The launch core is mode-agnostic. A profile selects one adapter.
 
-### 7.1 `console` mode (default for `LaunchAsUser` / Claude Code)
+### 7.1 `console` mode (Phase 1; default for `LaunchAsUser` / Claude Code)
 
 - Child stays on the **default noninteractive window station** (`Service-0x0-…`). Do **not** set `lpDesktop` to `WinSta0\Default`; do **not** hop the session.
+- Do not grant or repair any access to the caller's interactive window station or desktop. Console
+  terminal I/O is solely the ConPTY/named-pipe bridge below.
 - I/O via **ConPTY + named pipes**: the broker launches `launch-as-conhost.exe` as `LaunchAsUser`; the host creates the pseudoconsole, runs the target inside it, and connects per-session input, output, and resize pipes back to the client's terminal. (Reuse the existing `PseudoConsoleHost` / `TerminalBridge` code; move the child-creation call behind the broker.)
 - Data pipes are created by the **client** (in the interactive user's context) with a DACL granting connect+RW to `LaunchAsUser` only; names are random per session with `FILE_FLAG_FIRST_PIPE_INSTANCE`. The broker passes the names in the request; it never touches stdio and never receives enrollment-store handles.
 - **Surfaces:** Surface 1 **closed** (no interactive desktop), Surface 2 **closed** (independent logon SID).
 
-### 7.2 `interactive` mode (GUI, e.g. VS Code in the user's session)
+### 7.2 `interactive` mode (later GUI phase; e.g. VS Code or Claude Desktop in the user's session)
 
 Requires crossing from session 0 into the caller's interactive session. Steps:
 
@@ -185,7 +200,11 @@ Impersonation failure is a **hard failure** (otherwise the request would proceed
 }
 ```
 
-`console` block present only for `mode:"console"`. `mode:"interactive"` carries no pipe names.
+`mode:"console"` is the only supported launch mode in Phase 1. A structurally valid
+`mode:"interactive"` request carries no `console` block and receives
+`reasonCode:"mode_not_supported"` with `ERROR_NOT_SUPPORTED`; it is not dispatched to a launch
+handler. A missing or unknown mode is `invalid_request`. This keeps the explicit switch while
+making GUI opt-in when its later phase is implemented.
 
 ### 8.2 Response (broker → client)
 
@@ -205,7 +224,7 @@ Responses never contain secrets or internal detail beyond a stable reason code +
 
 Phase 1 accepts multiple enrolled local accounts. For now the account name is also the profile id,
 all accounts use the `console` adapter, and the installer authorises one caller SID. A richer profile
-record that separates launch policy from the Windows account remains a Phase-2 extension:
+record that separates launch policy from the Windows account remains a later GUI/policy-phase extension:
 
 ```text
 profileId              e.g. "LaunchAsUser"
@@ -378,14 +397,14 @@ Credential / authorization:
 
 ---
 
-## 19. Implementation phases
+## 19. Phases and implementation order
 
-**Phase 1 — broker + boundary, `console` (ConPTY) mode only:**
-service scaffold (SCM, demand-start, `sc sdset` delegation), single-session named-pipe IPC with impersonation-based auth, multiple enrolled accounts, SID-pinned enrollment records and per-launch passwords, `LogonUser` + `CreateProcessAsUserW`, Job object, Event Log audit. Ship the **`console` (ConPTY) adapter** on the default noninteractive station, reusing the existing `TerminalBridge`/`PseudoConsoleHost` with the child-creation call moved behind the broker (client owns the terminal and the SID-DACL'd data pipes). This is the daily-driver path (Claude Code) and closes **both** surfaces, so it validates the full trust boundary end-to-end. Run the §6.1 token-graft probe. Client: remove all credential/`CreateProcessWithLogonW` logic; relocate the two token-validation checks into the broker.
+**Phase 1 — shippable broker + boundary, `console` (ConPTY) mode only:**
+service scaffold (SCM, demand-start, `sc sdset` delegation), single-session named-pipe IPC with impersonation-based auth, multiple enrolled accounts, SID-pinned enrollment records and per-launch passwords, `LogonUser` + `CreateProcessAsUserW`, Job object, Event Log audit. Ship the **`console` (ConPTY) adapter** on the default noninteractive station, reusing the existing `TerminalBridge`/`PseudoConsoleHost` with the child-creation call moved behind the broker (client owns the terminal and the SID-DACL'd data pipes). This is the daily-driver path for console agents and closes **both** surfaces. It is complete only when the §18 console acceptance checks, including the real installed-console run, pass. Run the §6.1 token-graft probe; its current result retains the `LocalSystem` + `CreateProcessAsUserW` baseline. Client: remove all credential/`CreateProcessWithLogonW` logic; relocate the two token-validation checks into the broker.
 
-**Phase 2 — `interactive` (GUI) adapter + optional hardened policy:** the GUI adapter (§7.2) — session resolution, `SetTokenInformation(TokenSessionId)`, child-logon-SID `WinSta0`/`Default` ACEs with teardown, `LoadUserProfile`/`CreateEnvironmentBlock`, `detached` Job lifetime — launching e.g. VS Code into the caller's session (Surface 2 closed, Surface 1 accepted). Plus: multi-profile config + admin tool, optional executable allow-listing, canonical-path/ACL checks, working-dir + environment policy, credential rotation schedule, config integrity protection, concurrency/rate limits, optional `LocalService` downgrade if §6.1 passes.
+**Phase n — `interactive` GUI adapter + optional hardened policy:** when GUI support is selected, implement the adapter (§7.2): session resolution, `SetTokenInformation(TokenSessionId)`, child-logon-SID `WinSta0`/`Default` ACEs with teardown, `LoadUserProfile`/`CreateEnvironmentBlock`, and detached Job lifetime, for applications such as VS Code or Claude Desktop in the caller's session (Surface 2 closed, Surface 1 accepted). This later phase can also select multi-profile config + admin tooling, optional executable allow-listing, canonical-path/ACL checks, working-dir + environment policy, credential rotation schedule, config integrity protection, and concurrency/rate limits. The §6.1 result does not support a `LocalService` downgrade.
 
-**Phase 3 — Surface-1 hardening for GUI (postponed):** evaluate a private window station/desktop or a separate session for GUI where feasible; `SetWindowDisplayAffinity`-style mitigations are out of the child's control, so this likely means a dedicated session rather than co-locating on the human's desktop.
+**Later GUI hardening phase (postponed):** evaluate a private window station/desktop or a separate session for GUI where feasible; `SetWindowDisplayAffinity`-style mitigations are out of the child's control, so this likely means a dedicated session rather than co-locating on the human's desktop.
 
 ---
 
@@ -396,7 +415,7 @@ service scaffold (SCM, demand-start, `sc sdset` delegation), single-session name
 - account name is the Phase-1 profile id; any non-administrator local account may be enrolled;
 - SID-pinned enrollment record per account; `enroll` creates or takes over an account by generating + setting its password, while each launch generates another temporary password;
 - `LogonUserW(INTERACTIVE)` + `CreateProcessAsUserW`;
-- **`console` (ConPTY) adapter** as the Phase-1 slice; **`interactive` (GUI) adapter** in Phase 2;
+- **`console` (ConPTY) adapter** as the shippable Phase-1 slice; **`interactive` (GUI) adapter** only in a later selected phase;
 - Job object (kill-on-close for console, detached for GUI);
 - Event Log audit; no Windows Hello/master password in v1.
 

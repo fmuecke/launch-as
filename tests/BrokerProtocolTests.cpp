@@ -36,6 +36,16 @@ constexpr char ValidRequest[] = R"json({
 constexpr char LegacyConsoleRequest[] =
     R"json({"version":1,"requestId":"123e4567-e89b-12d3-a456-426614174000","operation":"launch","profileId":"LaunchAsUser","mode":"console","arguments":[],"workingDirectory":"C:\\repo","console":{"pipeIn":"\\\\.\\pipe\\launch-as-123-in","pipeOut":"\\\\.\\pipe\\launch-as-123-out","pipeResize":"\\\\.\\pipe\\launch-as-123-resize","cols":120,"rows":30}})json";
 
+constexpr char InteractiveRequest[] = R"json({
+  "version": 1,
+  "requestId": "123e4567-e89b-12d3-a456-426614174000",
+  "operation": "launch",
+  "profileId": "LaunchAsUser",
+  "mode": "interactive",
+  "arguments": ["--resume"],
+  "workingDirectory": "C:\\dev\\LaunchAsUser\\repo"
+})json";
+
 constexpr char ListRequest[] = R"json({
   "version": 1,
   "requestId": "123e4567-e89b-12d3-a456-426614174000",
@@ -151,11 +161,19 @@ int wmain()
         return 1;
     }
 
-    std::string wrongMode(ValidRequest);
-    wrongMode.replace(wrongMode.find("\"console\""), 9, "\"interactive\"");
-    if (!Expect(launch_as::broker::ParseBrokerRequest(wrongMode, request) ==
+    if (!Expect(launch_as::broker::ParseBrokerRequest(InteractiveRequest, request) ==
+                        launch_as::broker::ParseResult::ModeNotSupported &&
+                    request.requestId == L"123e4567-e89b-12d3-a456-426614174000",
+            L"Interactive mode did not produce the supported-mode rejection."))
+    {
+        return 1;
+    }
+
+    std::string unknownMode(ValidRequest);
+    unknownMode.replace(unknownMode.find("\"console\""), 9, "\"unknown\"");
+    if (!Expect(launch_as::broker::ParseBrokerRequest(unknownMode, request) ==
                     launch_as::broker::ParseResult::InvalidRequest,
-            L"Interactive mode was accepted by the console protocol."))
+            L"Unknown mode was not rejected as an invalid request."))
     {
         return 1;
     }

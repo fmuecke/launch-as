@@ -580,8 +580,15 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
     std::wstring operationName;
     bool profile = false;
     bool profileSeen = false;
-    bool mode = false;
     bool modeSeen = false;
+    enum class LaunchMode
+    {
+        Missing,
+        Console,
+        Interactive,
+        Unknown
+    };
+    LaunchMode launchMode = LaunchMode::Missing;
     bool arguments = false;
     bool argumentsSeen = false;
     bool workingDirectory = false;
@@ -622,7 +629,22 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
         {
             modeSeen = true;
             std::wstring value;
-            mode = reader.String(value) && value == L"console";
+            if (!reader.String(value))
+            {
+                launchMode = LaunchMode::Unknown;
+            }
+            else if (value == L"console")
+            {
+                launchMode = LaunchMode::Console;
+            }
+            else if (value == L"interactive")
+            {
+                launchMode = LaunchMode::Interactive;
+            }
+            else
+            {
+                launchMode = LaunchMode::Unknown;
+            }
         }
         else if (name == L"arguments" && !argumentsSeen)
         {
@@ -703,7 +725,19 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
         request.operation = RequestOperation::Unenroll;
         return ParseResult::Success;
     }
-    if (operationName != L"launch" || !mode || !arguments || !workingDirectory || !console ||
+    if (operationName != L"launch")
+    {
+        return ParseResult::InvalidRequest;
+    }
+    if (launchMode == LaunchMode::Interactive)
+    {
+        if (!arguments || !workingDirectory || consoleSeen)
+        {
+            return ParseResult::InvalidRequest;
+        }
+        return ParseResult::ModeNotSupported;
+    }
+    if (launchMode != LaunchMode::Console || !arguments || !workingDirectory || !console ||
         !IsConsolePipeName(request.console.pipeIn) || !IsConsolePipeName(request.console.pipeOut) ||
         !IsConsolePipeName(request.console.pipeResize) ||
         request.console.pipeIn == request.console.pipeOut ||

@@ -82,6 +82,66 @@ class ServerThread final
     return condition;
 }
 
+[[nodiscard]] bool TestInteractiveModeRejected()
+{
+    const std::wstring pipeName = L"\\\\.\\pipe\\launch-as-broker-unsupported-mode-test-" +
+                                  std::to_wstring(GetCurrentProcessId());
+    launch_as::UniqueHandle server(CreateNamedPipeW(pipeName.c_str(),
+        PIPE_ACCESS_DUPLEX,
+        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+        1,
+        static_cast<DWORD>(launch_as::broker::MaximumMessageBytes),
+        static_cast<DWORD>(launch_as::broker::MaximumMessageBytes),
+        0,
+        nullptr));
+    launch_as::UniqueHandle stopEvent(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+    if (!Expect(static_cast<bool>(server) && static_cast<bool>(stopEvent),
+            L"Could not create the unsupported-mode test pipe."))
+    {
+        return false;
+    }
+
+    LaunchCapture capture;
+    ServerThread serverThread(server.get(), stopEvent.get(), &capture);
+    launch_as::UniqueHandle client(CreateFileW(
+        pipeName.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr));
+    if (!Expect(static_cast<bool>(client), L"Could not connect to the unsupported-mode test pipe."))
+    {
+        return false;
+    }
+
+    constexpr char request[] =
+        R"json({"version":1,"requestId":"123e4567-e89b-12d3-a456-426614174000","operation":"launch","profileId":"LaunchAsUser","mode":"interactive","arguments":[],"workingDirectory":"C:\\repo"})json";
+    DWORD bytesWritten = 0;
+    if (!Expect(WriteFile(client.get(), request, sizeof(request) - 1, &bytesWritten, nullptr) &&
+                    bytesWritten == sizeof(request) - 1,
+            L"Could not send the unsupported-mode broker request."))
+    {
+        return false;
+    }
+
+    std::string response(512, '\0');
+    DWORD bytesRead = 0;
+    if (!Expect(ReadFile(client.get(),
+                    response.data(),
+                    static_cast<DWORD>(response.size()),
+                    &bytesRead,
+                    nullptr),
+            L"Could not read the unsupported-mode broker response."))
+    {
+        return false;
+    }
+    response.resize(bytesRead);
+    return Expect(serverThread.connected(), L"The unsupported-mode test pipe did not connect.") &&
+           Expect(!capture.invoked, L"The broker dispatched the unsupported interactive mode.") &&
+           Expect(response.find("\"requestId\":\"123e4567-e89b-12d3-a456-426614174000\"") !=
+                      std::string::npos,
+               L"The unsupported-mode response did not preserve the request id.") &&
+           Expect(response.find("\"reasonCode\":\"mode_not_supported\"") != std::string::npos &&
+                      response.find("\"win32Error\":50") != std::string::npos,
+               L"The broker did not return the stable unsupported-mode response.");
+}
+
 } // namespace
 
 int wmain()
@@ -134,6 +194,10 @@ int wmain()
         return 1;
     }
     response.resize(bytesRead);
+    if (!TestInteractiveModeRejected())
+    {
+        return 1;
+    }
     return Expect(serverThread.connected(), L"The broker test pipe did not connect.") &&
                    Expect(capture.invoked, L"The broker did not dispatch the launch request.") &&
                    Expect(!capture.callerSid.empty() &&

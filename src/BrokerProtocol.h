@@ -57,7 +57,8 @@ enum class ParseResult
 {
     Success,
     InvalidJson,
-    InvalidRequest
+    InvalidRequest,
+    ModeNotSupported
 };
 
 [[nodiscard]] ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request);

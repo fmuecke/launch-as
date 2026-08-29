@@ -1,0 +1,2 @@
+- [ ] Add a `quiet` or `verbose` switch that controls the broker messages for starting & stopping
+- [ ] verbose mode could also print some more info like 

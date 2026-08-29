@@ -8,6 +8,7 @@
 #include "BrokerControlPipe.h"
 #include "BrokerProtocol.h"
 #include "BrokerServiceInstaller.h"
+#include "LicenseHeader.h"
 #include "Win32Support.h"
 
 #include <Windows.h>
@@ -113,6 +114,7 @@ namespace
 
 void PrintUsage()
 {
+    launch_as::PrintLicenseHeader();
     std::wcerr << LR"usage(Usage:
   launch-as-admin install                         Stop active sessions, then create or update the broker service.
   launch-as-admin uninstall [--force]             Stop and remove the service; accounts are retained.

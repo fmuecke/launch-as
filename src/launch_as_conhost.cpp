@@ -3,23 +3,28 @@
 // Project: https://github.com/fmuecke/launch-as
 
 #include "LauncherOptions.h"
+#include "LicenseHeader.h"
 #include "PseudoConsoleHost.h"
 
 #include <cstddef>
-#include <cstdio>
-#include <fcntl.h>
-#include <io.h>
 #include <iostream>
 #include <span>
+#include <string_view>
 
 int wmain(int argumentCount, wchar_t* arguments[])
 {
-    static_cast<void>(_setmode(_fileno(stdout), _O_U8TEXT));
-    static_cast<void>(_setmode(_fileno(stderr), _O_U8TEXT));
+    launch_as::ConfigureUserFacingOutput();
+
+    if (argumentCount == 2 && std::wstring_view(arguments[1]) == L"--license")
+    {
+        launch_as::PrintLicenseHeader();
+        return static_cast<int>(launch_as::ExitSuccess);
+    }
 
     const std::span argumentsView(arguments, static_cast<std::size_t>(argumentCount));
     if (!launch_as::IsPseudoConsoleHostInvocation(argumentsView))
     {
+        launch_as::PrintLicenseHeader();
         std::wcerr << L"launch-as-conhost accepts only the broker pseudoconsole invocation.\n";
         return static_cast<int>(launch_as::ExitUsage);
     }

@@ -81,6 +81,8 @@ add_executable(launch_as
     src/PseudoConsoleSession.h
     src/LaunchProcess.cpp
     src/LaunchProcess.h
+    src/LicenseHeader.cpp
+    src/LicenseHeader.h
     src/TerminalBridge.cpp
     src/TerminalBridge.h
     src/TerminalIO.cpp
@@ -145,6 +147,8 @@ set_target_properties(launch_as PROPERTIES
 )
 
 add_executable(launch_as_conhost
+    src/LicenseHeader.cpp
+    src/LicenseHeader.h
     src/launch_as_conhost.cpp
     src/LauncherOptions.h
     src/PseudoConsoleHost.cpp
@@ -161,6 +165,9 @@ add_executable(launch_as_conhost
 )
 target_link_libraries(launch_as_conhost PRIVATE
     Ole32
+)
+target_include_directories(launch_as_conhost PRIVATE
+    "${CMAKE_CURRENT_BINARY_DIR}"
 )
 configure_launch_as_target(launch_as_conhost)
 set_target_properties(launch_as_conhost PROPERTIES
@@ -184,6 +191,8 @@ add_executable(launch_as_broker
     src/BrokerLogonToken.h
     src/BrokerPassword.cpp
     src/BrokerPassword.h
+    src/LicenseHeader.cpp
+    src/LicenseHeader.h
     src/BrokerProcessLauncher.cpp
     src/BrokerProcessLauncher.h
     src/BrokerRegistration.cpp
@@ -209,6 +218,9 @@ target_link_libraries(launch_as_broker PRIVATE
     Shell32
     Userenv
 )
+target_include_directories(launch_as_broker PRIVATE
+    "${CMAKE_CURRENT_BINARY_DIR}"
+)
 configure_launch_as_target(launch_as_broker)
 set_target_properties(launch_as_broker PROPERTIES
     OUTPUT_NAME "launch-as-broker"
@@ -228,6 +240,8 @@ add_executable(launch_as_admin
     src/BrokerControlPipe.h
     src/BrokerDataDirectory.cpp
     src/BrokerDataDirectory.h
+    src/LicenseHeader.cpp
+    src/LicenseHeader.h
     src/BrokerProtocol.cpp
     src/BrokerProtocol.h
     src/BrokerServiceInstaller.cpp
@@ -241,6 +255,9 @@ target_link_libraries(launch_as_admin PRIVATE
     Netapi32
     Ole32
     Shell32
+)
+target_include_directories(launch_as_admin PRIVATE
+    "${CMAKE_CURRENT_BINARY_DIR}"
 )
 configure_launch_as_target(launch_as_admin)
 set_target_properties(launch_as_admin PROPERTIES

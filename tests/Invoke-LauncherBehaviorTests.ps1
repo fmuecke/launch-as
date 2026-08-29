@@ -95,9 +95,45 @@ function Assert-VersionMetadata {
     Assert-Equal -Name "$OriginalFilename copyright metadata" -Actual $version.LegalCopyright -Expected 'Copyright (c) 2026 Florian Mücke'
 }
 
+function Assert-LicenseHeader {
+    param(
+        [Parameter(Mandatory)]
+        [string] $Path,
+
+        [Parameter(Mandatory)]
+        [string] $Name
+    )
+
+    $output = @(& $Path '--license' 2>&1)
+    $exitCode = $LASTEXITCODE
+    $text = ($output | ForEach-Object ToString) -join [Environment]::NewLine
+    if ($exitCode -ne 0) {
+        throw "$Name --license returned $exitCode. Output:`n$text"
+    }
+    foreach ($line in @(
+            "launch-as v$ExpectedVersion - Least-privilege Launcher",
+            'Copyright (C) 2026 Florian Mücke - This program comes with ABSOLUTELY NO WARRANTY.')) {
+        if (-not $text.Contains($line)) {
+            throw "$Name --license did not produce '$line'. Output:`n$text"
+        }
+    }
+    Write-Host "[PASS] $Name --license"
+}
+
 $script:ResolvedLauncher = [IO.Path]::GetFullPath($LauncherPath)
 if (-not (Test-Path -LiteralPath $script:ResolvedLauncher -PathType Leaf)) {
     throw "Launcher not found: $script:ResolvedLauncher"
+}
+
+foreach ($executable in @(
+        @{ Path = $script:ResolvedLauncher; Name = 'launch-as' },
+        @{ Path = [IO.Path]::GetFullPath($BrokerPath); Name = 'launch-as-broker' },
+        @{ Path = [IO.Path]::GetFullPath($AdminPath); Name = 'launch-as-admin' },
+        @{ Path = [IO.Path]::GetFullPath($ConhostPath); Name = 'launch-as-conhost' })) {
+    if (-not (Test-Path -LiteralPath $executable.Path -PathType Leaf)) {
+        throw "$($executable.Name) not found: $($executable.Path)"
+    }
+    Assert-LicenseHeader -Path $executable.Path -Name $executable.Name
 }
 
 $usage = Invoke-Launcher `

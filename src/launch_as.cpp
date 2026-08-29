@@ -4,36 +4,12 @@
 
 #include "LaunchProcess.h"
 #include "LauncherOptions.h"
-#include "LauncherVersion.h"
+#include "LicenseHeader.h"
 #include "PseudoConsoleHost.h"
 
 #include <cstddef>
-#include <cstdio>
-#include <fcntl.h>
-#include <io.h>
-#include <iostream>
 #include <span>
-
-namespace
-{
-
-void ConfigureUserFacingOutput()
-{
-    static_cast<void>(_setmode(_fileno(stdout), _O_U8TEXT));
-    static_cast<void>(_setmode(_fileno(stderr), _O_U8TEXT));
-}
-
-void PrintLicenseHeader()
-{
-    std::wcerr << L"\nlaunch-as v" << launch_as::LauncherVersion << L" - Least-privilege Launcher\n"
-               << L"Copyright (C) 2026 Florian Mücke\n"
-               << L"This program comes with ABSOLUTELY NO WARRANTY.\n"
-               //<< L"This is free software, and you are welcome to redistribute it under the\n"
-               //<< L"terms of the GNU General Public License version 3; see LICENSE for details.\n"
-               << std::endl;
-}
-
-} // namespace
+#include <string_view>
 
 int wmain(int argc, wchar_t* argv[])
 {
@@ -42,6 +18,11 @@ int wmain(int argc, wchar_t* argv[])
     ConfigureUserFacingOutput();
 
     const std::span arguments(argv, static_cast<std::size_t>(argc));
+    if (arguments.size() == 2 && std::wstring_view(arguments[1]) == L"--license")
+    {
+        PrintLicenseHeader();
+        return static_cast<int>(ExitSuccess);
+    }
     if (IsPseudoConsoleHostInvocation(arguments))
     {
         return static_cast<int>(RunPseudoConsoleHost(arguments));

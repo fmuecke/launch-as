@@ -2,6 +2,15 @@
 
 # launch-as
 
+Launch-as is currently used in [agent-win-sandbox](https://github.com/fmuecke/agent-win-sandbox) to create a least-privilege session for a coding agent like Claude Code or GitHub Copilot CLI.
+
+The current stable version is still v3.2.0. [Browse the stable v3.2.0 version](https://github.com/fmuecke/launch-as/tree/v0.3.2). It creates the session via `CreateProcessWithLogonW` from the current user. However, this has some security implications due to derived logon session tokens:
+
+- Session user will be able to see and interact with the regular user's desktop.
+- For regular-user processes that retain the normal logon-SID default-DACL ACE, the session user
+  can obtain `PROCESS_VM_READ` and `PROCESS_TERMINATE`, allowing memory reads and termination.
+  Protected processes or processes with custom DACLs may not be accessible.
+
 **1.0.0-preview · Windows x64 · console programs only**
 
 `launch-as` starts a console program as an **enrolled local standard account** through the

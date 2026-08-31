@@ -28,6 +28,37 @@ $launcherPath = Join-Path `
     $buildDirectory `
     "$Configuration\launch-as.exe"
 
+$ninjaGenerator = 'Ninja Multi-Config'
+if ($null -eq (Get-Command ninja -ErrorAction SilentlyContinue)) {
+    throw 'Ninja was not found on PATH. Install Ninja and rerun build.ps1.'
+}
+
+if ([string]::IsNullOrWhiteSpace($env:INCLUDE)) {
+    $vsWhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+    if (-not (Test-Path -LiteralPath $vsWhere -PathType Leaf)) {
+        throw 'Could not find Visual Studio. Install the MSVC C++ build tools and rerun build.ps1.'
+    }
+
+    $installationPath = & $vsWhere -latest -products '*' `
+        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+    $developerCommand = Join-Path $installationPath.Trim() 'Common7\Tools\VsDevCmd.bat'
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $developerCommand -PathType Leaf)) {
+        throw 'Could not find Visual Studio MSVC x64 build tools.'
+    }
+
+    $environment = & cmd.exe /c "call `"$developerCommand`" -no_logo -arch=x64 -host_arch=x64 >nul && set"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not initialize the MSVC build environment (exit code $LASTEXITCODE)."
+    }
+    foreach ($entry in $environment) {
+        $separator = $entry.IndexOf('=')
+        if ($separator -gt 0) {
+            Set-Item -LiteralPath "Env:$($entry.Substring(0, $separator))" `
+                -Value $entry.Substring($separator + 1)
+        }
+    }
+}
+
 Write-Host 'Formatting native C++ sources'
 $nativeSourceRoots = @(
     (Join-Path $projectRoot 'src')
@@ -47,18 +78,13 @@ if ($LASTEXITCODE -ne 0) {
     throw "clang-format failed with exit code $LASTEXITCODE."
 }
 
-Write-Host "Configuring x64 build in $buildDirectory"
-& cmake -S $projectRoot -B $buildDirectory -A x64
+Write-Host "Configuring Ninja Multi-Config build in $buildDirectory"
+& cmake -S $projectRoot -B $buildDirectory -G $ninjaGenerator
 if ($LASTEXITCODE -ne 0) {
     throw "CMake configure failed with exit code $LASTEXITCODE."
 }
 
-$buildDescription = if ($RunTests) {
-    'launch-as and test targets'
-}
-else {
-    'launch-as'
-}
+$buildDescription = 'all configured targets'
 Write-Host "Building $buildDescription ($Configuration)"
 $buildArguments = @(
     '--build'
@@ -66,19 +92,17 @@ $buildArguments = @(
     '--config'
     $Configuration
 )
-if (-not $RunTests) {
-    $buildArguments += @('--target', 'launch_as')
-}
 & cmake @buildArguments
 if ($LASTEXITCODE -ne 0) {
     throw "CMake build failed with exit code $LASTEXITCODE."
 }
 
 if ($RunTests) {
-    Write-Host "Running unattended launcher tests ($Configuration)"
+    Write-Host "Running all non-elevated CTest tests ($Configuration)"
     & ctest `
         --test-dir $buildDirectory `
         -C $Configuration `
+        --label-exclude 'elevated|interactive' `
         --output-on-failure
     if ($LASTEXITCODE -ne 0) {
         throw "CTest failed with exit code $LASTEXITCODE."

@@ -1,84 +1,106 @@
+<!-- Project URL: https://github.com/fmuecke/launch-as -->
+
 # launch-as
 
-A small Windows launcher that runs any executable as a **different local
-standard user**, without retyping a password every time.
+**1.0.0-preview · Windows x64 · console programs only**
 
-`launch-as` signs in with `CreateProcessWithLogonW`, optionally caches the
-target account's password in the current user's Windows Credential Manager, and
-can host the launched program right inside your existing terminal pane through
-ConPTY — so a nested shell under another identity feels like a normal tab.
+`launch-as` starts a console program as an **enrolled local standard account** through the
+`launch-as-broker` Windows service. The client never accepts, reads, stores, or transmits the
+account password. The broker creates an independent logon session, so the child does not inherit
+the caller's logon SID or its default access to the caller's processes.
 
-**Scope:** `launch-as` is for a trusted regular Windows user who wants to run
-tools such as coding agents in separate restricted local identities. It is not
-an elevation tool: it never launches a program as Administrator and rejects
-administrative target accounts.
+This is a general-purpose alternate-account launcher: its authorised caller can choose an enrolled
+account and any absolute executable. It is blast-radius reduction, not a sandbox: it does not
+protect against a local administrator or kernel-level attacker. GUI applications are out of scope
+for this preview.
+
+## Install the binary package
+
+Extract `launch-as-v1.0.0-preview-win64.zip` and run the bundled setup script from its extracted
+directory. It elevates when needed, installs or updates the demand-start service, and can enroll a
+default account. The user who runs `install` becomes the broker's authorised caller.
 
 ```powershell
-# Store the target account's password once
-.\launch-as.exe register --user RestrictedUser
-
-# Run something as that user, reusing the stored credential
-.\launch-as.exe --user RestrictedUser -- C:\Windows\System32\cmd.exe
-
-# Or open a nested shell in the current Windows Terminal / VS Code pane
-.\launch-as.exe --user RestrictedUser --terminal `
-    -- C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoExit
+.\Setup-LaunchAs.ps1
 ```
 
-## Why
+The package contains `launch-as.exe`, `launch-as-admin.exe`, `launch-as-broker.exe`,
+`launch-as-conhost.exe`, this README, the setup script, and the license. Keep
+`launch-as-admin.exe`, `launch-as-broker.exe`, and `launch-as-conhost.exe` together while
+installing; setup copies the broker and console host to
+`%ProgramFiles%\launch-as` with protected permissions.
 
-Running a build, tool, or shell under a restricted local account is a simple way
-to contain what it can touch. Doing that repeatedly usually means a password
-prompt every time or a plaintext secret in a script. `launch-as` keeps the
-convenience of a one-time setup while keeping the password out of your scripts.
+## Setup
 
-This matters most for processes that act on their own. AI coding agents such as
-**Claude Code** or **GitHub Copilot** run commands, edit files, and invoke tools
-with whatever rights their host shell holds. Launching them under a dedicated
-restricted user separates the agent's identity from your own: it acts as its own
-account, reaches only the resources you grant that account, and its actions stay
-attributable to it rather than blending into your session — all without giving up
-the convenience of your normal terminal.
-
-## Features
-
-- **Run as another local user** from an absolute executable path, with an
-  optional working directory and full argument pass-through after `--`.
-- **Credential Manager integration** — register a password once; later launches
-  reuse it with no prompt. Stale passwords are detected and can be refreshed.
-- **Flexible credential modes** — `auto` (prompt if missing), `stored`
-  (unattended, never shows UI), and `prompt` (ephemeral, never saved).
-- **Terminal mode (`--terminal`)** hosts an interactive process through ConPTY in
-  your current terminal pane, follows pane resizing, and avoids a separate
-  console window.
-- **Safe by construction** — refuses administrative target accounts, verifies the
-  child's token SID before resuming it, and zeroes password buffers after use.
-
-## Requirements
-
-- Windows 10 version 1809 or newer (terminal mode requires the same minimum)
-- Visual Studio with the MSVC C++ toolchain and a Windows SDK
-- CMake 3.25 or newer, `clang-format` on `PATH`, and PowerShell
-
-## Build
+For automation or individual elevated administration operations, use `launch-as-admin.exe`. Run
+these commands from the extracted package directory (or `out\build\Release` after a source build):
 
 ```powershell
-.\build.ps1                              # configure + build x64 Release
+.\launch-as-admin.exe install
+.\launch-as-admin.exe enroll LaunchAsUser
+```
+
+`install`, `enroll`, `unenroll`, and `uninstall` require elevation. `install` stops active broker
+sessions before updating the service. `enroll` creates a missing non-administrative local account,
+or takes over an existing one by setting a broker-owned password. It prompts before changing an
+account; `--force` is the explicit non-interactive override.
+
+The broker creates a password for each launch, uses it only to log on, then wipes it. An enrolled
+account runs one session at a time; a second launch fails immediately. `unenroll` forgets the
+enrollment and disables the account, but does not delete the Windows account.
+
+```powershell
+.\launch-as-admin.exe list
+.\launch-as-admin.exe unenroll LaunchAsUser
+.\launch-as-admin.exe uninstall
+```
+
+## Launch
+
+From a normal terminal, launch an enrolled account in the current pane:
+
+```powershell
+.\launch-as.exe `
+    --user LaunchAsUser `
+    --working-directory C:\dev\project `
+    -- C:\Windows\System32\cmd.exe /d /k
+```
+
+`run` is an optional spelling of the same command. The client starts the demand-start broker,
+creates the terminal data pipes, and returns the target program's exit code. The broker owns the
+temporary launch password and kills the console job when the client control connection closes.
+
+## Build and test
+
+The source build requires Visual Studio/MSVC, a Windows SDK, CMake 3.25+, PowerShell, `ninja`, and
+`clang-format`. Run `build.ps1` from the repository root; it initializes the MSVC environment when
+needed and builds the Ninja Multi-Config Release target by default.
+
+```powershell
+.\build.ps1
 .\build.ps1 -Configuration Debug
-.\build.ps1 -Configuration Release -Test  # build and run the CTest suite
+.\build.ps1 -RunTests
 ```
 
-The release binary links the static MSVC runtime, so it needs no separately
-installed Visual C++ Redistributable.
+`-RunTests` runs every non-elevated CTest test. The installed-service acceptance checks remain
+explicit because they require elevation and an enrolled account:
 
-## Documentation
+```powershell
+.\tests\Invoke-BrokerConsoleAcceptanceTest.ps1 -Account LaunchAsUser -ExpectedExitCode 37
+.\tests\Invoke-BrokerProbeAcceptanceTest.ps1 -Account LaunchAsUser
+```
 
-See **[DESIGN-DECISIONS.md](DESIGN-DECISIONS.md)** for the complete reference: every CLI option, the
-credential and security model, the ConPTY / named-pipe terminal bridge, and the
-build and acceptance test details. See [CHANGELOG.md](CHANGELOG.md) for release
-notes.
+The probe confirms a distinct logon SID, no interactive windows, and denied `VM_READ` and
+`TERMINATE` access to the caller's process. These are blast-radius controls, not protection from a
+local administrator or kernel-level attacker.
+
+## Design
+
+[launch-as-broker-spec.md](launch-as-broker-spec.md) is the Phase 1 implementation specification.
+The `interactive` GUI adapter is deliberately deferred to Phase 2; Phase 1 provides console
+(ConPTY) launches only.
 
 ## License
 
-`launch-as` is licensed under the GNU General Public License version 3 only.
-See [LICENSE](LICENSE).
+`launch-as` is licensed under the [GNU General Public License version 3 only](LICENSE). Source for
+this preview is available at <https://github.com/fmuecke/launch-as/tree/v1.0.0-preview>.

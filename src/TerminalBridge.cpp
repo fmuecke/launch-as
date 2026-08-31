@@ -23,6 +23,7 @@ namespace
 
 constexpr DWORD PipeMode =
     PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS;
+constexpr DWORD BrokerPipeConnectionTimeoutMilliseconds = 5'000;
 
 struct LocalFreeDeleter
 {
@@ -43,7 +44,8 @@ enum class PipeDirection
     ParentReads
 };
 
-[[nodiscard]] bool CreatePipeSecurityDescriptor(UniqueLocalMemory& descriptor, std::wstring& error)
+[[nodiscard]] bool CreatePipeSecurityDescriptor(
+    std::wstring_view childSid, UniqueLocalMemory& descriptor, std::wstring& error)
 {
     HANDLE rawToken = nullptr;
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &rawToken))
@@ -90,8 +92,11 @@ enum class PipeDirection
     }
     std::unique_ptr<wchar_t, LocalFreeDeleter> sid(rawSid);
 
-    const std::wstring securityDefinition =
-        L"D:P(A;;GA;;;SY)(A;;GA;;;" + std::wstring(sid.get()) + L")";
+    std::wstring securityDefinition = L"D:P(A;;GA;;;SY)(A;;GA;;;" + std::wstring(sid.get()) + L")";
+    if (!childSid.empty())
+    {
+        securityDefinition += L"(A;;GRGW;;;" + std::wstring(childSid) + L")";
+    }
     PSECURITY_DESCRIPTOR rawDescriptor = nullptr;
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
             securityDefinition.c_str(), SDDL_REVISION_1, &rawDescriptor, nullptr))
@@ -203,6 +208,101 @@ enum class PipeDirection
     return true;
 }
 
+[[nodiscard]] bool CreateTerminalPipeServer(std::wstring_view purpose, PipeDirection direction,
+    PSECURITY_DESCRIPTOR descriptor, UniqueHandle& parentEndpoint, std::wstring& childPipeName,
+    std::wstring& error)
+{
+    if (!CreatePipeName(purpose, childPipeName, error))
+    {
+        return false;
+    }
+    SECURITY_ATTRIBUTES serverSecurity {
+        .nLength = sizeof(serverSecurity),
+        .lpSecurityDescriptor = descriptor,
+        .bInheritHandle = FALSE
+    };
+    const DWORD serverAccess =
+        direction == PipeDirection::ParentWrites ? PIPE_ACCESS_OUTBOUND : PIPE_ACCESS_INBOUND;
+    HANDLE rawServer = CreateNamedPipeW(childPipeName.c_str(),
+        serverAccess | FILE_FLAG_FIRST_PIPE_INSTANCE | FILE_FLAG_OVERLAPPED,
+        PipeMode,
+        1,
+        RelayBufferBytes,
+        RelayBufferBytes,
+        0,
+        &serverSecurity);
+    if (rawServer == INVALID_HANDLE_VALUE)
+    {
+        const DWORD serverError = GetLastError();
+        error = L"Could not create the broker terminal " + std::wstring(purpose) + L" server: " +
+                FormatWindowsError(serverError);
+        return false;
+    }
+    parentEndpoint.reset(rawServer);
+    return true;
+}
+
+[[nodiscard]] bool ConnectTerminalPipeServer(
+    HANDLE server, std::wstring_view purpose, std::wstring& error)
+{
+    UniqueHandle operationEvent(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+    if (!operationEvent)
+    {
+        const DWORD eventError = GetLastError();
+        error = L"Could not create the broker terminal " + std::wstring(purpose) +
+                L" connection event: " + FormatWindowsError(eventError);
+        return false;
+    }
+    OVERLAPPED overlapped {};
+    overlapped.hEvent = operationEvent.get();
+    if (ConnectNamedPipe(server, &overlapped))
+    {
+        return true;
+    }
+    const DWORD connectError = GetLastError();
+    if (connectError == ERROR_PIPE_CONNECTED)
+    {
+        return true;
+    }
+    if (connectError != ERROR_IO_PENDING)
+    {
+        error = L"Could not connect the broker terminal " + std::wstring(purpose) + L" server: " +
+                FormatWindowsError(connectError);
+        return false;
+    }
+
+    const DWORD wait =
+        WaitForSingleObject(operationEvent.get(), BrokerPipeConnectionTimeoutMilliseconds);
+    if (wait != WAIT_OBJECT_0)
+    {
+        const DWORD waitError = wait == WAIT_FAILED ? GetLastError() : ERROR_TIMEOUT;
+        CancelIoEx(server, &overlapped);
+        DWORD ignored = 0;
+        static_cast<void>(GetOverlappedResult(server, &overlapped, &ignored, TRUE));
+        if (wait == WAIT_TIMEOUT)
+        {
+            error = L"Timed out waiting for the broker terminal " + std::wstring(purpose) +
+                    L" client to connect.";
+        }
+        else
+        {
+            error = L"Could not wait for the broker terminal " + std::wstring(purpose) +
+                    L" client: " + FormatWindowsError(waitError);
+        }
+        return false;
+    }
+
+    DWORD ignored = 0;
+    if (GetOverlappedResult(server, &overlapped, &ignored, FALSE))
+    {
+        return true;
+    }
+    const DWORD completionError = GetLastError();
+    error = L"Could not connect the broker terminal " + std::wstring(purpose) + L" server: " +
+            FormatWindowsError(completionError);
+    return false;
+}
+
 } // namespace
 
 TerminalBridge::~TerminalBridge() { Stop(); }
@@ -229,7 +329,7 @@ bool TerminalBridge::Initialize(STARTUPINFOW& childStartupInformation, std::wstr
     }
 
     UniqueLocalMemory pipeSecurity;
-    if (!CreatePipeSecurityDescriptor(pipeSecurity, error))
+    if (!CreatePipeSecurityDescriptor(L"", pipeSecurity, error))
     {
         return false;
     }
@@ -268,6 +368,56 @@ bool TerminalBridge::Initialize(STARTUPINFOW& childStartupInformation, std::wstr
     childStartupInformation.hStdInput = childInputRead_.get();
     childStartupInformation.hStdOutput = childOutputWrite_.get();
     childStartupInformation.hStdError = childResizeRead_.get();
+    return true;
+}
+
+bool TerminalBridge::InitializeForBroker(
+    std::wstring_view childSid, TerminalPipeNames& pipeNames, std::wstring& error)
+{
+    pipeNames = {};
+    parentInput_ = GetStdHandle(STD_INPUT_HANDLE);
+    parentOutput_ = GetStdHandle(STD_OUTPUT_HANDLE);
+    const HANDLE parentError = GetStdHandle(STD_ERROR_HANDLE);
+    if (!IsUsableHandle(parentInput_) || !IsUsableHandle(parentOutput_) ||
+        !IsUsableHandle(parentError))
+    {
+        error = L"Terminal mode requires usable standard input, output, and error handles.";
+        return false;
+    }
+    outputCompleteEvent_.reset(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+    if (!outputCompleteEvent_)
+    {
+        const DWORD eventError = GetLastError();
+        error = L"Could not create the terminal output completion event: " +
+                FormatWindowsError(eventError);
+        return false;
+    }
+    UniqueLocalMemory pipeSecurity;
+    if (!CreatePipeSecurityDescriptor(childSid, pipeSecurity, error))
+    {
+        return false;
+    }
+    if (!CreateTerminalPipeServer(L"input",
+            PipeDirection::ParentWrites,
+            static_cast<PSECURITY_DESCRIPTOR>(pipeSecurity.get()),
+            inputWrite_,
+            pipeNames.input,
+            error) ||
+        !CreateTerminalPipeServer(L"output",
+            PipeDirection::ParentReads,
+            static_cast<PSECURITY_DESCRIPTOR>(pipeSecurity.get()),
+            outputRead_,
+            pipeNames.output,
+            error) ||
+        !CreateTerminalPipeServer(L"resize",
+            PipeDirection::ParentWrites,
+            static_cast<PSECURITY_DESCRIPTOR>(pipeSecurity.get()),
+            resizeWrite_,
+            pipeNames.resize,
+            error))
+    {
+        return false;
+    }
     return true;
 }
 
@@ -363,6 +513,24 @@ bool TerminalBridge::CompleteChildProcessCreation(bool processCreated, std::wstr
     return true;
 }
 
+bool TerminalBridge::ConnectBrokerChild(std::wstring& error)
+{
+    if (childProcessCreated_ || childHandlesInheritable_ || !inputWrite_ || !outputRead_ ||
+        !resizeWrite_)
+    {
+        error = L"The terminal bridge is not ready for a broker child connection.";
+        return false;
+    }
+    if (!ConnectTerminalPipeServer(inputWrite_.get(), L"input", error) ||
+        !ConnectTerminalPipeServer(outputRead_.get(), L"output", error) ||
+        !ConnectTerminalPipeServer(resizeWrite_.get(), L"resize", error))
+    {
+        return false;
+    }
+    childProcessCreated_ = true;
+    return true;
+}
+
 bool TerminalBridge::Start(std::wstring& error)
 {
     if (!childProcessCreated_ || childHandlesInheritable_ || !inputWrite_ || !outputRead_ ||
@@ -424,6 +592,12 @@ bool TerminalBridge::Start(std::wstring& error)
         return false;
     }
     return true;
+}
+
+DWORD TerminalBridge::WaitForOutput() const noexcept
+{
+    return outputCompleteEvent_ ? WaitForSingleObject(outputCompleteEvent_.get(), INFINITE)
+                                : WAIT_FAILED;
 }
 
 void TerminalBridge::Stop() noexcept

@@ -16,40 +16,17 @@ namespace launch_as
 
 using ExitCode = std::uint32_t;
 
-inline constexpr ExitCode ExitSuccess = 0;              // ERROR_SUCCESS
-inline constexpr ExitCode ExitFailure = 1;              // ERROR_INVALID_FUNCTION
-inline constexpr ExitCode ExitUsage = 87;               // ERROR_INVALID_PARAMETER
-inline constexpr ExitCode ExitCredentialMissing = 1168; // ERROR_NOT_FOUND
-inline constexpr ExitCode ExitCancelled = 1223;         // ERROR_CANCELLED
-
-enum class Command
-{
-    Register,
-    Run,
-    Status,
-    Forget
-};
-
-enum class CredentialMode
-{
-    Auto,
-    Stored,
-    Prompt
-};
+inline constexpr ExitCode ExitSuccess = 0;      // ERROR_SUCCESS
+inline constexpr ExitCode ExitFailure = 1;      // ERROR_INVALID_FUNCTION
+inline constexpr ExitCode ExitUsage = 87;       // ERROR_INVALID_PARAMETER
+inline constexpr ExitCode ExitCancelled = 1223; // ERROR_CANCELLED
 
 struct Options
 {
-    Command command;
     std::wstring username;
-    std::wstring testCredentialTag;
-    bool testCredentialTagSpecified = false;
-    bool passwordFromStdin = false;
-    CredentialMode credentialMode = CredentialMode::Auto;
-    bool credentialModeSpecified = false;
     std::filesystem::path workingDirectory;
     std::filesystem::path executablePath;
     std::vector<std::wstring> processArguments;
-    bool terminal = false;
 };
 
 void PrintUsage();

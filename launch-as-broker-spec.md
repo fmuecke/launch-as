@@ -1,6 +1,6 @@
 # launch-as-broker — Implementation Specification
 
-Status: draft for implementation · Language: C++ (native Windows service) · Supersedes the earlier `spec.md`
+Status: Phase 1 console implementation · Language: C++ (native Windows service) · Supersedes the earlier `spec.md` and the retired pre-broker design notes
 
 ---
 
@@ -245,9 +245,14 @@ Responses never contain secrets or internal detail beyond a stable reason code +
 
 ## 9. Profiles and launch policy
 
-Phase 1 accepts multiple enrolled local accounts. For now the account name is also the profile id,
-all accounts use the `console` adapter, and the installer authorises one caller SID. A richer profile
-record that separates launch policy from the Windows account remains a later GUI/policy-phase extension:
+Phase 1 accepts multiple enrolled local accounts. The account name is the profile id, all accounts
+use the `console` adapter, and the installer authorises one caller SID. The current service checks
+that caller identity and the SID-pinned enrollment record; the client also requires an existing
+absolute executable and working directory. It deliberately accepts the caller's command, arguments,
+and working directory as a general-purpose alternate-account launch.
+
+A richer profile record that separates launch policy from the Windows account remains a later
+GUI/policy-phase extension:
 
 ```text
 profileId              e.g. "LaunchAsUser"
@@ -265,7 +270,7 @@ jobLifetime            "control-connection" | "detached"
 enabled                bool
 ```
 
-The broker validates, default-deny:
+When that profile policy is implemented, it must validate, default-deny:
 
 - caller SID ∈ `authorisedCallerSids`; profile enabled;
 - executable == configured canonical path (canonicalised; reparse/symlink resolved);
@@ -379,7 +384,15 @@ Never log: passwords, enrollment records, full sensitive command lines, secret-b
 
 ## 16. Failure behaviour (fail closed)
 
-Fail closed when: caller identity unresolved; impersonation fails; profile missing/disabled; config integrity check fails; executable not canonicalisable or ACL check fails; enrollment does not match the account SID or `LogonUser` fails; session ambiguous (interactive mode); desktop access cannot be prepared; handle validation fails; protocol version unsupported. Return a stable reason code + Win32 error; no sensitive internals.
+Phase 1 fails closed when caller identity cannot be captured or authorised, the request is malformed or
+uses an unsupported mode, the enrollment record does not match, password reset or `LogonUser` fails,
+the resulting token is administrative or has the wrong account SID, child logon-SID validation fails,
+or the terminal/job setup fails. Responses return a stable reason code and Win32 error without
+sensitive internals.
+
+The future GUI/policy phase must additionally fail closed for disabled profiles, config-integrity
+failures, canonical-path/ACL policy failures, ambiguous sessions, unavailable desktop access, and
+all future handle-validation checks.
 
 ---
 
@@ -387,10 +400,14 @@ Fail closed when: caller identity unresolved; impersonation fails; profile missi
 
 1. The child token is created by an **independent `LogonUser`** and never carries the interactive user's logon SID.
 2. Passwords never cross the client↔broker boundary.
-3. The caller chooses a **profile + mode**, not a password, account, or executable.
+3. The caller chooses an enrolled **profile + console command**, never a password. Phase 1 is
+   intentionally a general-purpose launcher; executable allow-listing is not an implemented
+   security boundary.
 4. Authorisation is based on the **actual caller token**, not a claimed name.
 5. Config/enrollment changes require a distinct elevated path.
-6. Executable/dir checks use canonical paths + ACL inspection; no string-prefix checks.
+6. Phase 1 validates existing absolute executable and working-directory paths. Any future
+   executable or directory restriction must use canonical paths + ACL inspection, never
+   string-prefix checks.
 7. No client-supplied handle is trusted without validation; no broker handle is inheritable by default.
 8. Interactive-mode desktop ACEs are granted to the child **logon SID** (not account SID) and removed on teardown.
 9. Every failure path zeroes secrets and closes handles.
@@ -462,7 +479,48 @@ The essential improvement over the current client: the agent runs under an **ind
 
 ---
 
-## 21. Open account-lifecycle decisions
+## 21. Implemented Phase-1 service contract
+
+This section is the current contract. It preserves the applicable behavior of the retired
+pre-broker launcher design; Credential Manager, `register`, `--credential-mode`, direct
+`CreateProcessWithLogonW`, and `--terminal` are not broker interfaces.
+
+- `launch-as.exe [run] --user <enrolled-local-user> [--working-directory <directory>] --
+  <absolute-executable> [arguments...]` is the console-launch CLI. `run` is optional. The
+  client requires an existing absolute executable and, when supplied, an existing absolute
+  working directory; otherwise it uses its current directory.
+- The client starts the demand-start `launch-as-broker` service and connects to its local,
+  message-mode control pipe. The pipe rejects remote clients. Its DACL admits the authorised
+  caller, but the service also impersonates the pipe client, captures its SID/session/integrity,
+  immediately reverts, and cross-checks the client-process SID before authorising the request.
+- Phase 1 supports only explicit `mode:"console"`. `mode:"interactive"` is recognised but
+  rejected with `mode_not_supported` / `ERROR_NOT_SUPPORTED` (50); missing or unknown modes are
+  invalid requests. No Phase-1 process is placed on `WinSta0\\Default` or given access to the
+  caller's interactive window station or desktop.
+- The `LocalSystem` service resets a broker-generated password for the SID-pinned enrolled local
+  account, calls `LogonUserW(LOGON32_LOGON_INTERACTIVE)`, clears the password buffer, loads the
+  user profile/environment, and creates the console host suspended with `CreateProcessAsUserW`.
+  The host is checked not to share the caller's logon SID before it resumes.
+- Console terminal I/O remains in the caller's pane through ConPTY. The client creates random,
+  one-instance, SID-scoped input, output, and resize named pipes; the broker-launched
+  `launch-as-conhost.exe` connects to them and starts the requested command in the
+  pseudoconsole. Windows 10 version 1809 or newer is required. Output is untrusted terminal
+  content and can spoof prompts or terminal-supported presentation actions.
+- Each console host is assigned to a kill-on-close Job before it resumes. The control connection
+  is the dead-man switch: client disconnect, service stop, or launch failure closes the Job and
+  terminates the host's process tree. A single active control-pipe session is supported; a second
+  launch fails with `ERROR_PIPE_BUSY`.
+- After terminal output finishes, the broker reports the launched command's exit code over the
+  control connection and `launch-as.exe` returns it unchanged. Launcher-originated failures use
+  the documented Win32-style outcomes (notably `1` for general failure and `87` for usage); child
+  exit codes may collide with them.
+
+The installed service and interactive console path still need their explicit acceptance tests;
+unit tests and parser checks alone do not demonstrate an installed, cross-session boundary.
+
+---
+
+## 22. Open account-lifecycle decisions
 
 The current broker implementation is not the decision record for these points. Resolve them before treating multi-account registration as a stable interface.
 

@@ -148,18 +148,41 @@ The launch core is mode-agnostic. A profile selects one adapter.
 
 ### 7.2 `interactive` mode (later GUI phase; e.g. VS Code or Claude Desktop in the user's session)
 
+The broker remains a headless Session-0 service; it does **not** need its own interactive desktop.
+It creates the restricted child in the authenticated caller's existing session and attaches that
+child to that session's `WinSta0\Default`. This is a cross-session launch, not an attempt to make
+the service interactive.
+
 Requires crossing from session 0 into the caller's interactive session. Steps:
 
-1. From the authenticated caller token, obtain the caller's **session id**; verify it belongs to the caller (do not blindly use `WTSGetActiveConsoleSessionId`).
+1. From the authenticated caller token, obtain the caller's **session id**; verify it belongs to the
+   caller. Do not accept a client-supplied session id or blindly use `WTSGetActiveConsoleSessionId`:
+   RDP, Fast User Switching, multiple logons, and disconnected sessions make the active console
+   ambiguous.
 2. `LogonUserW(INTERACTIVE)` → primary token (its own logon SID; session 0 by default).
 3. `SetTokenInformation(TokenSessionId, callerSession)` — needs `SeTcbPrivilege`.
-4. Extract the **child's own logon SID** (`GetTokenInformation(TokenLogonSid)`), and add scoped ACEs for **that logon SID** — not the account SID — to the caller session's `WinSta0` window station and `Default` desktop (KB165194 pattern). Track the ACEs for removal on teardown.
+4. Extract the **child's own logon SID** (`GetTokenInformation(TokenLogonSid)`), and add the
+   minimum scoped ACEs for **that logon SID** — not the account SID — to the caller session's
+   `WinSta0` window station and `Default` desktop. `lpDesktop` selects the desktop but does not
+   grant access on its own. Record exactly which ACEs this launch added so failures and teardown
+   remove only those ACEs; account-SID grants can leave persistent cross-session access.
 5. `LoadUserProfile` + `CreateEnvironmentBlock` (GUI apps need `HKCU`/`%APPDATA%`).
 6. `STARTUPINFO.lpDesktop = L"WinSta0\\Default"`; `CreateProcessAsUserW`.
-7. On process-tree exit or teardown: remove the temporary winsta/desktop ACEs, `DestroyEnvironmentBlock`, `UnloadUserProfile`, close handles.
+7. On process-tree exit, launch failure, or teardown: remove the temporary winsta/desktop ACEs,
+   `DestroyEnvironmentBlock`, `UnloadUserProfile`, and close handles.
 - **Surfaces:** Surface 2 **closed** (the token holds the child's own logon SID, never the interactive user's). Surface 1 **open and accepted** — the GUI child is physically on the shared desktop (can screenshot, enumerate, and inject laterally into same-IL windows). This is the documented, postponed residual. Use the account/logon SID scoping above so no *persistent* cross-session desktop access is left behind.
 
 > Rationale for why Surface 2 stays closed in GUI mode: granting the child's *own* logon SID rights on the interactive desktop gives desktop access without placing the interactive user's logon SID into the child token — so the interactive user's process default-DACL ACE still does not match.
+
+#### 7.2.1 No normal-user token helper
+
+Do not move GUI or terminal plumbing into a helper running as the interactive user if that requires
+passing it the restricted primary token. A process able to control that helper could duplicate or
+misuse the token, reopening a privileged-launch boundary. A session-local helper may only be used
+after a separate design proves it cannot receive credentials or a reusable restricted token; the
+broker retains both and performs `CreateProcessAsUserW` directly. Phase 1 avoids this issue by
+keeping terminal ownership in the client and connecting the broker-launched console host through
+SID-scoped named pipes.
 
 ---
 
@@ -393,7 +416,13 @@ Credential / authorization:
 - the child's token `TokenGroups` does **not** contain the interactive user's logon SID;
 - the Surface-2 `OpenProcess` probe from the child against the interactive user's processes returns **`VM_READ`/`TERMINATE` DENIED**;
 - `console` mode: `EnumWindows` from the child cannot see the interactive user's windows (Surface 1 closed);
-- `interactive` mode: Surface 2 tests pass (DENIED) even though the child renders on the shared desktop (Surface 1 intentionally open); after the child exits, the temporary `WinSta0`/`Default` ACEs for the child logon SID are gone.
+- `interactive` mode: the child's token session id equals the authenticated caller's session id, and
+  both its process window station and thread desktop identify the caller session's
+  `WinSta0\Default`; a desktop named `Default` alone is not sufficient evidence;
+- `interactive` mode: Surface 2 tests pass (DENIED) even though the child renders on the shared desktop (Surface 1 intentionally open); after the child exits, the temporary `WinSta0`/`Default` ACEs for the child logon SID are gone;
+- `interactive` mode: exercise an RDP or Fast User Switching case and reject an ambiguous or
+  disconnected caller session; console-only tests do not establish this path;
+- no process running as the interactive caller receives a reusable restricted primary token.
 
 ---
 
@@ -402,7 +431,17 @@ Credential / authorization:
 **Phase 1 — shippable broker + boundary, `console` (ConPTY) mode only:**
 service scaffold (SCM, demand-start, `sc sdset` delegation), single-session named-pipe IPC with impersonation-based auth, multiple enrolled accounts, SID-pinned enrollment records and per-launch passwords, `LogonUser` + `CreateProcessAsUserW`, Job object, Event Log audit. Ship the **`console` (ConPTY) adapter** on the default noninteractive station, reusing the existing `TerminalBridge`/`PseudoConsoleHost` with the child-creation call moved behind the broker (client owns the terminal and the SID-DACL'd data pipes). This is the daily-driver path for console agents and closes **both** surfaces. It is complete only when the §18 console acceptance checks, including the real installed-console run, pass. Run the §6.1 token-graft probe; its current result retains the `LocalSystem` + `CreateProcessAsUserW` baseline. Client: remove all credential/`CreateProcessWithLogonW` logic; relocate the two token-validation checks into the broker.
 
-**Phase n — `interactive` GUI adapter + optional hardened policy:** when GUI support is selected, implement the adapter (§7.2): session resolution, `SetTokenInformation(TokenSessionId)`, child-logon-SID `WinSta0`/`Default` ACEs with teardown, `LoadUserProfile`/`CreateEnvironmentBlock`, and detached Job lifetime, for applications such as VS Code or Claude Desktop in the caller's session (Surface 2 closed, Surface 1 accepted). This later phase can also select multi-profile config + admin tooling, optional executable allow-listing, canonical-path/ACL checks, working-dir + environment policy, credential rotation schedule, config integrity protection, and concurrency/rate limits. The §6.1 result does not support a `LocalService` downgrade.
+**Phase n — `interactive` GUI adapter + optional hardened policy:** when GUI support is selected,
+implement the adapter (§7.2): derive and validate the caller's session from the authenticated pipe
+token; `SetTokenInformation(TokenSessionId)`; child-logon-SID-only, minimum `WinSta0`/`Default`
+ACEs with failure-safe teardown; `LoadUserProfile`/`CreateEnvironmentBlock`; and detached Job
+lifetime. The Session-0 broker remains the direct process creator and never transfers a reusable
+restricted token to a normal-user helper. Test the path in real RDP/Fast User Switching scenarios,
+not merely the console path, before accepting it for VS Code or Claude Desktop in the caller's
+session (Surface 2 closed, Surface 1 accepted). This later phase can also select multi-profile
+config + admin tooling, optional executable allow-listing, canonical-path/ACL checks, working-dir
+environment policy, credential rotation schedule, config integrity protection, and concurrency/
+rate limits. The §6.1 result does not support a `LocalService` downgrade.
 
 **Later GUI hardening phase (postponed):** evaluate a private window station/desktop or a separate session for GUI where feasible; `SetWindowDisplayAffinity`-style mitigations are out of the child's control, so this likely means a dedicated session rather than co-locating on the human's desktop.
 

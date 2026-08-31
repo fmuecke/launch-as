@@ -1,43 +1,58 @@
+<!-- Project URL: https://github.com/fmuecke/launch-as -->
+
 # launch-as
+
+**1.0.0-preview · Windows x64 · console programs only**
 
 `launch-as` starts a console program as an **enrolled local standard account** through the
 `launch-as-broker` Windows service. The client never accepts, reads, stores, or transmits the
-account password. The broker creates an independent interactive logon session, which prevents the
-child from inheriting the caller's logon SID and from using that SID to read or terminate the
-caller's processes.
+account password. The broker creates an independent logon session, so the child does not inherit
+the caller's logon SID or its default access to the caller's processes.
 
-The broker is a general-purpose alternate-account launcher: an authorised caller may choose an
-enrolled account and an absolute executable. Per-account executable restrictions are deliberately
-not part of Phase 1.
+This is a general-purpose alternate-account launcher: its authorised caller can choose an enrolled
+account and any absolute executable. It is blast-radius reduction, not a sandbox: it does not
+protect against a local administrator or kernel-level attacker. GUI applications are out of scope
+for this preview.
 
-## Setup
+## Install the binary package
 
-For interactive setup, build first and run the convenience wrapper. It elevates when necessary,
-offers to update or uninstall an existing service, and offers to enroll a default account after a
-fresh install:
+Extract `launch-as-v1.0.0-preview-win64.zip` and run the bundled setup script from its extracted
+directory. It elevates when needed, installs or updates the demand-start service, and can enroll a
+default account. The user who runs `install` becomes the broker's authorised caller.
 
 ```powershell
 .\Setup-LaunchAs.ps1
 ```
 
-For automation or individual elevated administration operations, use `launch-as-admin.exe`:
+The package contains `launch-as.exe`, `launch-as-admin.exe`, `launch-as-broker.exe`,
+`launch-as-conhost.exe`, this README, the setup script, and the license. Keep
+`launch-as-admin.exe`, `launch-as-broker.exe`, and `launch-as-conhost.exe` together while
+installing; setup copies the broker and console host to
+`%ProgramFiles%\launch-as` with protected permissions.
+
+## Setup
+
+For automation or individual elevated administration operations, use `launch-as-admin.exe`. Run
+these commands from the extracted package directory (or `out\build\Release` after a source build):
 
 ```powershell
-.\out\build\Release\launch-as-admin.exe install
-.\out\build\Release\launch-as-admin.exe enroll LaunchAsUser
+.\launch-as-admin.exe install
+.\launch-as-admin.exe enroll LaunchAsUser
 ```
 
-`install` stops any active broker session before updating the service. `enroll` creates a missing non-administrative local account or takes over an existing one by
-setting a broker-owned password. It prompts before changing the account; `--force` is the explicit
-non-interactive override. The broker retains no password after enrollment: it creates one for each
-launch, uses it to log on, then wipes it. The broker accepts one session at a time; a second launch
-fails immediately instead of waiting. `unenroll` forgets the enrollment and disables the account,
-but does not delete the Windows account.
+`install`, `enroll`, `unenroll`, and `uninstall` require elevation. `install` stops active broker
+sessions before updating the service. `enroll` creates a missing non-administrative local account,
+or takes over an existing one by setting a broker-owned password. It prompts before changing an
+account; `--force` is the explicit non-interactive override.
+
+The broker creates a password for each launch, uses it only to log on, then wipes it. An enrolled
+account runs one session at a time; a second launch fails immediately. `unenroll` forgets the
+enrollment and disables the account, but does not delete the Windows account.
 
 ```powershell
-.\out\build\Release\launch-as-admin.exe list
-.\out\build\Release\launch-as-admin.exe unenroll LaunchAsUser
-.\out\build\Release\launch-as-admin.exe uninstall
+.\launch-as-admin.exe list
+.\launch-as-admin.exe unenroll LaunchAsUser
+.\launch-as-admin.exe uninstall
 ```
 
 ## Launch
@@ -45,7 +60,7 @@ but does not delete the Windows account.
 From a normal terminal, launch an enrolled account in the current pane:
 
 ```powershell
-.\out\build\Release\launch-as.exe `
+.\launch-as.exe `
     --user LaunchAsUser `
     --working-directory C:\dev\project `
     -- C:\Windows\System32\cmd.exe /d /k
@@ -57,8 +72,9 @@ temporary launch password and kills the console job when the client control conn
 
 ## Build and test
 
-Run `build.ps1` from a Visual Studio Developer PowerShell or x64 Native Tools Command Prompt. It
-requires `ninja` on `PATH` and builds the Ninja Multi-Config Release target by default.
+The source build requires Visual Studio/MSVC, a Windows SDK, CMake 3.25+, PowerShell, `ninja`, and
+`clang-format`. Run `build.ps1` from the repository root; it initializes the MSVC environment when
+needed and builds the Ninja Multi-Config Release target by default.
 
 ```powershell
 .\build.ps1
@@ -86,4 +102,5 @@ The `interactive` GUI adapter is deliberately deferred to Phase 2; Phase 1 provi
 
 ## License
 
-`launch-as` is licensed under the GNU General Public License version 3 only.
+`launch-as` is licensed under the [GNU General Public License version 3 only](LICENSE). Source for
+this preview is available at <https://github.com/fmuecke/launch-as/tree/v1.0.0-preview>.

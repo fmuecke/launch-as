@@ -52,9 +52,16 @@ if (-not (Test-Administrator)) {
     exit $exitCode
 }
 
-$admin = Join-Path $PSScriptRoot 'out\build\Release\launch-as-admin.exe'
-if (-not (Test-Path -LiteralPath $admin -PathType Leaf)) {
-    throw "Administrator executable not found: $admin. Run .\build.ps1 first."
+$packageAdmin = Join-Path $PSScriptRoot 'launch-as-admin.exe'
+$buildAdmin = Join-Path $PSScriptRoot 'out\build\Release\launch-as-admin.exe'
+$admin = if (Test-Path -LiteralPath $packageAdmin -PathType Leaf) {
+    $packageAdmin
+}
+elseif (Test-Path -LiteralPath $buildAdmin -PathType Leaf) {
+    $buildAdmin
+}
+else {
+    throw "Administrator executable not found beside the script or at $buildAdmin. Extract the binary package or run .\build.ps1 first."
 }
 
 $service = Get-Service -Name 'launch-as-broker' -ErrorAction SilentlyContinue

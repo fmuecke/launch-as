@@ -224,27 +224,37 @@ void AuditRequest(launch_as::broker::BrokerAuditEvent event, WORD type,
     return ERROR_SUCCESS;
 }
 
-[[nodiscard]] launch_as::UniqueHandle CreateControlPipe(std::wstring_view dacl)
+[[nodiscard]] launch_as::UniqueHandle CreateControlPipe(
+    std::wstring_view dacl, bool firstInstance, DWORD& error)
 {
+    error = ERROR_SUCCESS;
     const std::wstring daclText(dacl);
     LocalSecurityDescriptor securityDescriptor;
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
             daclText.c_str(), SDDL_REVISION_1, securityDescriptor.address(), nullptr))
     {
+        error = GetLastError();
         return {};
     }
     SECURITY_ATTRIBUTES securityAttributes {};
     securityAttributes.nLength = sizeof(securityAttributes);
     securityAttributes.lpSecurityDescriptor = securityDescriptor.get();
 
+    const DWORD openMode = PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED |
+                           (firstInstance ? FILE_FLAG_FIRST_PIPE_INSTANCE : 0);
     HANDLE pipe = CreateNamedPipeW(launch_as::broker::ControlPipeName.data(),
-        PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+        openMode,
         PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
         MaximumConcurrentPipeWorkers,
         static_cast<DWORD>(launch_as::broker::MaximumMessageBytes),
         static_cast<DWORD>(launch_as::broker::MaximumMessageBytes),
         0,
         &securityAttributes);
+    if (pipe == INVALID_HANDLE_VALUE)
+    {
+        error = GetLastError();
+        return {};
+    }
     return launch_as::UniqueHandle(pipe);
 }
 
@@ -348,9 +358,11 @@ void JoinWorkers(std::vector<std::unique_ptr<BrokerPipeWorker>>& workers)
     return true;
 }
 
-void RunPipeServer(BrokerLaunchPolicy& launchPolicy)
+[[nodiscard]] DWORD RunPipeServer(BrokerLaunchPolicy& launchPolicy)
 {
     std::vector<std::unique_ptr<BrokerPipeWorker>> workers;
+    bool firstInstance = true;
+    DWORD serviceExitCode = ERROR_SUCCESS;
     while (WaitForSingleObject(stopEvent, 0) == WAIT_TIMEOUT)
     {
         ReapCompletedWorkers(workers);
@@ -358,12 +370,26 @@ void RunPipeServer(BrokerLaunchPolicy& launchPolicy)
         {
             break;
         }
-        launch_as::UniqueHandle pipe(CreateControlPipe(launchPolicy.controlPipeDacl));
+        DWORD createError = ERROR_SUCCESS;
+        launch_as::UniqueHandle pipe(
+            CreateControlPipe(launchPolicy.controlPipeDacl, firstInstance, createError));
         if (!pipe)
         {
+            if (firstInstance)
+            {
+                const std::vector<std::wstring> fields {
+                    L"reason=first_pipe_instance_unavailable",
+                    L"win32Error=" + std::to_wstring(createError),
+                };
+                static_cast<void>(launch_as::broker::WriteBrokerAuditEvent(EVENTLOG_ERROR_TYPE,
+                    launch_as::broker::BrokerAuditEvent::ControlPipeCreationFailed,
+                    fields));
+                serviceExitCode = createError;
+            }
             SetEvent(stopEvent);
             break;
         }
+        firstInstance = false;
 
         launch_as::UniqueHandle connectEvent(CreateEventW(nullptr, TRUE, FALSE, nullptr));
         if (!connectEvent)
@@ -390,7 +416,7 @@ void RunPipeServer(BrokerLaunchPolicy& launchPolicy)
                 ReapCompletedWorkers(workers);
                 if (workers.empty())
                 {
-                    return;
+                    return serviceExitCode;
                 }
                 continue;
             }
@@ -418,6 +444,7 @@ void RunPipeServer(BrokerLaunchPolicy& launchPolicy)
         }
     }
     JoinWorkers(workers);
+    return serviceExitCode;
 }
 
 DWORD ConfigureProfile(void* context, const launch_as::broker::BrokerRequest& request,
@@ -620,8 +647,8 @@ void WINAPI ServiceMain(DWORD, wchar_t**)
         return;
     }
     ReportServiceStatus(SERVICE_RUNNING);
-    RunPipeServer(launchPolicy);
-    ReportServiceStatus(SERVICE_STOPPED);
+    const DWORD pipeServerExitCode = RunPipeServer(launchPolicy);
+    ReportServiceStatus(SERVICE_STOPPED, pipeServerExitCode);
 }
 
 } // namespace

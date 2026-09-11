@@ -76,7 +76,7 @@ DWORD OpenBrokerControlPipe(HANDLE& pipe)
             0,
             nullptr,
             OPEN_EXISTING,
-            0,
+            SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION,
             nullptr);
         if (rawPipe != INVALID_HANDLE_VALUE)
         {

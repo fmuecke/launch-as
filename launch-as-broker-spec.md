@@ -139,6 +139,11 @@ The launch core is mode-agnostic. A profile selects one adapter.
 
 ### 7.1 `console` mode (Phase 1; default for `LaunchAsUser` / Claude Code)
 
+**CLI decision (2026-09-11):** the Phase-1 CLI intentionally has no `--mode console` option while
+`console` is the only supported mode. The client selects console mode and still sends the explicit
+`mode:"console"` protocol field. Add a CLI mode selector only when another client-visible mode is
+implemented.
+
 - Child stays on the **default noninteractive window station** (`Service-0x0-…`). Do **not** set `lpDesktop` to `WinSta0\Default`; do **not** hop the session.
 - Do not grant or repair any access to the caller's interactive window station or desktop. Console
   terminal I/O is solely the ConPTY/named-pipe bridge below.
@@ -361,6 +366,8 @@ The installer/setup runs **elevated once** and must:
 - create `%ProgramData%\launch-as\{,enrollments}` with restrictive ACLs (§4);
 - register the Event Log source;
 - provision/har­den the `LaunchAsUser` account and run `enroll LaunchAsUser` (§11) to create its enrollment record;
+- on update, install the new broker first and then re-enroll the configured default account,
+  replacing its broker-owned password; report failure if either operation fails;
 - optionally create Firewall rules (separate, out of scope here);
 - deny ordinary users any right to replace/reconfigure the service or its files;
 - support clean uninstall with optional secure credential deletion.
@@ -488,7 +495,9 @@ pre-broker launcher design; Credential Manager, `register`, `--credential-mode`,
 - `launch-as.exe [run] --user <enrolled-local-user> [--working-directory <directory>] --
   <absolute-executable> [arguments...]` is the console-launch CLI. `run` is optional. The
   client requires an existing absolute executable and, when supplied, an existing absolute
-  working directory; otherwise it uses its current directory.
+  working directory; otherwise it uses its current directory. It intentionally exposes no mode
+  option until more than one client-visible mode is implemented; it sends `mode:"console"` to the
+  broker.
 - The client starts the demand-start `launch-as-broker` service and connects to its local,
   message-mode control pipe. The pipe rejects remote clients. Its DACL admits the authorised
   caller, but the service also impersonates the pipe client, captures its SID/session/integrity,

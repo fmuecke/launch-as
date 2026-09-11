@@ -361,6 +361,20 @@ if(BUILD_TESTING)
         LABELS "setup;unit"
     )
 
+    add_test(
+        NAME launcher.setup_update_contract
+        COMMAND
+            pwsh
+            -NoProfile
+            -File
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Test-SetupUpdateContract.ps1"
+            -Path
+            "${CMAKE_CURRENT_SOURCE_DIR}/Setup-LaunchAs.ps1"
+    )
+    set_tests_properties(launcher.setup_update_contract PROPERTIES
+        LABELS "setup;unit"
+    )
+
     add_executable(LauncherBrokerPasswordTests
         tests/BrokerPasswordTests.cpp
         src/BrokerPassword.cpp

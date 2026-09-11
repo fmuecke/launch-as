@@ -27,7 +27,8 @@ for this preview.
 
 Extract `launch-as-v1.0.0-preview-win64.zip` and run the bundled setup script from its extracted
 directory. It elevates when needed, installs or updates the demand-start service, and can enroll a
-default account. The user who runs `install` becomes the broker's authorised caller.
+default account. Updating re-enrolls that account and replaces its broker-owned password. The user
+who runs `install` becomes the broker's authorised caller.
 
 ```powershell
 .\Setup-LaunchAs.ps1

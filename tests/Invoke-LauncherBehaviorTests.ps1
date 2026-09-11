@@ -27,6 +27,37 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$copyrightHolder = 'Florian M' + [char]0x00FC + 'cke'
+
+function Invoke-NativeAndCapture {
+    param(
+        [Parameter(Mandatory)]
+        [string] $Path,
+
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [string[]] $Arguments,
+
+        [Parameter(Mandatory)]
+        [ref] $Output,
+
+        [Parameter(Mandatory)]
+        [ref] $ExitCode
+    )
+
+    $previousOutputEncoding = [Console]::OutputEncoding
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+        $ErrorActionPreference = 'Continue'
+        $Output.Value = @(& $Path @Arguments 2>&1)
+        $ExitCode.Value = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+        [Console]::OutputEncoding = $previousOutputEncoding
+    }
+}
 
 function Invoke-Launcher {
     param(
@@ -44,8 +75,13 @@ function Invoke-Launcher {
         [string] $ExpectedOutput
     )
 
-    $output = @(& $script:ResolvedLauncher @Arguments 2>&1)
-    $exitCode = $LASTEXITCODE
+    $output = $null
+    $exitCode = 0
+    Invoke-NativeAndCapture `
+        -Path $script:ResolvedLauncher `
+        -Arguments $Arguments `
+        -Output ([ref] $output) `
+        -ExitCode ([ref] $exitCode)
     $text = ($output | ForEach-Object ToString) -join [Environment]::NewLine
     if ($exitCode -notin $ExpectedExitCodes) {
         throw "$Name returned $exitCode; expected $($ExpectedExitCodes -join ' or '). Output:`n$text"
@@ -92,7 +128,7 @@ function Assert-VersionMetadata {
     Assert-Equal -Name "$OriginalFilename file description metadata" -Actual $version.FileDescription -Expected $Description
     Assert-Equal -Name "$OriginalFilename product name metadata" -Actual $version.ProductName -Expected 'launch-as'
     Assert-Equal -Name "$OriginalFilename original filename metadata" -Actual $version.OriginalFilename -Expected $OriginalFilename
-    Assert-Equal -Name "$OriginalFilename copyright metadata" -Actual $version.LegalCopyright -Expected 'Copyright (c) 2026 Florian Mücke'
+    Assert-Equal -Name "$OriginalFilename copyright metadata" -Actual $version.LegalCopyright -Expected "Copyright (c) 2026 $copyrightHolder"
 }
 
 function Assert-LicenseHeader {
@@ -104,15 +140,20 @@ function Assert-LicenseHeader {
         [string] $Name
     )
 
-    $output = @(& $Path '--license' 2>&1)
-    $exitCode = $LASTEXITCODE
+    $output = $null
+    $exitCode = 0
+    Invoke-NativeAndCapture `
+        -Path $Path `
+        -Arguments @('--license') `
+        -Output ([ref] $output) `
+        -ExitCode ([ref] $exitCode)
     $text = ($output | ForEach-Object ToString) -join [Environment]::NewLine
     if ($exitCode -ne 0) {
         throw "$Name --license returned $exitCode. Output:`n$text"
     }
     foreach ($line in @(
             "launch-as v$ExpectedVersion - Least-privilege Launcher",
-            'Copyright (C) 2026 Florian Mücke - This program comes with ABSOLUTELY NO WARRANTY.')) {
+            "Copyright (C) 2026 $copyrightHolder - This program comes with ABSOLUTELY NO WARRANTY.")) {
         if (-not $text.Contains($line)) {
             throw "$Name --license did not produce '$line'. Output:`n$text"
         }

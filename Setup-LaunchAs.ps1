@@ -85,10 +85,15 @@ Write-Host "Existing launch-as-broker service detected ($($service.Status))."
 $choice = if ($Force) { 'update' } else { Read-Host 'Choose update, uninstall, or cancel' }
 switch ($choice.ToLowerInvariant()) {
     'update' {
-        if (-not (Confirm-Action 'Update the broker and stop any active broker sessions')) {
+        $updatePrompt = "Update the broker, stop any active broker sessions, and re-enroll default account '$DefaultAccount' (replacing its broker-owned password)"
+        if (-not (Confirm-Action $updatePrompt)) {
             exit $exitCancelled
         }
         & $admin install
+        if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+        }
+        & $admin enroll $DefaultAccount --force
         exit $LASTEXITCODE
     }
     'uninstall' {

@@ -16,7 +16,7 @@ param(
     [switch] $RunAcceptanceTest,
 
     [Parameter()]
-    [string] $TargetUser
+    [string] $TargetUser = "LaunchAsUser"
 )
 
 Set-StrictMode -Version Latest
@@ -69,9 +69,9 @@ $nativeSourceFiles = @(
         -LiteralPath $nativeSourceRoots `
         -Recurse `
         -File |
-        Where-Object { $_.Extension -in '.cpp', '.h', '.hpp' } |
-        Sort-Object -Property FullName |
-        ForEach-Object -MemberName FullName
+    Where-Object { $_.Extension -in '.cpp', '.h', '.hpp' } |
+    Sort-Object -Property FullName |
+    ForEach-Object -MemberName FullName
 )
 & clang-format -i -- @nativeSourceFiles
 if ($LASTEXITCODE -ne 0) {
@@ -116,8 +116,8 @@ if ($RunAcceptanceTest) {
 
     Write-Host "Running interactive launcher acceptance test as .\$TargetUser"
     & (Join-Path `
-        $projectRoot `
-        'tests\Invoke-LauncherAcceptanceTest.ps1') `
+            $projectRoot `
+            'tests\Invoke-LauncherAcceptanceTest.ps1') `
         -TargetUser $TargetUser `
         -LauncherPath $launcherPath
 }

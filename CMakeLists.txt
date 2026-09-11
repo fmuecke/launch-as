@@ -529,6 +529,9 @@ if(BUILD_TESTING)
     target_include_directories(LauncherBrokerChildIdentityProbeTests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
     )
+    target_link_libraries(LauncherBrokerChildIdentityProbeTests PRIVATE
+        Advapi32
+    )
     configure_launch_as_target(LauncherBrokerChildIdentityProbeTests)
 
     add_test(

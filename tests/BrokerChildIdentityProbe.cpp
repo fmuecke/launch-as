@@ -94,6 +94,61 @@ BOOL CALLBACK FindExpectedWindow(HWND window, LPARAM value)
     return ERROR_SUCCESS;
 }
 
+[[nodiscard]] DWORD TokenContainsSid(std::wstring_view sidText, bool& contains)
+{
+    contains = false;
+    const std::wstring sidValue(sidText);
+    PSID expectedSid = nullptr;
+    if (!ConvertStringSidToSidW(sidValue.c_str(), &expectedSid))
+    {
+        const DWORD convertError = GetLastError();
+        return convertError;
+    }
+
+    HANDLE rawToken = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &rawToken))
+    {
+        const DWORD tokenError = GetLastError();
+        LocalFree(expectedSid);
+        return tokenError;
+    }
+    DWORD bytes = 0;
+    GetTokenInformation(rawToken, TokenGroups, nullptr, 0, &bytes);
+    const DWORD sizeError = GetLastError();
+    if (sizeError != ERROR_INSUFFICIENT_BUFFER || bytes == 0)
+    {
+        CloseHandle(rawToken);
+        LocalFree(expectedSid);
+        return sizeError;
+    }
+    std::vector<BYTE> buffer(bytes);
+    if (!GetTokenInformation(rawToken, TokenGroups, buffer.data(), bytes, &bytes))
+    {
+        const DWORD groupsError = GetLastError();
+        CloseHandle(rawToken);
+        LocalFree(expectedSid);
+        return groupsError;
+    }
+    CloseHandle(rawToken);
+
+    const auto* groups = reinterpret_cast<const TOKEN_GROUPS*>(buffer.data());
+    for (DWORD index = 0; index < groups->GroupCount; ++index)
+    {
+        if (!IsValidSid(groups->Groups[index].Sid))
+        {
+            LocalFree(expectedSid);
+            return ERROR_INVALID_SID;
+        }
+        if (EqualSid(groups->Groups[index].Sid, expectedSid))
+        {
+            contains = true;
+            break;
+        }
+    }
+    LocalFree(expectedSid);
+    return ERROR_SUCCESS;
+}
+
 [[nodiscard]] DWORD GetAccountName(std::wstring& value)
 {
     std::vector<wchar_t> buffer(MaximumUserNameCharacters);
@@ -163,19 +218,22 @@ BOOL CALLBACK FindExpectedWindow(HWND window, LPARAM value)
 
 int wmain(int argumentCount, wchar_t* arguments[])
 {
-    const bool hasOutput = argumentCount == 9;
-    if ((argumentCount != 7 && !hasOutput) || std::wstring_view(arguments[1]) != L"--window" ||
+    const bool hasOutput = argumentCount == 11;
+    if ((argumentCount != 9 && !hasOutput) || std::wstring_view(arguments[1]) != L"--window" ||
         std::wstring_view(arguments[3]) != L"--process" ||
         std::wstring_view(arguments[5]) != L"--exit-code" ||
-        (hasOutput && (std::wstring_view(arguments[7]) != L"--output" ||
-                          std::wstring_view(arguments[8]).empty())))
+        std::wstring_view(arguments[7]) != L"--interactive-logon-sid" ||
+        std::wstring_view(arguments[8]).empty() ||
+        (hasOutput && (std::wstring_view(arguments[9]) != L"--output" ||
+                          std::wstring_view(arguments[10]).empty())))
     {
         std::wcerr << L"Usage: BrokerChildIdentityProbe --window <hwnd> --process <pid> "
-                      L"--exit-code <code> [--output <path>]\n";
+                      L"--exit-code <code> --interactive-logon-sid <sid> [--output <path>]\n";
         return 1;
     }
 
-    const std::wstring_view reportPath = hasOutput ? arguments[8] : L"";
+    const std::wstring_view interactiveLogonSid = arguments[8];
+    const std::wstring_view reportPath = hasOutput ? arguments[10] : L"";
 
     unsigned long long windowValue = 0;
     unsigned long long processValue = 0;
@@ -193,6 +251,14 @@ int wmain(int argumentCount, wchar_t* arguments[])
     if (logonSidError != ERROR_SUCCESS)
     {
         std::wcerr << L"Could not read the child logon SID: " << logonSidError << L"\n";
+        return 1;
+    }
+    bool interactiveLogonSidPresent = false;
+    const DWORD tokenGroupsError =
+        TokenContainsSid(interactiveLogonSid, interactiveLogonSidPresent);
+    if (tokenGroupsError != ERROR_SUCCESS)
+    {
+        std::wcerr << L"Could not inspect the child TokenGroups: " << tokenGroupsError << L"\n";
         return 1;
     }
     std::wstring accountName;
@@ -226,6 +292,8 @@ int wmain(int argumentCount, wchar_t* arguments[])
     printEnvironment(L"LOCALAPPDATA");
     printEnvironment(L"USERPROFILE");
     report << L"logonSid=" << logonSid << L"\n";
+    report << L"interactiveLogonSidPresentInTokenGroups="
+           << (interactiveLogonSidPresent ? L"true" : L"false") << L"\n";
     report << L"interactiveWindowVisible=" << (search.found ? L"true" : L"false") << L"\n";
     report << L"enumWindowsError=" << enumerationError << L"\n";
     report << L"interactiveProcessVmReadDenied="

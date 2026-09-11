@@ -8,6 +8,7 @@
 #include <Windows.h>
 #include <array>
 #include <iostream>
+#include <sddl.h>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -62,7 +63,57 @@ class TemporaryReport final
     return true;
 }
 
-[[nodiscard]] bool RunProbe(const std::wstring& probePath, const TemporaryReport& report)
+[[nodiscard]] bool GetCurrentLogonSid(std::wstring& value)
+{
+    HANDLE rawToken = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &rawToken))
+    {
+        const DWORD tokenError = GetLastError();
+        std::wcerr << L"Could not open the test process token: "
+                   << launch_as::FormatWindowsError(tokenError) << L"\n";
+        return false;
+    }
+    launch_as::UniqueHandle token(rawToken);
+
+    DWORD bytes = 0;
+    GetTokenInformation(token.get(), TokenLogonSid, nullptr, 0, &bytes);
+    const DWORD sizeError = GetLastError();
+    if (sizeError != ERROR_INSUFFICIENT_BUFFER || bytes == 0)
+    {
+        std::wcerr << L"Could not size the test process logon SID: "
+                   << launch_as::FormatWindowsError(sizeError) << L"\n";
+        return false;
+    }
+    std::vector<BYTE> buffer(bytes);
+    if (!GetTokenInformation(token.get(), TokenLogonSid, buffer.data(), bytes, &bytes))
+    {
+        const DWORD sidError = GetLastError();
+        std::wcerr << L"Could not read the test process logon SID: "
+                   << launch_as::FormatWindowsError(sidError) << L"\n";
+        return false;
+    }
+    const auto* groups = reinterpret_cast<const TOKEN_GROUPS*>(buffer.data());
+    if (groups->GroupCount != 1 || !IsValidSid(groups->Groups[0].Sid))
+    {
+        std::wcerr << L"The test process has an invalid logon SID.\n";
+        return false;
+    }
+
+    LPWSTR rawSid = nullptr;
+    if (!ConvertSidToStringSidW(groups->Groups[0].Sid, &rawSid))
+    {
+        const DWORD convertError = GetLastError();
+        std::wcerr << L"Could not format the test process logon SID: "
+                   << launch_as::FormatWindowsError(convertError) << L"\n";
+        return false;
+    }
+    value = rawSid;
+    LocalFree(rawSid);
+    return true;
+}
+
+[[nodiscard]] bool RunProbe(const std::wstring& probePath, const TemporaryReport& report,
+    std::wstring_view interactiveLogonSid)
 {
     const std::vector<std::wstring> arguments {
         L"--window",
@@ -71,6 +122,8 @@ class TemporaryReport final
         std::to_wstring(GetCurrentProcessId()),
         L"--exit-code",
         L"37",
+        L"--interactive-logon-sid",
+        std::wstring(interactiveLogonSid),
         L"--output",
         report.path(),
     };
@@ -167,6 +220,8 @@ class TemporaryReport final
                L"The identity report did not include the account.") &&
            Expect(text.find(L"logonSid=") != std::wstring::npos,
                L"The identity report did not include the logon SID.") &&
+           Expect(text.find(L"interactiveLogonSidPresentInTokenGroups=true") != std::wstring::npos,
+               L"The identity report did not find its own logon SID in TokenGroups.") &&
            Expect(text.find(L"interactiveWindowVisible=") != std::wstring::npos,
                L"The identity report did not include the window result.");
 }
@@ -182,9 +237,10 @@ int wmain(int argumentCount, wchar_t* arguments[])
     }
 
     TemporaryReport report(L"");
-    if (!CreateTemporaryReport(report))
+    std::wstring interactiveLogonSid;
+    if (!CreateTemporaryReport(report) || !GetCurrentLogonSid(interactiveLogonSid))
     {
         return 1;
     }
-    return RunProbe(arguments[1], report) && VerifyReport(report) ? 0 : 1;
+    return RunProbe(arguments[1], report, interactiveLogonSid) && VerifyReport(report) ? 0 : 1;
 }

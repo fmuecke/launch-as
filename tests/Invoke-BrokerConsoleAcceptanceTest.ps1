@@ -50,7 +50,8 @@ $reportPath = Join-Path $reportDirectory 'probe.txt'
 try {
     Write-Host "Launching the identity probe as enrolled account $Account. It must report a different logon SID and not access this interactive process or enumerate its window."
     $output = & $launcher.Path --user $Account --working-directory $workingDirectory -- `
-        $probe.Path --window $windowHandle --process $PID --exit-code $ExpectedExitCode --output $reportPath
+        $probe.Path --window $windowHandle --process $PID --exit-code $ExpectedExitCode `
+        --interactive-logon-sid $interactiveLogonSid --output $reportPath
     $exitCode = $LASTEXITCODE
     $output | Write-Host
     if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
@@ -80,6 +81,9 @@ try {
     }
     if ($childLogonSid -eq $interactiveLogonSid) {
         throw 'The broker child reused the interactive user logon SID.'
+    }
+    if ($outputText -notmatch '(?i)interactiveLogonSidPresentInTokenGroups\s*=\s*false') {
+        throw "The broker child's TokenGroups contain the interactive user logon SID."
     }
     if ($outputText -notmatch '(?i)interactiveWindowVisible\s*=\s*false') {
         throw "The broker child enumerated interactive window $($interactiveWindow.Id)."

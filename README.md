@@ -93,12 +93,17 @@ needed and builds the Ninja Multi-Config Release target by default.
 ```
 
 `-RunTests` runs every non-elevated CTest test. The installed-service acceptance checks remain
-explicit because they require elevation and an enrolled account:
+explicit because they require an installed broker, an enrolled account, and the authorised
+non-elevated interactive session:
 
 ```powershell
+.\build.ps1 -RunAcceptanceTest
 .\tests\Invoke-BrokerConsoleAcceptanceTest.ps1 -Account LaunchAsUser -ExpectedExitCode 37
 .\tests\Invoke-BrokerProbeAcceptanceTest.ps1 -Account LaunchAsUser
 ```
+
+`-RunAcceptanceTest` uses `LaunchAsUser` by default; pass `-TargetUser <account>` to select another
+enrolled account.
 
 The probe confirms a distinct logon SID, no interactive windows, and denied `VM_READ` and
 `TERMINATE` access to the caller's process. These are blast-radius controls, not protection from a

@@ -5,7 +5,10 @@
 [CmdletBinding()]
 param(
     [string]$PipeName = 'launch-as-broker.v1',
-    [string]$Account = 'LaunchAsUser'
+    [string]$Account = 'LaunchAsUser',
+    [string]$AccessProbePath = (
+        Join-Path $PSScriptRoot '..\out\build\Release\LauncherBrokerProcessAccessProbe.exe'
+    )
 )
 
 $ErrorActionPreference = 'Stop'
@@ -135,7 +138,7 @@ try {
         throw "Broker probe failed: $responseText"
     }
     $processId = $response.processId
-    $accessProbe = Resolve-Path (Join-Path $PSScriptRoot '..\out\build\Release\LauncherBrokerProcessAccessProbe.exe')
+    $accessProbe = Resolve-Path -LiteralPath $AccessProbePath
     & $accessProbe.Path $processId
     if ($LASTEXITCODE -ne 0) {
         throw "The broker child exposed caller process access; probe exit code: $LASTEXITCODE"

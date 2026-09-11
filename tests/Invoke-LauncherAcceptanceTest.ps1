@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: 2026 Florian Mücke
 # SPDX-License-Identifier: GPL-3.0-only
 # Project: https://github.com/fmuecke/launch-as
+# Runs the installed broker acceptance suite from its authorised non-elevated interactive session.
+# Build and install the broker and enroll the target account before running this script.
 
 [CmdletBinding()]
 param(
@@ -11,195 +13,54 @@ param(
     [Parameter()]
     [ValidateNotNullOrEmpty()]
     [string] $LauncherPath = (
-        Join-Path $PSScriptRoot `
-            '..\out\build\Release\launch-as.exe'
-    ),
-
-    [Parameter()]
-    [securestring] $Password
+        Join-Path $PSScriptRoot '..\out\build\Release\launch-as.exe'
+    )
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-function Invoke-LauncherStep {
-    param(
-        [Parameter(Mandatory)]
-        [string] $Name,
-
-        [Parameter(Mandatory)]
-        [string[]] $Arguments,
-
-        [Parameter()]
-        [int] $ExpectedExitCode = 0,
-
-        [Parameter()]
-        [ValidateNotNullOrEmpty()]
-        [string] $ExpectedOutput,
-
-        [Parameter()]
-        [AllowEmptyString()]
-        [string] $StandardInput
-    )
-
-    Write-Host "`n[$Name]"
-    $captureOutput = $PSBoundParameters.ContainsKey('ExpectedOutput')
-    if ($PSBoundParameters.ContainsKey('StandardInput')) {
-        $previousOutputEncoding = $OutputEncoding
-        try {
-            $OutputEncoding = [Text.UTF8Encoding]::new($false)
-            if ($captureOutput) {
-                $capturedOutput = @(
-                    $StandardInput | & $script:ResolvedLauncher @Arguments
-                )
-            }
-            else {
-                $StandardInput | & $script:ResolvedLauncher @Arguments
-            }
-        }
-        finally {
-            $OutputEncoding = $previousOutputEncoding
-        }
-    }
-    elseif ($captureOutput) {
-        $capturedOutput = @(& $script:ResolvedLauncher @Arguments)
-    }
-    else {
-        & $script:ResolvedLauncher @Arguments
-    }
-    $exitCode = $LASTEXITCODE
-    if ($captureOutput) {
-        $capturedOutput | ForEach-Object { Write-Host $_ }
-        $outputText = $capturedOutput -join "`n"
-        if (-not $outputText.Contains($ExpectedOutput)) {
-            throw "$Name output did not contain '$ExpectedOutput'."
-        }
-    }
-    if ($exitCode -ne $ExpectedExitCode) {
-        throw (
-            "$Name returned launcher exit code $exitCode; " +
-            "expected $ExpectedExitCode."
-        )
-    }
-}
-
-$script:ResolvedLauncher = [System.IO.Path]::GetFullPath($LauncherPath)
-if (-not (Test-Path -LiteralPath $script:ResolvedLauncher -PathType Leaf)) {
-    throw "Launcher not found: $script:ResolvedLauncher"
+$caller = [Security.Principal.WindowsPrincipal]::new(
+    [Security.Principal.WindowsIdentity]::GetCurrent())
+if ($caller.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    throw 'Run this acceptance test from the authorised non-elevated user session.'
 }
 
 $localUser = Get-LocalUser -Name $TargetUser -ErrorAction Stop
 if (-not $localUser.Enabled) {
-    throw "Local user '$TargetUser' is disabled."
+    throw "Local user '$TargetUser' is disabled. Enroll it before running acceptance tests."
 }
 
 $administrators = Get-LocalGroup -SID 'S-1-5-32-544'
 $isAdministrator = Get-LocalGroupMember -Group $administrators |
-    Where-Object { $_.SID -eq $localUser.SID }
+Where-Object { $_.SID -eq $localUser.SID }
 if ($null -ne $isAdministrator) {
-    throw "Local user '$TargetUser' is an administrator; use a standard user."
+    throw "Local user '$TargetUser' is an administrator; use an enrolled standard user."
 }
 
-$testCredentialTag =
-    'acceptance-' + [Guid]::NewGuid().ToString('N')
-try {
-    Write-Host "Acceptance user: .\$TargetUser"
-    Write-Host 'The credential is stored for the Windows user running this test.'
-    Write-Host "Temporary credential tag: $testCredentialTag"
+$resolvedLauncher = Resolve-Path -LiteralPath $LauncherPath
+$binaryDirectory = Split-Path -Parent $resolvedLauncher.Path
+$identityProbe = Join-Path $binaryDirectory 'LauncherBrokerChildIdentityProbe.exe'
+$accessProbe = Join-Path $binaryDirectory 'LauncherBrokerProcessAccessProbe.exe'
+$consoleAcceptance = Join-Path $PSScriptRoot 'Invoke-BrokerConsoleAcceptanceTest.ps1'
+$brokerProbeAcceptance = Join-Path $PSScriptRoot 'Invoke-BrokerProbeAcceptanceTest.ps1'
 
-    $registrationArguments = @(
-        'register',
-        '--user',
-        $TargetUser,
-        '--test-credential-tag',
-        $testCredentialTag
-    )
-    if ($null -eq $Password) {
-        Write-Host 'Enter the target account password in Windows Credential UI.'
-        Invoke-LauncherStep `
-            -Name 'Register and store credential' `
-            -Arguments $registrationArguments
-    }
-    else {
-        Write-Host 'Registering with the supplied password through standard input.'
-        $plainTextPassword = [pscredential]::new(
-            'target',
-            $Password
-        ).GetNetworkCredential().Password
-        try {
-            $registrationArguments += '--password-stdin'
-            Invoke-LauncherStep `
-                -Name 'Register and store credential' `
-                -Arguments $registrationArguments `
-                -StandardInput $plainTextPassword
-        }
-        finally {
-            $registrationArguments = $null
-            $plainTextPassword = $null
-        }
-    }
+Write-Host "Acceptance account: .\$TargetUser"
+Write-Host 'Running the installed broker console identity and isolation checks.'
+& $consoleAcceptance `
+    -Account $TargetUser `
+    -ExpectedExitCode 37 `
+    -LauncherPath $resolvedLauncher.Path `
+    -ProbePath $identityProbe
 
-    Invoke-LauncherStep -Name 'Read credential-store status' -Arguments @(
-        'status',
-        '--user',
-        $TargetUser,
-        '--test-credential-tag',
-        $testCredentialTag
-    )
+Write-Host 'Running the installed broker process-access and disconnect checks.'
+& $brokerProbeAcceptance `
+    -Account $TargetUser `
+    -AccessProbePath $accessProbe
 
-    $commandPrompt = Join-Path $env:SystemRoot 'System32\cmd.exe'
-    Invoke-LauncherStep -Name 'Retrieve credential and run user process' `
-        -Arguments @(
-            '--user',
-            $TargetUser,
-            '--credential-mode',
-            'stored',
-            '--test-credential-tag',
-            $testCredentialTag,
-            '--working-directory',
-            $env:SystemRoot,
-            '--',
-            $commandPrompt,
-            '/d',
-            '/c',
-            'exit 37'
-        ) `
-        -ExpectedExitCode 37
-
-    Invoke-LauncherStep -Name 'Run target user through ConPTY' `
-        -Arguments @(
-            '--user',
-            $TargetUser,
-            '--credential-mode',
-            'stored',
-            '--test-credential-tag',
-            $testCredentialTag,
-            '--working-directory',
-            $env:SystemRoot,
-            '--terminal',
-            '--',
-            $commandPrompt,
-            '/d',
-            '/c',
-            'echo conpty-user=%USERNAME% & exit 41'
-        ) `
-        -ExpectedExitCode 41 `
-        -ExpectedOutput "conpty-user=$TargetUser"
-
-    Write-Host "`nAcceptance test passed:"
-    Write-Host '  - Credential was written to Windows Credential Manager.'
-    Write-Host '  - Credential was read back by the launcher.'
-    Write-Host '  - Windows authenticated the target user.'
-    Write-Host '  - Direct cmd.exe and the ConPTY helper used the checked target token.'
-    Write-Host '  - cmd.exe returned the checked sentinel code.'
-    Write-Host '  - ConPTY returned target-user output through the current terminal.'
-}
-finally {
-    Invoke-LauncherStep -Name 'Remove tagged test credential' -Arguments @(
-        'forget',
-        '--user',
-        $TargetUser,
-        '--test-credential-tag',
-        $testCredentialTag
-    )
-}
+Write-Host "`nAcceptance tests passed:"
+Write-Host '  - The broker launched the enrolled standard account through an independent logon session.'
+Write-Host '  - The child token did not contain the interactive user logon SID.'
+Write-Host '  - The child could not enumerate the interactive window or open the caller for VM_READ or TERMINATE.'
+Write-Host '  - The target exit code propagated through the console path.'
+Write-Host '  - Disconnecting the broker control pipe terminated the child process tree.'

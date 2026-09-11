@@ -6,7 +6,13 @@
 param(
     [string]$Account = 'LaunchAsUser',
     [ValidateRange(0, [int]::MaxValue)]
-    [int]$ExpectedExitCode = 0
+    [int]$ExpectedExitCode = 0,
+    [string]$LauncherPath = (
+        Join-Path $PSScriptRoot '..\out\build\Release\launch-as.exe'
+    ),
+    [string]$ProbePath = (
+        Join-Path $PSScriptRoot '..\out\build\Release\LauncherBrokerChildIdentityProbe.exe'
+    )
 )
 
 $caller = [System.Security.Principal.WindowsPrincipal]::new(
@@ -15,8 +21,8 @@ if ($caller.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrat
     throw 'Run this acceptance test from the authorised non-elevated user session.'
 }
 
-$launcher = Resolve-Path (Join-Path $PSScriptRoot '..\out\build\Release\launch-as.exe')
-$probe = Resolve-Path (Join-Path $PSScriptRoot '..\out\build\Release\LauncherBrokerChildIdentityProbe.exe')
+$launcher = Resolve-Path -LiteralPath $LauncherPath
+$probe = Resolve-Path -LiteralPath $ProbePath
 $workingDirectory = Join-Path $env:PUBLIC 'Documents'
 if (-not (Test-Path -LiteralPath $workingDirectory -PathType Container)) {
     $workingDirectory = $env:PUBLIC

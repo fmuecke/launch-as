@@ -256,6 +256,12 @@ that caller identity and the SID-pinned enrollment record; the client also requi
 absolute executable and working directory. It deliberately accepts the caller's command, arguments,
 and working directory as a general-purpose alternate-account launch.
 
+An enrolled account may have more than one live console session. Sessions for the same account
+share its account SID, `%USERPROFILE%`, HKCU hive, caches, and any other account-scoped resources;
+they are cooperating siblings, **not** a security boundary from one another. Sessions for different
+enrolled accounts use different account SIDs, profiles, HKCU hives, and logon sessions. Every launch,
+including a sibling launch for the same account, still receives a fresh logon token and logon SID.
+
 A richer profile record that separates launch policy from the Windows account remains a later
 GUI/policy-phase extension:
 
@@ -292,9 +298,17 @@ When that profile policy is implemented, it must validate, default-deny:
 One non-secret enrollment record per profile pins the local account SID under
 `%ProgramData%\launch-as\enrollments\<profileId>.enrollment`. It contains no account password.
 
-- The service accepts one control-pipe session at a time. For each launch it generates a password,
-  sets it with `NetUserSetInfo`, obtains a logon token, and immediately zeroes the mutable buffer.
-  A second launch receives `ERROR_PIPE_BUSY` without waiting for the active session.
+- For each launch the service generates a password, sets it with `NetUserSetInfo`, obtains a logon
+  token, and immediately zeroes the mutable buffer. The reset-through-`LogonUserW` sequence is
+  serialized so another launch cannot replace an account password between reset and logon. No
+  reusable account password is persisted.
+- The broker admits at most **four** starting or active sessions globally and at most **two** for
+  one account. It does not queue excess launches. A launch over either limit receives
+  `session_limit_reached` / `ERROR_BUSY`; named-pipe transport contention is not reported as the
+  semantic limit.
+- The control pipe admits at most **eight** workers total, including authenticated sessions and
+  connections that have not completed request parsing. Further clients remain outside the worker
+  pool and encounter normal named-pipe contention until capacity returns.
 - A service crash closes the kill-on-close job. The next launch generates a new password.
 - Passwords never appear in `std::wstring`, exceptions, logs, command lines, environment, registry,
   or IPC.
@@ -318,36 +332,47 @@ maintenance.
   4. write a SID-pinned enrollment record;
   5. zero the setup password. Operator is never shown it.
   It also sets `PasswordNeverExpires` and `UserMayChangePassword=false`. Additional account hardening is reserved for a future explicit broker-managed-account mode; it must not silently be applied to an adopted account.
-- **`unenroll <profileId>`**: disables the account and deletes the enrollment record. It never
-  deletes the Windows account. The one-session control pipe requires the active session to end
-  before an administrative operation can connect. Both changes require confirmation unless
-  `--force` is supplied.
+- **Current `unenroll <profileId>` behavior:** under the launch gate, disables the account and
+  deletes the enrollment record. It never deletes the Windows account. It does not yet consult the
+  session registry or drain active sessions; `--force` supplies destructive-action confirmation,
+  not a distinct service-side draining mode.
+- **Target lifecycle behavior:** normal `unenroll` returns `profile_busy` while that profile has a
+  starting or active session; forced unenrollment drains only that profile. `unenroll-all`, service
+  replacement, and uninstall drain all sessions. This remains implementation work tracked in §22.
 
 ---
 
 ## 12. Process-creation flow (per accepted launch)
 
-1. authorise (§8, §9).
-2. generate and set a fresh password for the enrolled account.
+1. authorise (§8, §9), reserve a global and per-account session slot, and count it as `starting`.
+2. under the launch gate, generate and set a fresh password for the enrolled account.
 3. `LogonUserW(accountName, ".", pw, LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT, &token)`.
-4. zero the password buffer immediately.
+4. zero the password buffer immediately. The launch gate covers reset through logon and the
+   process-wide privilege changes used for process creation.
 5. validate token: `TokenUser` SID == pinned `accountSid`; `TokenGroups` must **not** contain the local Administrators SID (reuse the client's existing `ProcessHasAccountSid` / `ValidateNonAdministrativeToken` checks, relocated here).
 6. optional `CreateRestrictedToken` (disable non-essential privileges; **keep Medium integrity** — Low IL breaks the MSVC toolchain).
 7. apply the **session adapter** (§7): `console` → noninteractive + ConPTY host; `interactive` → session hop + desktop-DACL grant.
-8. if `profileLoad`: `LoadUserProfile` + `CreateEnvironmentBlock` (note: `LOGON_WITH_PROFILE`-style profile loading can stall for minutes on heavily-used machines — load only when the mode/app needs `HKCU`/`%APPDATA%`; a headless console child often does not).
+8. if `profileLoad`: acquire the account's profile lease, loading the profile on its first session,
+   and create an environment block. Release the lease and unload only after the account's last
+   session has ended. (`LOGON_WITH_PROFILE`-style loading can stall on heavily-used machines.)
 9. prepare only explicitly approved inherited handles (console mode: none from the broker; the host connects pipes by name). All broker handles non-inheritable by default.
 10. `CreateProcessAsUserW(token, exe, …, CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT[ | EXTENDED_STARTUPINFO_PRESENT], env, workingDir, &si, &pi)`.
 11. `ProcessHasAccountSid(pi.hProcess)` re-check; on mismatch, terminate and fail.
 12. create a **Job object**, `AssignProcessToJobObject` before resume.
-13. `ResumeThread`.
+13. `ResumeThread`; mark the reserved session `active` and release the launch gate.
 14. audit; return PID.
-15. teardown: for `interactive`, remove temporary winsta/desktop ACEs, `DestroyEnvironmentBlock`, `UnloadUserProfile`; always close token/thread/process handles and zero any residual secret buffers.
+15. teardown: close only this session's Job, ConPTY, control-pipe, token, thread, and process handles;
+   release its profile lease and session slot; zero any residual secret buffers.
 
 ---
 
 ## 13. Lifecycle / Job object
 
-Per launch, one Job object. Lifetime is **per-profile policy**:
+Per launch, one control connection, broker worker, ConPTY pipe set, console host, and Job object.
+The implemented counter tracks reserved sessions per account and globally. The target lifecycle
+registry adds distinct `starting`, `active`, and `draining` states plus account-scoped profile
+leases. Closing one connection tears down only that session; service stop sets the shared stop
+event, kills every Job, and joins every worker. Lifetime is **per-profile policy**:
 
 - **`control-connection`** (default for `console`): the Job handle's lifetime is tied to the client's **control-pipe connection** with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. Client exit/crash/Ctrl-C → control pipe breaks → broker closes the Job handle → the whole child tree (agent + spawned compilers) dies. This is the dead-man switch, for free. Exit is observed by the client as **data-pipe EOF**; the broker need not relay exit codes.
 - **`detached`** (default for `interactive`/GUI): the GUI app (VS Code) should outlive the launching client. Assign to a Job for tracking/limits but **without** kill-on-close, or hand the Job to a session-scoped owner. Do not kill on client disconnect.
@@ -430,7 +455,14 @@ Credential / authorization:
 - neither an interactive-user process nor an agent process can read the active password via any supported interface;
 - authorised callers may launch arbitrary executables through an enrolled account; this is intentional general-purpose behaviour, not an executable-policy bypass;
 - passwords never appear in logs, command lines, environment, or IPC captures;
-- killing the client exposes no broker resources; a second request fails immediately while a session is active; failed impersonation → immediate rejection;
+- killing one client exposes no broker resources and terminates only its session; failed
+  impersonation → immediate rejection;
+- two overlapping launches for the same account both succeed, have distinct logon SIDs, and share
+  the documented account/profile state; disconnecting either leaves the other running;
+- overlapping launches for different enrolled accounts both succeed and retain distinct account
+  SIDs, profiles, HKCU hives, logon SIDs, control connections, and Jobs;
+- the third starting/active launch for one account and the fifth globally fail immediately with
+  `session_limit_reached` / `ERROR_BUSY`, without disturbing admitted sessions;
 - service restart terminates active jobs; the next launch resets the password. Uninstall leaves no
   service or IPC endpoint.
 
@@ -453,7 +485,7 @@ Credential / authorization:
 ## 19. Phases and implementation order
 
 **Phase 1 — shippable broker + boundary, `console` (ConPTY) mode only:**
-service scaffold (SCM, demand-start, `sc sdset` delegation), single-session named-pipe IPC with impersonation-based auth, multiple enrolled accounts, SID-pinned enrollment records and per-launch passwords, `LogonUser` + `CreateProcessAsUserW`, Job object, Event Log audit. Ship the **`console` (ConPTY) adapter** on the default noninteractive station, reusing the existing `TerminalBridge`/`PseudoConsoleHost` with the child-creation call moved behind the broker (client owns the terminal and the SID-DACL'd data pipes). This is the daily-driver path for console agents and closes **both** surfaces. It is complete only when the §18 console acceptance checks, including the real installed-console run, pass. Run the §6.1 token-graft probe; its current result retains the `LocalSystem` + `CreateProcessAsUserW` baseline. Client: remove all credential/`CreateProcessWithLogonW` logic; relocate the two token-validation checks into the broker.
+service scaffold (SCM, demand-start, `sc sdset` delegation), bounded multi-session named-pipe IPC with impersonation-based auth, multiple enrolled accounts, SID-pinned enrollment records and per-launch passwords, `LogonUser` + `CreateProcessAsUserW`, Job object, Event Log audit. Ship the **`console` (ConPTY) adapter** on the default noninteractive station, reusing the existing `TerminalBridge`/`PseudoConsoleHost` with the child-creation call moved behind the broker (client owns the terminal and the SID-DACL'd data pipes). This is the daily-driver path for console agents and closes **both** surfaces. It is complete only when the §18 console acceptance checks, including the real installed-console run, pass. Run the §6.1 token-graft probe; its current result retains the `LocalSystem` + `CreateProcessAsUserW` baseline. Client: remove all credential/`CreateProcessWithLogonW` logic; relocate the two token-validation checks into the broker.
 
 **Phase n — `interactive` GUI adapter + optional hardened policy:** when GUI support is selected,
 implement the adapter (§7.2): derive and validate the caller's session from the authenticated pipe
@@ -464,8 +496,8 @@ restricted token to a normal-user helper. Test the path in real RDP/Fast User Sw
 not merely the console path, before accepting it for VS Code or Claude Desktop in the caller's
 session (Surface 2 closed, Surface 1 accepted). This later phase can also select multi-profile
 config + admin tooling, optional executable allow-listing, canonical-path/ACL checks, working-dir
-environment policy, credential rotation schedule, config integrity protection, and concurrency/
-rate limits. The §6.1 result does not support a `LocalService` downgrade.
+environment policy, credential rotation schedule, config integrity protection, and rate limits.
+The §6.1 result does not support a `LocalService` downgrade.
 
 **Later GUI hardening phase (postponed):** evaluate a private window station/desktop or a separate session for GUI where feasible; `SetWindowDisplayAffinity`-style mitigations are out of the child's control, so this likely means a dedicated session rather than co-locating on the human's desktop.
 
@@ -480,6 +512,9 @@ rate limits. The §6.1 result does not support a `LocalService` downgrade.
 - `LogonUserW(INTERACTIVE)` + `CreateProcessAsUserW`;
 - **`console` (ConPTY) adapter** as the shippable Phase-1 slice; **`interactive` (GUI) adapter** only in a later selected phase;
 - Job object (kill-on-close for console, detached for GUI);
+- at most four starting/active sessions globally and two per account, with immediate rejection and
+  no queue; every session owns an independent control connection, token/logon SID, ConPTY state,
+  console host, Job, and dead-man switch;
 - Event Log audit; no Windows Hello/master password in v1.
 
 The essential improvement over the current client: the agent runs under an **independent logon session** (Surface 2 closed) and the interactive user and agent can request a launch but can never retrieve the account password.
@@ -509,7 +544,8 @@ pre-broker launcher design; Credential Manager, `register`, `--credential-mode`,
 - The `LocalSystem` service resets a broker-generated password for the SID-pinned enrolled local
   account, calls `LogonUserW(LOGON32_LOGON_INTERACTIVE)`, clears the password buffer, loads the
   user profile/environment, and creates the console host suspended with `CreateProcessAsUserW`.
-  The host is checked not to share the caller's logon SID before it resumes.
+  Password reset through logon and the process-wide privilege changes used by process creation are
+  serialized. The host is checked not to share the caller's logon SID before it resumes.
 - Console terminal I/O remains in the caller's pane through ConPTY. The client creates random,
   one-instance, SID-scoped input, output, and resize named pipes; the broker-launched
   `launch-as-conhost.exe` connects to them and starts the requested command in the
@@ -517,15 +553,22 @@ pre-broker launcher design; Credential Manager, `register`, `--credential-mode`,
   content and can spoof prompts or terminal-supported presentation actions.
 - Each console host is assigned to a kill-on-close Job before it resumes. The control connection
   is the dead-man switch: client disconnect, service stop, or launch failure closes the Job and
-  terminates the host's process tree. A single active control-pipe session is supported; a second
-  launch fails with `ERROR_PIPE_BUSY`.
+  terminates that host's process tree. Bounded parallel sessions are the selected contract: four
+  starting/active sessions globally and two per account, rejected beyond the limit with
+  `session_limit_reached` / `ERROR_BUSY`. The implementation dispatches each accepted control
+  connection to one of at most eight workers and enforces both session limits. Same-account
+  concurrency and independent disconnect teardown are acceptance-tested; account-scoped profile
+  leasing and cross-account lifecycle acceptance remain required before the full contract is
+  complete.
 - After terminal output finishes, the broker reports the launched command's exit code over the
   control connection and `launch-as.exe` returns it unchanged. Launcher-originated failures use
   the documented Win32-style outcomes (notably `1` for general failure and `87` for usage); child
   exit codes may collide with them.
 
-The installed service and interactive console path still need their explicit acceptance tests;
-unit tests and parser checks alone do not demonstrate an installed, cross-session boundary.
+The installed console suite covers identity, `TokenGroups`, window/process access, exit propagation,
+disconnect teardown, same-account overlap, the per-account limit, and released-slot reuse. It must
+be rerun after security-sensitive changes; unit tests and parser checks alone do not demonstrate an
+installed, cross-session boundary.
 
 ---
 
@@ -557,6 +600,7 @@ The current broker implementation is not the decision record for these points. R
 - Make account changes and enrollment-metadata updates recoverable when one step succeeds and a later step fails.
 - Define per-profile caller authorisation and account-selection semantics. The default execution policy remains general-purpose; add profile-specific restrictions only if a future use case requires them.
 - Specify `unenroll-all` preview, confirmation, partial-failure reporting, and audit records.
-- Evaluate bounded parallel sessions only when a concrete use case requires them. That design needs
-  per-account active-generation state, job draining, and explicit sibling-session isolation rules.
+- Complete the selected bounded-session design: account-scoped profile leases, profile-specific and
+  global draining for management operations, cross-account acceptance, and stable audit fields for
+  session admission and rejection.
 - Audit attach, take-over, create, password rotation, disable, unregister, and deletion without recording secrets.

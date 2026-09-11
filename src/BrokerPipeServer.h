@@ -25,10 +25,12 @@ using ConfigurationRequestHandler = DWORD (*)(void* context, const BrokerRequest
     const BrokerCallerIdentity& caller, std::vector<std::wstring>& accounts);
 using LaunchRequestHandler = DWORD (*)(void* context, const BrokerRequest& request,
     const BrokerCallerIdentity& caller, BrokerChildProcess& child);
+using SessionFinishedHandler = void (*)(void* context, const BrokerRequest& request);
 
 void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
     ConfigurationRequestHandler configurationRequestHandler = nullptr,
     void* configurationContext = nullptr, LaunchRequestHandler launchRequestHandler = nullptr,
-    void* launchContext = nullptr);
+    void* launchContext = nullptr, SessionFinishedHandler sessionFinishedHandler = nullptr,
+    void* sessionFinishedContext = nullptr);
 
 } // namespace launch_as::broker

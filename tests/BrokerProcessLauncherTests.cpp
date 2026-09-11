@@ -6,6 +6,7 @@
 
 #include <Windows.h>
 #include <iostream>
+#include <string>
 #include <vector>
 
 namespace
@@ -20,10 +21,90 @@ namespace
     return condition;
 }
 
+[[nodiscard]] bool TestJobTerminationConfirmsActiveProcessZero()
+{
+    launch_as::broker::BrokerChildProcess child;
+    if (!Expect(launch_as::broker::CreateBrokerJob(child) == ERROR_SUCCESS,
+            L"Could not create the broker termination-test job."))
+    {
+        return false;
+    }
+
+    wchar_t systemDirectory[MAX_PATH] {};
+    const UINT directoryLength = GetSystemDirectoryW(systemDirectory, MAX_PATH);
+    if (!Expect(directoryLength > 0 && directoryLength < MAX_PATH,
+            L"Could not resolve the system directory for the broker termination test."))
+    {
+        return false;
+    }
+    const std::wstring executable = std::wstring(systemDirectory) + L"\\cmd.exe";
+    std::wstring commandLine = L"\"" + executable + L"\" /d /c timeout /t 30 /nobreak >nul";
+    STARTUPINFOW startupInfo {};
+    startupInfo.cb = sizeof(startupInfo);
+    PROCESS_INFORMATION processInfo {};
+    if (!Expect(CreateProcessW(executable.c_str(),
+                    commandLine.data(),
+                    nullptr,
+                    nullptr,
+                    FALSE,
+                    CREATE_NO_WINDOW | CREATE_SUSPENDED,
+                    nullptr,
+                    nullptr,
+                    &startupInfo,
+                    &processInfo),
+            L"Could not create the broker termination-test process."))
+    {
+        return false;
+    }
+
+    const bool assigned = AssignProcessToJobObject(child.job(), processInfo.hProcess) != FALSE;
+    HANDLE observedJob = nullptr;
+    const bool duplicated = assigned && DuplicateHandle(GetCurrentProcess(),
+                                            child.job(),
+                                            GetCurrentProcess(),
+                                            &observedJob,
+                                            0,
+                                            FALSE,
+                                            DUPLICATE_SAME_ACCESS) != FALSE;
+    const bool resumed = assigned && ResumeThread(processInfo.hThread) != static_cast<DWORD>(-1);
+    const bool terminated = duplicated && resumed && child.TerminateAndWaitForExit();
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting {};
+    const bool queried = terminated && QueryInformationJobObject(observedJob,
+                                           JobObjectBasicAccountingInformation,
+                                           &accounting,
+                                           sizeof(accounting),
+                                           nullptr) != FALSE;
+    const bool processExited =
+        terminated && WaitForSingleObject(processInfo.hProcess, 5'000) == WAIT_OBJECT_0;
+    if (!terminated)
+    {
+        TerminateProcess(processInfo.hProcess, ERROR_CANCELLED);
+        static_cast<void>(WaitForSingleObject(processInfo.hProcess, INFINITE));
+    }
+    if (observedJob != nullptr)
+    {
+        CloseHandle(observedJob);
+    }
+    CloseHandle(processInfo.hThread);
+    CloseHandle(processInfo.hProcess);
+    return Expect(assigned, L"Could not assign the termination-test process to the broker job.") &&
+           Expect(duplicated, L"Could not retain the termination-test Job for inspection.") &&
+           Expect(resumed, L"Could not resume the broker termination-test process.") &&
+           Expect(terminated, L"The broker could not confirm that its Job process tree exited.") &&
+           Expect(queried && accounting.ActiveProcesses == 0,
+               L"The broker finished teardown while the Job still had active processes.") &&
+           Expect(
+               processExited, L"The process assigned to the terminated broker Job did not exit.");
+}
+
 } // namespace
 
 int wmain()
 {
+    if (!TestJobTerminationConfirmsActiveProcessZero())
+    {
+        return 1;
+    }
     launch_as::broker::BrokerChildProcess child;
     if (!Expect(launch_as::broker::CreateBrokerJob(child) == ERROR_SUCCESS,
             L"Could not create the broker job."))

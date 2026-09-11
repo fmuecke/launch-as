@@ -44,6 +44,7 @@ $identityProbe = Join-Path $binaryDirectory 'LauncherBrokerChildIdentityProbe.ex
 $accessProbe = Join-Path $binaryDirectory 'LauncherBrokerProcessAccessProbe.exe'
 $consoleAcceptance = Join-Path $PSScriptRoot 'Invoke-BrokerConsoleAcceptanceTest.ps1'
 $brokerProbeAcceptance = Join-Path $PSScriptRoot 'Invoke-BrokerProbeAcceptanceTest.ps1'
+$sameAccountConcurrency = Join-Path $PSScriptRoot 'Invoke-BrokerSameAccountConcurrencyTest.ps1'
 
 Write-Host "Acceptance account: .\$TargetUser"
 Write-Host 'Running the installed broker console identity and isolation checks.'
@@ -58,9 +59,13 @@ Write-Host 'Running the installed broker process-access and disconnect checks.'
     -Account $TargetUser `
     -AccessProbePath $accessProbe
 
+Write-Host 'Running two overlapping sessions for the same enrolled account.'
+& $sameAccountConcurrency -Account $TargetUser
+
 Write-Host "`nAcceptance tests passed:"
 Write-Host '  - The broker launched the enrolled standard account through an independent logon session.'
 Write-Host '  - The child token did not contain the interactive user logon SID.'
 Write-Host '  - The child could not enumerate the interactive window or open the caller for VM_READ or TERMINATE.'
 Write-Host '  - The target exit code propagated through the console path.'
 Write-Host '  - Disconnecting the broker control pipe terminated the child process tree.'
+Write-Host '  - Two same-account sessions overlapped and retained independent disconnect lifetimes.'

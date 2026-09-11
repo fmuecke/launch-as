@@ -172,8 +172,13 @@ ExitCode RunBrokerConsole(const AccountIdentity& account, const Options& options
     {
         if (launchError == ERROR_PIPE_BUSY)
         {
-            std::wcerr << L"The broker is already running a session. Wait for it to finish before "
-                          L"starting another.\n";
+            std::wcerr << L"The broker control pipe stayed busy while connecting.\n";
+            return ExitFailure;
+        }
+        if (launchError == ERROR_BUSY)
+        {
+            std::wcerr << L"The broker session limit has been reached. Wait for a session to "
+                          L"finish before starting another.\n";
             return ExitFailure;
         }
         std::wcerr << L"Could not launch the enrolled account through the broker: "

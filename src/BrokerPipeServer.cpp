@@ -296,13 +296,15 @@ void WaitForControlConnectionClose(HANDLE pipe, HANDLE stopEvent)
 
 void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
     ConfigurationRequestHandler configurationRequestHandler, void* configurationContext,
-    LaunchRequestHandler launchRequestHandler, void* launchContext)
+    LaunchRequestHandler launchRequestHandler, void* launchContext,
+    SessionFinishedHandler sessionFinishedHandler, void* sessionFinishedContext)
 {
     std::string message;
     BrokerRequest request;
     BrokerCallerIdentity caller;
     BrokerChildProcess child;
     std::string response;
+    bool sessionStarted = false;
     if (!ReadRequest(pipe, stopEvent, message) || !CaptureCallerIdentity(pipe, caller))
     {
         response = BuildErrorResponse(L"", "caller_identity", ERROR_ACCESS_DENIED);
@@ -355,12 +357,13 @@ void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
             const DWORD launchError = launchRequestHandler(launchContext, request, caller, child);
             if (launchError == ERROR_SUCCESS && child)
             {
+                sessionStarted = true;
                 response = BuildLaunchSuccessResponse(request.requestId, child.processId());
             }
             else
             {
                 response = BuildErrorResponse(request.requestId,
-                    "launch_failed",
+                    launchError == ERROR_BUSY ? "session_limit_reached" : "launch_failed",
                     launchError == ERROR_SUCCESS ? ERROR_INVALID_DATA : launchError);
             }
         }
@@ -369,28 +372,34 @@ void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
     {
         response = BuildErrorResponse(request.requestId, "invalid_request", ERROR_INVALID_DATA);
     }
-    if (WriteResponse(pipe, stopEvent, response) && child &&
-        WaitForBrokerChildExit(pipe, stopEvent, child.process()))
+    bool waitForControlClose = false;
+    if (WriteResponse(pipe, stopEvent, response) && child)
     {
-        DWORD exitCode = 0;
-        bool wroteExitResponse = false;
-        if (GetExitCodeProcess(child.process(), &exitCode))
+        if (WaitForBrokerChildExit(pipe, stopEvent, child.process()))
         {
-            wroteExitResponse = WriteResponse(
-                pipe, stopEvent, BuildLaunchExitResponse(request.requestId, exitCode));
+            DWORD exitCode = 0;
+            if (GetExitCodeProcess(child.process(), &exitCode))
+            {
+                waitForControlClose = WriteResponse(
+                    pipe, stopEvent, BuildLaunchExitResponse(request.requestId, exitCode));
+            }
+            else
+            {
+                const DWORD exitCodeError = GetLastError();
+                waitForControlClose = WriteResponse(pipe,
+                    stopEvent,
+                    BuildErrorResponse(request.requestId, "exit_code_failed", exitCodeError));
+            }
         }
-        else
-        {
-            const DWORD exitCodeError = GetLastError();
-            wroteExitResponse = WriteResponse(pipe,
-                stopEvent,
-                BuildErrorResponse(request.requestId, "exit_code_failed", exitCodeError));
-        }
-        child.Reset();
-        if (wroteExitResponse)
-        {
-            WaitForControlConnectionClose(pipe, stopEvent);
-        }
+    }
+    const bool processTreeExited = child.TerminateAndWaitForExit();
+    if (sessionStarted && processTreeExited && sessionFinishedHandler != nullptr)
+    {
+        sessionFinishedHandler(sessionFinishedContext, request);
+    }
+    if (waitForControlClose)
+    {
+        WaitForControlConnectionClose(pipe, stopEvent);
     }
 }
 

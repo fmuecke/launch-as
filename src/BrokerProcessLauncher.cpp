@@ -216,6 +216,46 @@ DWORD BrokerChildProcess::Resume() noexcept
     return suspendedCount == 1 ? ERROR_SUCCESS : ERROR_INVALID_STATE;
 }
 
+bool BrokerChildProcess::TerminateAndWaitForExit() noexcept
+{
+    if (job_ == nullptr)
+    {
+        Reset();
+        return true;
+    }
+
+    const BOOL terminated = TerminateJobObject(job_, ERROR_CANCELLED);
+    const DWORD terminationError = terminated ? ERROR_SUCCESS : GetLastError();
+    const bool hostExited = process_ == nullptr || WaitForSingleObject(process_,
+                                                       terminated ? INFINITE : 0) == WAIT_OBJECT_0;
+    bool treeExited = hostExited;
+    while (treeExited)
+    {
+        JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting {};
+        if (!QueryInformationJobObject(job_,
+                JobObjectBasicAccountingInformation,
+                &accounting,
+                sizeof(accounting),
+                nullptr))
+        {
+            treeExited = false;
+            break;
+        }
+        if (accounting.ActiveProcesses == 0)
+        {
+            break;
+        }
+        if (terminationError != ERROR_SUCCESS)
+        {
+            treeExited = false;
+            break;
+        }
+        Sleep(10);
+    }
+    Reset();
+    return treeExited;
+}
+
 void BrokerChildProcess::Reset() noexcept
 {
     if (profile_ != nullptr)
@@ -366,7 +406,10 @@ DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,
     if (!AssignProcessToJobObject(child.job_, processInfo.hProcess))
     {
         const DWORD assignmentError = GetLastError();
-        TerminateProcess(processInfo.hProcess, ERROR_CANCELLED);
+        if (TerminateProcess(processInfo.hProcess, ERROR_CANCELLED))
+        {
+            static_cast<void>(WaitForSingleObject(processInfo.hProcess, INFINITE));
+        }
         CloseHandle(processInfo.hThread);
         CloseHandle(processInfo.hProcess);
         UnloadUserProfile(token, profileInfo.hProfile);
@@ -383,7 +426,10 @@ DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,
             DUPLICATE_SAME_ACCESS))
     {
         const DWORD duplicateError = GetLastError();
-        TerminateProcess(processInfo.hProcess, ERROR_CANCELLED);
+        if (TerminateProcess(processInfo.hProcess, ERROR_CANCELLED))
+        {
+            static_cast<void>(WaitForSingleObject(processInfo.hProcess, INFINITE));
+        }
         CloseHandle(processInfo.hThread);
         CloseHandle(processInfo.hProcess);
         UnloadUserProfile(token, profileInfo.hProfile);
@@ -445,7 +491,10 @@ DWORD LaunchFixedBrokerProbe(HANDLE token, BrokerChildProcess& child)
     if (!AssignProcessToJobObject(child.job_, processInfo.hProcess))
     {
         const DWORD assignmentError = GetLastError();
-        TerminateProcess(processInfo.hProcess, ERROR_CANCELLED);
+        if (TerminateProcess(processInfo.hProcess, ERROR_CANCELLED))
+        {
+            static_cast<void>(WaitForSingleObject(processInfo.hProcess, INFINITE));
+        }
         CloseHandle(processInfo.hThread);
         CloseHandle(processInfo.hProcess);
         child.Reset();
@@ -455,7 +504,7 @@ DWORD LaunchFixedBrokerProbe(HANDLE token, BrokerChildProcess& child)
     const DWORD resumeError = child.Resume();
     if (resumeError != ERROR_SUCCESS)
     {
-        child.Reset();
+        static_cast<void>(child.TerminateAndWaitForExit());
     }
     return resumeError;
 }

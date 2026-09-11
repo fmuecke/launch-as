@@ -17,10 +17,15 @@
 
 #include <Windows.h>
 #include <array>
+#include <cwchar>
 #include <iostream>
+#include <map>
+#include <memory>
+#include <mutex>
 #include <sddl.h>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace
@@ -28,6 +33,10 @@ namespace
 
 constexpr wchar_t ServiceName[] = L"launch-as-broker";
 constexpr DWORD BrokerIdleTimeoutMilliseconds = 30'000;
+constexpr std::size_t MaximumConcurrentSessions = 4;
+constexpr std::size_t MaximumConcurrentSessionsPerAccount = 2;
+constexpr DWORD MaximumConcurrentPipeWorkers = 8;
+static_assert(MaximumConcurrentPipeWorkers + 1 <= MAXIMUM_WAIT_OBJECTS);
 
 SERVICE_STATUS_HANDLE serviceStatusHandle = nullptr;
 SERVICE_STATUS serviceStatus {};
@@ -107,6 +116,61 @@ struct BrokerLaunchPolicy
     std::vector<BYTE> authorizedCallerSid;
     launch_as::broker::RegistrationService registration;
     std::wstring controlPipeDacl;
+    std::mutex launchGate;
+
+    [[nodiscard]] bool TryReserveSession(std::wstring_view accountName)
+    {
+        std::lock_guard lock(sessionMutex);
+        if (sessionCount >= MaximumConcurrentSessions)
+        {
+            return false;
+        }
+        const auto existing = sessionsByAccount.find(std::wstring(accountName));
+        if (existing != sessionsByAccount.end() &&
+            existing->second >= MaximumConcurrentSessionsPerAccount)
+        {
+            return false;
+        }
+        ++sessionsByAccount[std::wstring(accountName)];
+        ++sessionCount;
+        return true;
+    }
+
+    void ReleaseSession(std::wstring_view accountName)
+    {
+        std::lock_guard lock(sessionMutex);
+        const auto existing = sessionsByAccount.find(std::wstring(accountName));
+        if (existing == sessionsByAccount.end() || existing->second == 0)
+        {
+            return;
+        }
+        --existing->second;
+        --sessionCount;
+        if (existing->second == 0)
+        {
+            sessionsByAccount.erase(existing);
+        }
+    }
+
+  private:
+    struct AccountNameLess
+    {
+        [[nodiscard]] bool operator()(
+            const std::wstring& left, const std::wstring& right) const noexcept
+        {
+            return _wcsicmp(left.c_str(), right.c_str()) < 0;
+        }
+    };
+
+    std::mutex sessionMutex;
+    std::map<std::wstring, std::size_t, AccountNameLess> sessionsByAccount;
+    std::size_t sessionCount = 0;
+};
+
+struct BrokerPipeWorker
+{
+    launch_as::UniqueHandle completedEvent;
+    std::thread thread;
 };
 
 [[nodiscard]] std::wstring AuditCallerSid(const launch_as::broker::BrokerCallerIdentity& caller)
@@ -176,7 +240,7 @@ void AuditRequest(launch_as::broker::BrokerAuditEvent event, WORD type,
     HANDLE pipe = CreateNamedPipeW(launch_as::broker::ControlPipeName.data(),
         PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
         PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
-        1,
+        MaximumConcurrentPipeWorkers,
         static_cast<DWORD>(launch_as::broker::MaximumMessageBytes),
         static_cast<DWORD>(launch_as::broker::MaximumMessageBytes),
         0,
@@ -189,21 +253,123 @@ DWORD ConfigureProfile(void* context, const launch_as::broker::BrokerRequest& re
 DWORD LaunchProfile(void* context, const launch_as::broker::BrokerRequest& request,
     const launch_as::broker::BrokerCallerIdentity& caller,
     launch_as::broker::BrokerChildProcess& child);
+void FinishProfileSession(void* context, const launch_as::broker::BrokerRequest& request);
+
+void ReapCompletedWorkers(std::vector<std::unique_ptr<BrokerPipeWorker>>& workers)
+{
+    for (auto worker = workers.begin(); worker != workers.end();)
+    {
+        if (WaitForSingleObject((*worker)->completedEvent.get(), 0) != WAIT_OBJECT_0)
+        {
+            ++worker;
+            continue;
+        }
+        if ((*worker)->thread.joinable())
+        {
+            (*worker)->thread.join();
+        }
+        worker = workers.erase(worker);
+    }
+}
+
+void JoinWorkers(std::vector<std::unique_ptr<BrokerPipeWorker>>& workers)
+{
+    for (const auto& worker : workers)
+    {
+        if (worker->thread.joinable())
+        {
+            worker->thread.join();
+        }
+    }
+    workers.clear();
+}
+
+[[nodiscard]] bool DispatchPipeWorker(launch_as::UniqueHandle pipe,
+    BrokerLaunchPolicy& launchPolicy, std::vector<std::unique_ptr<BrokerPipeWorker>>& workers)
+{
+    auto worker = std::make_unique<BrokerPipeWorker>();
+    worker->completedEvent.reset(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+    if (!worker->completedEvent)
+    {
+        return false;
+    }
+    BrokerPipeWorker* workerState = worker.get();
+    try
+    {
+        worker->thread = std::thread(
+            [ownedPipe = std::move(pipe), &launchPolicy, workerState]() mutable
+            {
+                launch_as::broker::ServeControlPipeRequest(ownedPipe.get(),
+                    stopEvent,
+                    ConfigureProfile,
+                    &launchPolicy,
+                    LaunchProfile,
+                    &launchPolicy,
+                    FinishProfileSession,
+                    &launchPolicy);
+                DisconnectNamedPipe(ownedPipe.get());
+                SetEvent(workerState->completedEvent.get());
+            });
+    }
+    catch (...)
+    {
+        return false;
+    }
+    workers.push_back(std::move(worker));
+    return true;
+}
+
+[[nodiscard]] bool WaitForAvailableWorkerSlot(
+    std::vector<std::unique_ptr<BrokerPipeWorker>>& workers)
+{
+    while (workers.size() >= MaximumConcurrentPipeWorkers)
+    {
+        std::vector<HANDLE> waitHandles;
+        waitHandles.reserve(workers.size() + 1);
+        waitHandles.push_back(stopEvent);
+        for (const auto& worker : workers)
+        {
+            waitHandles.push_back(worker->completedEvent.get());
+        }
+        const DWORD wait = WaitForMultipleObjects(
+            static_cast<DWORD>(waitHandles.size()), waitHandles.data(), FALSE, INFINITE);
+        if (wait == WAIT_OBJECT_0)
+        {
+            return false;
+        }
+        if (wait < WAIT_OBJECT_0 + 1 ||
+            wait >= WAIT_OBJECT_0 + static_cast<DWORD>(waitHandles.size()))
+        {
+            SetEvent(stopEvent);
+            return false;
+        }
+        ReapCompletedWorkers(workers);
+    }
+    return true;
+}
 
 void RunPipeServer(BrokerLaunchPolicy& launchPolicy)
 {
+    std::vector<std::unique_ptr<BrokerPipeWorker>> workers;
     while (WaitForSingleObject(stopEvent, 0) == WAIT_TIMEOUT)
     {
+        ReapCompletedWorkers(workers);
+        if (!WaitForAvailableWorkerSlot(workers))
+        {
+            break;
+        }
         launch_as::UniqueHandle pipe(CreateControlPipe(launchPolicy.controlPipeDacl));
         if (!pipe)
         {
-            return;
+            SetEvent(stopEvent);
+            break;
         }
 
         launch_as::UniqueHandle connectEvent(CreateEventW(nullptr, TRUE, FALSE, nullptr));
         if (!connectEvent)
         {
-            return;
+            SetEvent(stopEvent);
+            break;
         }
         OVERLAPPED overlapped {};
         overlapped.hEvent = connectEvent.get();
@@ -221,7 +387,12 @@ void RunPipeServer(BrokerLaunchPolicy& launchPolicy)
                 CancelIoEx(pipe.get(), &overlapped);
                 DWORD ignored = 0;
                 static_cast<void>(GetOverlappedResult(pipe.get(), &overlapped, &ignored, TRUE));
-                return;
+                ReapCompletedWorkers(workers);
+                if (workers.empty())
+                {
+                    return;
+                }
+                continue;
             }
             if (wait != WAIT_OBJECT_0 + 1)
             {
@@ -240,10 +411,13 @@ void RunPipeServer(BrokerLaunchPolicy& launchPolicy)
         {
             continue;
         }
-        launch_as::broker::ServeControlPipeRequest(
-            pipe.get(), stopEvent, ConfigureProfile, &launchPolicy, LaunchProfile, &launchPolicy);
-        DisconnectNamedPipe(pipe.get());
+        if (!DispatchPipeWorker(std::move(pipe), launchPolicy, workers))
+        {
+            SetEvent(stopEvent);
+            break;
+        }
     }
+    JoinWorkers(workers);
 }
 
 DWORD ConfigureProfile(void* context, const launch_as::broker::BrokerRequest& request,
@@ -266,6 +440,7 @@ DWORD ConfigureProfile(void* context, const launch_as::broker::BrokerRequest& re
     {
         return complete(ERROR_ACCESS_DENIED);
     }
+    std::lock_guard launchLock(policy->launchGate);
     if (request.operation == launch_as::broker::RequestOperation::List)
     {
         return complete(policy->registration.List(accounts));
@@ -295,8 +470,15 @@ DWORD LaunchProfile(void* context, const launch_as::broker::BrokerRequest& reque
     const launch_as::broker::BrokerCallerIdentity& caller,
     launch_as::broker::BrokerChildProcess& child)
 {
+    auto* policy = static_cast<BrokerLaunchPolicy*>(context);
+    bool sessionReserved = false;
     const auto complete = [&](DWORD result)
     {
+        if (result != ERROR_SUCCESS && sessionReserved && policy != nullptr)
+        {
+            policy->ReleaseSession(request.profileId);
+            sessionReserved = false;
+        }
         AuditRequest(result == ERROR_SUCCESS ? launch_as::broker::BrokerAuditEvent::LaunchAllowed
                                              : launch_as::broker::BrokerAuditEvent::LaunchRejected,
             result == ERROR_SUCCESS ? EVENTLOG_INFORMATION_TYPE : EVENTLOG_WARNING_TYPE,
@@ -306,7 +488,6 @@ DWORD LaunchProfile(void* context, const launch_as::broker::BrokerRequest& reque
             child.processId());
         return result;
     };
-    auto* policy = static_cast<BrokerLaunchPolicy*>(context);
     if (policy == nullptr ||
         request.operation != launch_as::broker::RequestOperation::ConsoleLaunch ||
         !launch_as::broker::IsAuthorizedCaller(policy->authorizedCallerSid, caller.userSid))
@@ -317,6 +498,12 @@ DWORD LaunchProfile(void* context, const launch_as::broker::BrokerRequest& reque
     {
         return complete(ERROR_INVALID_PARAMETER);
     }
+    if (!policy->TryReserveSession(request.profileId))
+    {
+        return complete(ERROR_BUSY);
+    }
+    sessionReserved = true;
+    std::lock_guard launchLock(policy->launchGate);
     launch_as::broker::SecurePassword password;
     const DWORD passwordError = launch_as::broker::GenerateBrokerPassword(password);
     if (passwordError != ERROR_SUCCESS)
@@ -373,9 +560,18 @@ DWORD LaunchProfile(void* context, const launch_as::broker::BrokerRequest& reque
     const DWORD resumeError = child.Resume();
     if (resumeError != ERROR_SUCCESS)
     {
-        child.Reset();
+        static_cast<void>(child.TerminateAndWaitForExit());
     }
     return complete(resumeError);
+}
+
+void FinishProfileSession(void* context, const launch_as::broker::BrokerRequest& request)
+{
+    auto* policy = static_cast<BrokerLaunchPolicy*>(context);
+    if (policy != nullptr)
+    {
+        policy->ReleaseSession(request.profileId);
+    }
 }
 
 void WINAPI ServiceMain(DWORD, wchar_t**)

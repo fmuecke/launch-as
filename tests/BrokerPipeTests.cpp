@@ -35,7 +35,7 @@ DWORD CaptureLaunchRequest(void* context, const launch_as::broker::BrokerRequest
     capture->request = request;
     capture->callerSid = caller.userSid;
     capture->callerLogonSid = caller.logonSid;
-    return ERROR_NOT_READY;
+    return ERROR_BUSY;
 }
 
 class ServerThread final
@@ -211,8 +211,10 @@ int wmain()
                    Expect(response.find("\"requestId\":\"123e4567-e89b-12d3-a456-426614174000\"") !=
                               std::string::npos,
                        L"The broker did not preserve the request id.") &&
-                   Expect(response.find("\"reasonCode\":\"launch_failed\"") != std::string::npos,
-                       L"The broker did not return the launch callback failure.")
+                   Expect(response.find("\"reasonCode\":\"session_limit_reached\"") !=
+                                  std::string::npos &&
+                              response.find("\"win32Error\":170") != std::string::npos,
+                       L"The broker did not return the stable session-limit response.")
                ? 0
                : 1;
 }

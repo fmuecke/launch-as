@@ -86,7 +86,8 @@ DWORD OpenBrokerControlPipe(HANDLE& pipe)
         lastError = GetLastError();
         if (lastError == ERROR_PIPE_BUSY)
         {
-            return ERROR_PIPE_BUSY;
+            static_cast<void>(WaitNamedPipeW(ControlPipeName.data(), 50));
+            continue;
         }
         if (lastError == ERROR_FILE_NOT_FOUND && !serviceStartAttempted)
         {

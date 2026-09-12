@@ -21,11 +21,13 @@ inline constexpr SHORT MaximumTerminalDimension = 2000;
 enum class InputRelayResult
 {
     EndOfFile,
-    Error
+    Error,
+    Stopped
 };
 
 [[nodiscard]] bool IsUsableHandle(HANDLE handle) noexcept;
-[[nodiscard]] InputRelayResult RelayInput(HANDLE source, HANDLE destination) noexcept;
+[[nodiscard]] InputRelayResult RelayInput(
+    HANDLE source, HANDLE destination, std::stop_token stopToken = std::stop_token {}) noexcept;
 void RelayOutput(
     HANDLE source, HANDLE destination, std::stop_token stopToken = std::stop_token {}) noexcept;
 [[nodiscard]] bool WriteTerminalSize(HANDLE destination, COORD size) noexcept;

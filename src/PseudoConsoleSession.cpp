@@ -157,11 +157,12 @@ bool PseudoConsoleSession::StartRelays(std::wstring& error)
     try
     {
         inputRelay_ = std::jthread(
-            [this, source = parentInput_, failureEvent = inputRelayFailedEvent_.get()]() noexcept
+            [this, source = parentInput_, failureEvent = inputRelayFailedEvent_.get()](
+                std::stop_token stopToken) noexcept
             {
                 // ConPTY treats a closed input endpoint as Ctrl+C, so EOF only stops the relay.
                 // The session owner closes the endpoint after the child has exited or disconnected.
-                if (RelayInput(source, inputWrite_.get()) == InputRelayResult::Error)
+                if (RelayInput(source, inputWrite_.get(), stopToken) == InputRelayResult::Error)
                 {
                     SetEvent(failureEvent);
                 }
@@ -220,8 +221,11 @@ void PseudoConsoleSession::StopRelays() noexcept
     // cannot keep the launcher alive indefinitely.
     WaitForSingleObject(outputCompleteEvent_.get(), OutputDrainGraceMilliseconds);
 
+    inputRelay_.request_stop();
     if (inputRelay_.joinable())
     {
+        // CancelSynchronousIo unblocks a piped stdin read; for a console handle the relay's
+        // own readiness poll (RelayInput) is what observes the stop request instead.
         CancelSynchronousIo(inputRelay_.native_handle());
         inputRelay_.join();
     }

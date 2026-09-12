@@ -731,7 +731,8 @@ if(BUILD_TESTING)
     )
     set_tests_properties(launcher.broker_terminal_bridge PROPERTIES
         LABELS "broker;integration"
-        TIMEOUT 15
+        SKIP_RETURN_CODE 77
+        TIMEOUT 30
     )
 
     add_executable(LauncherTerminalDisconnectTests

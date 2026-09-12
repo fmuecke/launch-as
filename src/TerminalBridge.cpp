@@ -556,10 +556,10 @@ bool TerminalBridge::Start(std::wstring& error)
     try
     {
         inputRelay_ = std::jthread(
-            [this, source = parentInput_]() noexcept
+            [this, source = parentInput_](std::stop_token stopToken) noexcept
             {
                 // Keep ConPTY input open after stdin EOF; closing it injects Ctrl+C into the child.
-                static_cast<void>(RelayInput(source, inputWrite_.get()));
+                static_cast<void>(RelayInput(source, inputWrite_.get(), stopToken));
             });
 
         outputRelay_ = std::jthread(
@@ -622,8 +622,11 @@ void TerminalBridge::Stop() noexcept
     }
     resizeWrite_.reset();
 
+    inputRelay_.request_stop();
     if (inputRelay_.joinable())
     {
+        // CancelSynchronousIo unblocks a piped stdin read; for a console handle the relay's
+        // own readiness poll (RelayInput) is what observes the stop request instead.
         CancelSynchronousIo(inputRelay_.native_handle());
         inputRelay_.join();
     }

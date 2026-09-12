@@ -16,6 +16,9 @@
 namespace
 {
 
+constexpr int SkipNoConsoleAttached = 77;
+constexpr DWORD StopWithConsoleStdinTimeoutMilliseconds = 2'000;
+
 [[nodiscard]] bool Expect(bool condition, const wchar_t* message)
 {
     if (!condition)
@@ -114,6 +117,125 @@ namespace
         L"The broker pseudoconsole host did not finish after receiving its initial resize.");
 }
 
+// C4 regression: CancelSynchronousIo does not unblock a pending console ReadFile, so Stop()
+// used to hang until the next keystroke whenever stdin was a real console handle. Opens CONIN$,
+// runs a real broker terminal session against it, and asserts Stop() still returns promptly with
+// no console input pending.
+[[nodiscard]] bool VerifyStopReturnsPromptlyWithConsoleStdin(
+    const std::filesystem::path& launcherPath, bool& skipped)
+{
+    skipped = false;
+    HANDLE rawConsoleInput = CreateFileW(L"CONIN$",
+        GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        nullptr,
+        OPEN_EXISTING,
+        0,
+        nullptr);
+    if (rawConsoleInput == INVALID_HANDLE_VALUE)
+    {
+        skipped = true;
+        return true;
+    }
+    launch_as::UniqueHandle consoleInput(rawConsoleInput);
+
+    const HANDLE originalStdin = GetStdHandle(STD_INPUT_HANDLE);
+    if (!SetStdHandle(STD_INPUT_HANDLE, consoleInput.get()))
+    {
+        const DWORD overrideError = GetLastError();
+        std::wcerr << L"Could not install the console stdin override: "
+                   << launch_as::FormatWindowsError(overrideError) << L"\n";
+        return false;
+    }
+
+    launch_as::TerminalBridge terminalBridge;
+    launch_as::TerminalPipeNames pipeNames;
+    std::wstring error;
+    const bool initialized = terminalBridge.InitializeForBroker(L"", pipeNames, error);
+    SetStdHandle(STD_INPUT_HANDLE, originalStdin);
+    if (!initialized)
+    {
+        std::wcerr << error << L"\n";
+        return false;
+    }
+
+    std::array<wchar_t, MAX_PATH> systemDirectory {};
+    if (GetSystemDirectoryW(systemDirectory.data(), static_cast<UINT>(systemDirectory.size())) == 0)
+    {
+        std::wcerr << L"Could not find the Windows system directory.\n";
+        return false;
+    }
+    const std::filesystem::path commandProcessor =
+        std::filesystem::path(systemDirectory.data()) / L"cmd.exe";
+    const std::vector<std::wstring> arguments {
+        L"--internal-pseudoconsole-host",
+        L"--size",
+        L"120",
+        L"30",
+        L"--pipe-in",
+        pipeNames.input,
+        L"--pipe-out",
+        pipeNames.output,
+        L"--pipe-resize",
+        pipeNames.resize,
+        L"--",
+        commandProcessor.native(),
+        L"/d",
+        L"/c",
+        L"exit 0",
+    };
+    std::wstring commandLine = launch_as::BuildWindowsCommandLine(launcherPath.native(), arguments);
+    std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
+    mutableCommandLine.push_back(L'\0');
+
+    STARTUPINFOW startupInformation {};
+    startupInformation.cb = sizeof(startupInformation);
+    PROCESS_INFORMATION processInformation {};
+    if (!CreateProcessW(launcherPath.c_str(),
+            mutableCommandLine.data(),
+            nullptr,
+            nullptr,
+            FALSE,
+            CREATE_NO_WINDOW,
+            nullptr,
+            nullptr,
+            &startupInformation,
+            &processInformation))
+    {
+        const DWORD processError = GetLastError();
+        std::wcerr << L"Could not start the broker pseudoconsole host: "
+                   << launch_as::FormatWindowsError(processError) << L"\n";
+        return false;
+    }
+    launch_as::UniqueHandle process(processInformation.hProcess);
+    launch_as::UniqueHandle thread(processInformation.hThread);
+
+    if (!terminalBridge.ConnectBrokerChild(error))
+    {
+        TerminateProcess(process.get(), 1);
+        WaitForSingleObject(process.get(), 5'000);
+        std::wcerr << error << L"\n";
+        return false;
+    }
+    if (!terminalBridge.Start(error))
+    {
+        TerminateProcess(process.get(), 1);
+        WaitForSingleObject(process.get(), 5'000);
+        std::wcerr << error << L"\n";
+        return false;
+    }
+
+    const ULONGLONG started = GetTickCount64();
+    terminalBridge.Stop();
+    const ULONGLONG elapsed = GetTickCount64() - started;
+
+    TerminateProcess(process.get(), 1);
+    WaitForSingleObject(process.get(), 5'000);
+
+    return Expect(elapsed < StopWithConsoleStdinTimeoutMilliseconds,
+        L"TerminalBridge::Stop() did not return promptly with console stdin.");
+}
+
 } // namespace
 
 int wmain(int argumentCount, wchar_t* arguments[])
@@ -141,12 +263,23 @@ int wmain(int argumentCount, wchar_t* arguments[])
     const ULONGLONG started = GetTickCount64();
     const bool connected = terminalBridge.ConnectBrokerChild(error);
     const ULONGLONG elapsed = GetTickCount64() - started;
+
+    bool skipConsoleStdinTest = false;
+    const bool consoleStdinTestPassed =
+        VerifyStopReturnsPromptlyWithConsoleStdin(launcherPath, skipConsoleStdinTest);
+    if (skipConsoleStdinTest)
+    {
+        std::wcout << L"Skipped: no console is attached to exercise the console-stdin input "
+                      L"relay.\n";
+        return SkipNoConsoleAttached;
+    }
+
     return Expect(!connected, L"The broker terminal bridge accepted an absent host.") &&
                    Expect(elapsed < 7'000,
                        L"The broker terminal bridge did not time out when the host was absent.") &&
                    Expect(error.find(L"Timed out") != std::wstring::npos,
                        L"The broker terminal bridge did not report its connection timeout.") &&
-                   VerifyHostWaitsForInitialResize(launcherPath)
+                   VerifyHostWaitsForInitialResize(launcherPath) && consoleStdinTestPassed
                ? 0
                : 1;
 }

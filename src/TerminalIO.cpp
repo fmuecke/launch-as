@@ -46,6 +46,17 @@ namespace
     return true;
 }
 
+constexpr DWORD ConsoleReadPollMilliseconds = 100;
+
+// A console input handle is signaled whenever it has an unread input record; unlike a
+// pipe or file handle, waiting on it before reading lets a stop request break the loop
+// promptly instead of leaving the wait itself uninterruptible.
+[[nodiscard]] bool IsConsoleHandle(HANDLE handle) noexcept
+{
+    DWORD mode = 0;
+    return GetConsoleMode(handle, &mode) != FALSE;
+}
+
 } // namespace
 
 bool IsUsableHandle(HANDLE handle) noexcept
@@ -53,11 +64,38 @@ bool IsUsableHandle(HANDLE handle) noexcept
     return handle != nullptr && handle != INVALID_HANDLE_VALUE;
 }
 
-InputRelayResult RelayInput(HANDLE source, HANDLE destination) noexcept
+InputRelayResult RelayInput(HANDLE source, HANDLE destination, std::stop_token stopToken) noexcept
 {
+    const bool isConsole = IsConsoleHandle(source);
     std::array<std::byte, RelayBufferBytes> buffer {};
     for (;;)
     {
+        if (isConsole)
+        {
+            // CancelSynchronousIo does not unblock a pending console ReadFile — a documented
+            // Windows limitation — so poll readiness instead of reading straight through. This
+            // is what lets a caller's Stop() end the relay instead of hanging until the next
+            // keystroke.
+            bool ready = false;
+            while (!stopToken.stop_requested())
+            {
+                const DWORD waitResult = WaitForSingleObject(source, ConsoleReadPollMilliseconds);
+                if (waitResult == WAIT_OBJECT_0)
+                {
+                    ready = true;
+                    break;
+                }
+                if (waitResult != WAIT_TIMEOUT)
+                {
+                    return InputRelayResult::Error;
+                }
+            }
+            if (!ready)
+            {
+                return InputRelayResult::Stopped;
+            }
+        }
+
         DWORD bytesRead = 0;
         if (!ReadFile(
                 source, buffer.data(), static_cast<DWORD>(buffer.size()), &bytesRead, nullptr))

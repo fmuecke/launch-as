@@ -5,7 +5,9 @@
 [CmdletBinding()]
 param(
     [Parameter()]
-    [ValidateNotNullOrEmpty()]
+    # This value is embedded in the elevated relaunch command line; reject quoting/control
+    # characters and keep it aligned with the broker's local-account-name grammar.
+    [ValidatePattern('^[^\\/\[\]:;|=,+*?<>"\x00-\x1F]{1,20}$')]
     [string] $DefaultAccount = 'LaunchAsUser',
 
     [Parameter()]
@@ -32,12 +34,16 @@ function Confirm-Action {
 }
 
 if (-not (Test-Administrator)) {
-    $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath,
-        '-DefaultAccount', $DefaultAccount)
+    $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" " +
+        "-DefaultAccount `"$DefaultAccount`""
     if ($Force) {
-        $arguments += '-Force'
+        $arguments += ' -Force'
     }
-    $process = Start-Process -FilePath (Get-Command pwsh -ErrorAction Stop).Source `
+    $powerShell = Join-Path $PSHOME 'pwsh.exe'
+    if (-not (Test-Path -LiteralPath $powerShell -PathType Leaf)) {
+        throw "PowerShell 7 executable not found at $powerShell."
+    }
+    $process = Start-Process -FilePath $powerShell `
         -ArgumentList $arguments -Verb RunAs -Wait -PassThru
     $exitCode = $process.ExitCode
     if ($exitCode -eq 0) {

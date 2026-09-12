@@ -581,7 +581,7 @@ DWORD LaunchProfile(void* context, const launch_as::broker::BrokerRequest& reque
         launch_as::broker::ValidateChildLogonSid(child.process(), caller.logonSid);
     if (validationError != ERROR_SUCCESS)
     {
-        child.Reset();
+        static_cast<void>(child.TerminateAndWaitForExit());
         return complete(validationError);
     }
     const DWORD resumeError = child.Resume();

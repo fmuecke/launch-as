@@ -28,9 +28,9 @@ class BrokerChildProcess final
     [[nodiscard]] explicit operator bool() const noexcept;
     [[nodiscard]] DWORD Resume() noexcept;
     [[nodiscard]] bool TerminateAndWaitForExit() noexcept;
-    void Reset() noexcept;
 
   private:
+    void Reset() noexcept;
     void SetProcess(HANDLE process, HANDLE thread) noexcept;
     void SetUserProfile(HANDLE token, HANDLE profile) noexcept;
 

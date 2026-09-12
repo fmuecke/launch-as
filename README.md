@@ -90,11 +90,14 @@ needed and builds the Ninja Multi-Config Release target by default.
 .\build.ps1
 .\build.ps1 -Configuration Debug
 .\build.ps1 -RunTests
+.\build.ps1 -RunAllTests
 ```
 
-`-RunTests` runs every non-elevated CTest test. The installed-service acceptance checks remain
-explicit because they require an installed broker, an enrolled account, and the authorised
-non-elevated interactive session:
+`-RunTests` runs every non-elevated CTest test. `-RunAllTests` adds the tests labelled `elevated`:
+when necessary, it asks for UAC approval and runs only that subset in an elevated child process.
+That child window stays open after the elevated tests complete so their output can be inspected.
+The installed-service acceptance checks remain explicit because they require an installed broker,
+an enrolled account, and the authorised non-elevated interactive session:
 
 ```powershell
 .\build.ps1 -RunAcceptanceTest

@@ -13,6 +13,15 @@ param(
     [switch] $RunTests,
 
     [Parameter()]
+    [switch] $RunAllTests,
+
+    [Parameter()]
+    [switch] $RunElevatedTests,
+
+    [Parameter()]
+    [switch] $WaitForElevatedTestResults,
+
+    [Parameter()]
     [switch] $RunAcceptanceTest,
 
     [Parameter()]
@@ -27,6 +36,80 @@ $buildDirectory = Join-Path $projectRoot 'out\build'
 $launcherPath = Join-Path `
     $buildDirectory `
     "$Configuration\launch-as.exe"
+
+function Test-IsAdministrator {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Invoke-CtestTests {
+    param(
+        [Parameter(Mandatory)]
+        [string] $Description,
+
+        [Parameter(Mandatory)]
+        [string] $LabelOption,
+
+        [Parameter(Mandatory)]
+        [string] $LabelValue
+    )
+
+    Write-Host "Running $Description CTest tests ($Configuration)"
+    & ctest `
+        --test-dir $buildDirectory `
+        -C $Configuration `
+        $LabelOption $LabelValue `
+        --output-on-failure
+    if ($LASTEXITCODE -ne 0) {
+        throw "CTest failed with exit code $LASTEXITCODE."
+    }
+}
+
+function Invoke-ElevatedCtestTests {
+    if (Test-IsAdministrator) {
+        Invoke-CtestTests -Description 'all elevated' -LabelOption '--label-regex' -LabelValue 'elevated'
+        return
+    }
+
+    Write-Host 'Requesting UAC approval to run elevated CTest tests'
+    $hostExecutable = (Get-Process -Id $PID).Path
+    if ([string]::IsNullOrWhiteSpace($hostExecutable)) {
+        throw 'Could not determine the current PowerShell executable for the elevated test run.'
+    }
+    $elevatedArguments = "-NoProfile -File `"$PSCommandPath`" -Configuration $Configuration -RunElevatedTests -WaitForElevatedTestResults"
+    try {
+        $process = Start-Process -FilePath $hostExecutable -ArgumentList $elevatedArguments -Verb RunAs -Wait -PassThru -WorkingDirectory $projectRoot
+    }
+    catch {
+        throw "Could not start elevated CTest tests: $($_.Exception.Message)"
+    }
+    if ($process.ExitCode -ne 0) {
+        throw "Elevated CTest tests failed with exit code $($process.ExitCode)."
+    }
+}
+
+if ($RunElevatedTests) {
+    if (-not (Test-IsAdministrator)) {
+        throw '-RunElevatedTests must be run from an elevated PowerShell process.'
+    }
+    $elevatedTestExitCode = 0
+    try {
+        Invoke-CtestTests -Description 'all elevated' -LabelOption '--label-regex' -LabelValue 'elevated'
+    }
+    catch {
+        Write-Host $_.Exception.Message -ForegroundColor Red
+        $elevatedTestExitCode = 1
+    }
+    if ($WaitForElevatedTestResults) {
+        Write-Host
+        Read-Host 'Elevated tests are complete. Press Enter to close this window.'
+    }
+    if ($elevatedTestExitCode -ne 0) {
+        exit $elevatedTestExitCode
+    }
+    return
+}
 
 $ninjaGenerator = 'Ninja Multi-Config'
 if ($null -eq (Get-Command ninja -ErrorAction SilentlyContinue)) {
@@ -103,16 +186,12 @@ if ($LASTEXITCODE -ne 0) {
     throw "CMake build failed with exit code $LASTEXITCODE."
 }
 
-if ($RunTests) {
-    Write-Host "Running all non-elevated CTest tests ($Configuration)"
-    & ctest `
-        --test-dir $buildDirectory `
-        -C $Configuration `
-        --label-exclude 'elevated|interactive' `
-        --output-on-failure
-    if ($LASTEXITCODE -ne 0) {
-        throw "CTest failed with exit code $LASTEXITCODE."
-    }
+if ($RunTests -or $RunAllTests) {
+    Invoke-CtestTests -Description 'all non-elevated' -LabelOption '--label-exclude' -LabelValue 'elevated|interactive'
+}
+
+if ($RunAllTests) {
+    Invoke-ElevatedCtestTests
 }
 
 if ($RunAcceptanceTest) {

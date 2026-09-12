@@ -397,6 +397,20 @@ if(BUILD_TESTING)
         LABELS "setup;unit"
     )
 
+    add_test(
+        NAME launcher.build_all_tests_contract
+        COMMAND
+            pwsh
+            -NoProfile
+            -File
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Test-BuildAllTestsContract.ps1"
+            -Path
+            "${CMAKE_CURRENT_SOURCE_DIR}/build.ps1"
+    )
+    set_tests_properties(launcher.build_all_tests_contract PROPERTIES
+        LABELS "build;unit"
+    )
+
     add_executable(LauncherBrokerPasswordTests
         tests/BrokerPasswordTests.cpp
         src/BrokerPassword.cpp
@@ -531,7 +545,7 @@ if(BUILD_TESTING)
         COMMAND "$<TARGET_FILE:LauncherBrokerAuditTests>"
     )
     set_tests_properties(launcher.broker_audit PROPERTIES
-        LABELS "broker;integration"
+        LABELS "broker;elevated;integration"
     )
 
     add_executable(LauncherBrokerProcessAccessProbe

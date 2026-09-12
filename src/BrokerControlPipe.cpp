@@ -72,7 +72,7 @@ DWORD OpenBrokerControlPipe(HANDLE& pipe)
     do
     {
         HANDLE rawPipe = CreateFileW(ControlPipeName.data(),
-            GENERIC_READ | GENERIC_WRITE,
+            ControlPipeClientAccess,
             0,
             nullptr,
             OPEN_EXISTING,

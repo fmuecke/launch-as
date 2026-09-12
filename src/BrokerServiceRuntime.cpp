@@ -6,6 +6,7 @@
 
 #include "BrokerAudit.h"
 #include "BrokerCallerPolicy.h"
+#include "BrokerControlPipe.h"
 #include "BrokerDataDirectory.h"
 #include "BrokerLogonToken.h"
 #include "BrokerPassword.h"
@@ -38,6 +39,7 @@ constexpr std::size_t MaximumConcurrentSessions = 4;
 constexpr std::size_t MaximumConcurrentSessionsPerAccount = 2;
 constexpr DWORD MaximumConcurrentPipeWorkers = 8;
 static_assert(MaximumConcurrentPipeWorkers + 1 <= MAXIMUM_WAIT_OBJECTS);
+static_assert(launch_as::broker::ControlPipeClientAccess == 0x0012008B);
 
 SERVICE_STATUS_HANDLE serviceStatusHandle = nullptr;
 SERVICE_STATUS serviceStatus {};
@@ -218,7 +220,7 @@ void AuditRequest(launch_as::broker::BrokerAuditEvent event, WORD type,
             const DWORD sidError = GetLastError();
             return sidError;
         }
-        dacl += L"(A;;GRGW;;;";
+        dacl += L"(A;;0x0012008B;;;";
         dacl += callerSid.get();
         dacl += L")";
     }

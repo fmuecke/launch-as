@@ -305,7 +305,9 @@ class JsonReader final
 {
     constexpr std::wstring_view invalidCharacters = L"\\/[]:;|=,+*?<>\"";
     return !value.empty() && value.size() <= UNLEN &&
-           value.find_first_of(invalidCharacters) == std::wstring::npos;
+           value.find_first_of(invalidCharacters) == std::wstring::npos &&
+           std::all_of(
+               value.begin(), value.end(), [](wchar_t character) { return character >= L' '; });
 }
 
 [[nodiscard]] bool IsConsolePipeName(const std::wstring& value)

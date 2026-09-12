@@ -109,6 +109,16 @@ int wmain()
         return 1;
     }
 
+    std::string controlCharacterProfile(ValidRequest);
+    controlCharacterProfile.replace(
+        controlCharacterProfile.find("LaunchAsUser"), 12, "LaunchAsUser\\n");
+    if (!Expect(launch_as::broker::ParseBrokerRequest(controlCharacterProfile, request) ==
+                    launch_as::broker::ParseResult::InvalidRequest,
+            L"A profile id containing a control character was accepted."))
+    {
+        return 1;
+    }
+
     if (!Expect(launch_as::broker::ParseBrokerRequest(ListRequest, request) ==
                         launch_as::broker::ParseResult::Success &&
                     request.operation == launch_as::broker::RequestOperation::List,

@@ -5,10 +5,10 @@
 #include "BrokerDataDirectory.h"
 
 #include <Aclapi.h>
+#include <ShlObj.h>
 #include <array>
 #include <sddl.h>
 #include <string>
-#include <vector>
 
 namespace launch_as::broker
 {
@@ -143,25 +143,28 @@ DWORD CreateSecureDirectory(std::wstring_view path)
     return ERROR_SUCCESS;
 }
 
-DWORD GetBrokerDataDirectory(std::wstring& directory)
+DWORD GetBrokerDataDirectoryPath(std::wstring& directory)
 {
     directory.clear();
-    const DWORD requiredCharacters = GetEnvironmentVariableW(L"ProgramData", nullptr, 0);
-    if (requiredCharacters == 0)
+    PWSTR programData = nullptr;
+    const HRESULT result =
+        SHGetKnownFolderPath(FOLDERID_ProgramData, KF_FLAG_DEFAULT, nullptr, &programData);
+    if (FAILED(result))
     {
-        const DWORD environmentError = GetLastError();
-        return environmentError;
+        return HRESULT_CODE(result) == ERROR_SUCCESS ? ERROR_GEN_FAILURE : HRESULT_CODE(result);
     }
-    std::vector<wchar_t> programData(requiredCharacters);
-    const DWORD copiedCharacters = GetEnvironmentVariableW(
-        L"ProgramData", programData.data(), static_cast<DWORD>(programData.size()));
-    if (copiedCharacters == 0 || copiedCharacters >= programData.size())
+    directory = std::wstring(programData) + L"\\launch-as";
+    CoTaskMemFree(programData);
+    return ERROR_SUCCESS;
+}
+
+DWORD GetBrokerDataDirectory(std::wstring& directory)
+{
+    const DWORD directoryPathError = GetBrokerDataDirectoryPath(directory);
+    if (directoryPathError != ERROR_SUCCESS)
     {
-        const DWORD environmentError = GetLastError();
-        return environmentError == ERROR_SUCCESS ? ERROR_ENVVAR_NOT_FOUND : environmentError;
+        return directoryPathError;
     }
-    const std::wstring root(programData.data(), copiedCharacters);
-    directory = root + L"\\launch-as";
     const DWORD brokerDirectoryError = CreateSecureDirectory(directory);
     if (brokerDirectoryError != ERROR_SUCCESS)
     {

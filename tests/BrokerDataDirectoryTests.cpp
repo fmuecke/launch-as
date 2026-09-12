@@ -5,6 +5,7 @@
 #include "BrokerDataDirectory.h"
 
 #include <Aclapi.h>
+#include <ShlObj.h>
 #include <Windows.h>
 #include <array>
 #include <iostream>
@@ -47,6 +48,42 @@ class TemporaryDirectory final
   private:
     std::wstring path_;
     bool created_ = false;
+};
+
+class ScopedEnvironmentVariable final
+{
+  public:
+    explicit ScopedEnvironmentVariable(const wchar_t* name) : name_(name)
+    {
+        const DWORD requiredCharacters = GetEnvironmentVariableW(name_, nullptr, 0);
+        if (requiredCharacters == 0)
+        {
+            wasPresent_ = GetLastError() != ERROR_ENVVAR_NOT_FOUND;
+            return;
+        }
+        originalValue_.resize(requiredCharacters);
+        if (GetEnvironmentVariableW(
+                name_, originalValue_.data(), static_cast<DWORD>(originalValue_.size())) == 0)
+        {
+            originalValue_.clear();
+            return;
+        }
+        originalValue_.pop_back();
+        wasPresent_ = true;
+    }
+
+    ~ScopedEnvironmentVariable()
+    {
+        SetEnvironmentVariableW(name_, wasPresent_ ? originalValue_.c_str() : nullptr);
+    }
+
+    ScopedEnvironmentVariable(const ScopedEnvironmentVariable&) = delete;
+    ScopedEnvironmentVariable& operator=(const ScopedEnvironmentVariable&) = delete;
+
+  private:
+    const wchar_t* name_;
+    std::wstring originalValue_;
+    bool wasPresent_ = false;
 };
 
 [[nodiscard]] bool Expect(bool condition, const wchar_t* message)
@@ -186,5 +223,25 @@ int wmain()
             L"CreateSecureDirectory followed a reparse point instead of rejecting it.");
     RemoveDirectoryW(junctionDirectory.c_str());
 
-    return freshCreationOk && untrustedOwnerRejected && reparsePointRejected ? 0 : 1;
+    PWSTR programData = nullptr;
+    const HRESULT knownFolderResult =
+        SHGetKnownFolderPath(FOLDERID_ProgramData, KF_FLAG_DEFAULT, nullptr, &programData);
+    const std::wstring expectedBrokerDirectory =
+        SUCCEEDED(knownFolderResult) ? std::wstring(programData) + L"\\launch-as" : L"";
+    CoTaskMemFree(programData);
+    ScopedEnvironmentVariable programDataOverride(L"ProgramData");
+    const std::wstring poisonedProgramData = directory.path() + L"\\poisoned-program-data";
+    const bool environmentOverridden =
+        SetEnvironmentVariableW(L"ProgramData", poisonedProgramData.c_str()) != FALSE;
+    std::wstring resolvedBrokerDirectory;
+    const bool knownFolderUsed =
+        SUCCEEDED(knownFolderResult) && environmentOverridden &&
+        launch_as::broker::GetBrokerDataDirectoryPath(resolvedBrokerDirectory) == ERROR_SUCCESS &&
+        resolvedBrokerDirectory == expectedBrokerDirectory;
+
+    return freshCreationOk && untrustedOwnerRejected && reparsePointRejected &&
+                   Expect(knownFolderUsed,
+                       L"Broker data directory followed the ProgramData environment variable.")
+               ? 0
+               : 1;
 }

@@ -510,6 +510,8 @@ if(BUILD_TESTING)
     )
     target_link_libraries(LauncherBrokerDataDirectoryTests PRIVATE
         Advapi32
+        Ole32
+        Shell32
     )
     configure_launch_as_target(LauncherBrokerDataDirectoryTests)
 

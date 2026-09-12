@@ -12,6 +12,7 @@ namespace launch_as::broker
 {
 
 [[nodiscard]] DWORD CreateSecureDirectory(std::wstring_view path);
+[[nodiscard]] DWORD GetBrokerDataDirectoryPath(std::wstring& directory);
 [[nodiscard]] DWORD GetBrokerDataDirectory(std::wstring& directory);
 [[nodiscard]] DWORD GetBrokerEnrollmentDirectory(std::wstring& directory);
 

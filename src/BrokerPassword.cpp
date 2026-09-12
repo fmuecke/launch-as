@@ -94,6 +94,7 @@ bool SecurePassword::Assign(const BYTE* bytes, DWORD byteCount)
     try
     {
         length_ = byteCount / sizeof(wchar_t);
+        characters_.reserve(length_ + 1);
         characters_.assign(first, first + length_);
         characters_.push_back(L'\0');
     }

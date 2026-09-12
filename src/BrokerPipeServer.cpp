@@ -294,6 +294,16 @@ void WaitForControlConnectionClose(HANDLE pipe, HANDLE stopEvent)
 
 } // namespace
 
+void FinishBrokerSession(SessionFinishedHandler sessionFinishedHandler,
+    void* sessionFinishedContext, const BrokerRequest& request, bool sessionStarted,
+    bool processTreeExited)
+{
+    if (sessionStarted && sessionFinishedHandler != nullptr)
+    {
+        sessionFinishedHandler(sessionFinishedContext, request, processTreeExited);
+    }
+}
+
 void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
     ConfigurationRequestHandler configurationRequestHandler, void* configurationContext,
     LaunchRequestHandler launchRequestHandler, void* launchContext,
@@ -398,10 +408,8 @@ void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
         }
     }
     const bool processTreeExited = child.TerminateAndWaitForExit();
-    if (sessionStarted && processTreeExited && sessionFinishedHandler != nullptr)
-    {
-        sessionFinishedHandler(sessionFinishedContext, request);
-    }
+    FinishBrokerSession(
+        sessionFinishedHandler, sessionFinishedContext, request, sessionStarted, processTreeExited);
     if (waitForControlClose)
     {
         WaitForControlConnectionClose(pipe, stopEvent);

@@ -15,6 +15,8 @@
 namespace
 {
 
+[[nodiscard]] bool Expect(bool condition, const wchar_t* message);
+
 struct LaunchCapture
 {
     bool invoked = false;
@@ -22,6 +24,39 @@ struct LaunchCapture
     std::vector<BYTE> callerSid;
     std::vector<BYTE> callerLogonSid;
 };
+
+struct SessionFinishCapture
+{
+    bool invoked = false;
+    bool processTreeExited = true;
+    std::wstring profileId;
+};
+
+void CaptureSessionFinished(
+    void* context, const launch_as::broker::BrokerRequest& request, bool processTreeExited)
+{
+    auto* capture = static_cast<SessionFinishCapture*>(context);
+    if (capture != nullptr)
+    {
+        capture->invoked = true;
+        capture->processTreeExited = processTreeExited;
+        capture->profileId = request.profileId;
+    }
+}
+
+[[nodiscard]] bool TestUnconfirmedTeardownFinishesSession()
+{
+    launch_as::broker::BrokerRequest request;
+    request.profileId = L"LaunchAsUser";
+    SessionFinishCapture capture;
+    launch_as::broker::FinishBrokerSession(CaptureSessionFinished, &capture, request, true, false);
+    return Expect(capture.invoked,
+               L"The broker did not finish a session after an unconfirmed teardown.") &&
+           Expect(!capture.processTreeExited,
+               L"The broker did not report the unconfirmed process tree to the session handler.") &&
+           Expect(capture.profileId == request.profileId,
+               L"The broker changed the profile while finishing a session.");
+}
 
 DWORD CaptureLaunchRequest(void* context, const launch_as::broker::BrokerRequest& request,
     const launch_as::broker::BrokerCallerIdentity& caller, launch_as::broker::BrokerChildProcess&)
@@ -194,7 +229,7 @@ int wmain()
         return 1;
     }
     response.resize(bytesRead);
-    if (!TestInteractiveModeRejected())
+    if (!TestInteractiveModeRejected() || !TestUnconfirmedTeardownFinishesSession())
     {
         return 1;
     }

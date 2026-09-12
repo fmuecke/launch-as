@@ -62,4 +62,8 @@ class BrokerChildProcess final
 [[nodiscard]] DWORD GetTokenLogonSid(HANDLE token, std::vector<BYTE>& logonSid);
 [[nodiscard]] DWORD ValidateChildLogonSid(HANDLE process, const std::vector<BYTE>& callerLogonSid);
 
+#ifdef LAUNCH_AS_TESTING
+void SetBrokerJobQueryFailureForTesting(bool fail) noexcept;
+#endif
+
 } // namespace launch_as::broker

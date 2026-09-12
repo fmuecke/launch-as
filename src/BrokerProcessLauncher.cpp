@@ -19,6 +19,12 @@ namespace launch_as::broker
 namespace
 {
 
+constexpr DWORD JobTerminationTimeoutMilliseconds = 5'000;
+
+#ifdef LAUNCH_AS_TESTING
+bool failBrokerJobQueryForTesting = false;
+#endif
+
 [[nodiscard]] bool IsDirectorySeparator(wchar_t character) noexcept
 {
     return character == L'\\' || character == L'/';
@@ -249,7 +255,28 @@ void CloseHandleIfPresent(HANDLE& handle) noexcept
     }
 }
 
+[[nodiscard]] bool QueryBrokerJobBasicAccountingInformation(
+    HANDLE job, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION& accounting) noexcept
+{
+#ifdef LAUNCH_AS_TESTING
+    if (failBrokerJobQueryForTesting)
+    {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return false;
+    }
+#endif
+    return QueryInformationJobObject(job,
+               JobObjectBasicAccountingInformation,
+               &accounting,
+               sizeof(accounting),
+               nullptr) != FALSE;
+}
+
 } // namespace
+
+#ifdef LAUNCH_AS_TESTING
+void SetBrokerJobQueryFailureForTesting(bool fail) noexcept { failBrokerJobQueryForTesting = fail; }
+#endif
 
 BrokerChildProcess::~BrokerChildProcess() { Reset(); }
 
@@ -392,43 +419,50 @@ bool BrokerChildProcess::TerminateAndWaitForExit() noexcept
         Reset();
         return true;
     }
-
-    const BOOL terminated = TerminateJobObject(job_, ERROR_CANCELLED);
-    const DWORD terminationError = terminated ? ERROR_SUCCESS : GetLastError();
-    const bool hostExited = process_ == nullptr || WaitForSingleObject(process_,
-                                                       terminated ? INFINITE : 0) == WAIT_OBJECT_0;
-    bool treeExited = hostExited;
-    while (treeExited)
+    const ULONGLONG deadline = GetTickCount64() + JobTerminationTimeoutMilliseconds;
+    static_cast<void>(TerminateJobObject(job_, ERROR_CANCELLED));
+    if (process_ != nullptr)
+    {
+        const ULONGLONG now = GetTickCount64();
+        const DWORD remaining = now >= deadline ? 0 : static_cast<DWORD>(deadline - now);
+        if (WaitForSingleObject(process_, remaining) != WAIT_OBJECT_0)
+        {
+            Reset();
+            return false;
+        }
+    }
+    for (;;)
     {
         JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting {};
-        if (!QueryInformationJobObject(job_,
-                JobObjectBasicAccountingInformation,
-                &accounting,
-                sizeof(accounting),
-                nullptr))
+        if (!QueryBrokerJobBasicAccountingInformation(job_, accounting))
         {
-            treeExited = false;
-            break;
+            Reset();
+            return false;
         }
         if (accounting.ActiveProcesses == 0)
         {
-            break;
+            Reset();
+            return true;
         }
-        if (terminationError != ERROR_SUCCESS)
+        const ULONGLONG now = GetTickCount64();
+        if (now >= deadline)
         {
-            treeExited = false;
-            break;
+            Reset();
+            return false;
         }
-        Sleep(10);
+        const DWORD remaining = static_cast<DWORD>(deadline - now);
+        Sleep(remaining < 10 ? remaining : 10);
     }
-    Reset();
-    return treeExited;
 }
 
 void BrokerChildProcess::Reset() noexcept
 {
     CloseHandleIfPresent(exitReport_);
     CloseHandleIfPresent(diagnostics_);
+    if (job_ != nullptr)
+    {
+        CloseHandle(job_);
+    }
     if (profile_ != nullptr)
     {
         UnloadUserProfile(profileToken_, profile_);
@@ -444,10 +478,6 @@ void BrokerChildProcess::Reset() noexcept
     if (process_ != nullptr)
     {
         CloseHandle(process_);
-    }
-    if (job_ != nullptr)
-    {
-        CloseHandle(job_);
     }
     job_ = nullptr;
     process_ = nullptr;

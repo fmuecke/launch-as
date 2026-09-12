@@ -18,6 +18,7 @@ enum class BrokerAuditEvent : DWORD
     ConfigurationChanged = 3,
     ConfigurationRejected = 4,
     ControlPipeCreationFailed = 5,
+    SessionTeardownFailed = 6,
 };
 
 [[nodiscard]] DWORD RegisterBrokerEventSource();

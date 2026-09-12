@@ -263,7 +263,8 @@ DWORD ConfigureProfile(void* context, const launch_as::broker::BrokerRequest& re
 DWORD LaunchProfile(void* context, const launch_as::broker::BrokerRequest& request,
     const launch_as::broker::BrokerCallerIdentity& caller,
     launch_as::broker::BrokerChildProcess& child);
-void FinishProfileSession(void* context, const launch_as::broker::BrokerRequest& request);
+void FinishProfileSession(
+    void* context, const launch_as::broker::BrokerRequest& request, bool processTreeExited);
 
 void ReapCompletedWorkers(std::vector<std::unique_ptr<BrokerPipeWorker>>& workers)
 {
@@ -592,12 +593,24 @@ DWORD LaunchProfile(void* context, const launch_as::broker::BrokerRequest& reque
     return complete(resumeError);
 }
 
-void FinishProfileSession(void* context, const launch_as::broker::BrokerRequest& request)
+void FinishProfileSession(
+    void* context, const launch_as::broker::BrokerRequest& request, bool processTreeExited)
 {
     auto* policy = static_cast<BrokerLaunchPolicy*>(context);
     if (policy != nullptr)
     {
         policy->ReleaseSession(request.profileId);
+    }
+    if (!processTreeExited)
+    {
+        const std::array<std::wstring, 3> fields {
+            L"operation=launch",
+            L"profileId=" + request.profileId,
+            L"reason=process_tree_not_confirmed",
+        };
+        static_cast<void>(launch_as::broker::WriteBrokerAuditEvent(EVENTLOG_ERROR_TYPE,
+            launch_as::broker::BrokerAuditEvent::SessionTeardownFailed,
+            fields));
     }
 }
 

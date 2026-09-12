@@ -147,11 +147,31 @@ namespace
                processExited, L"The process assigned to the terminated broker Job did not exit.");
 }
 
+[[nodiscard]] bool TestTeardownFailureReturnsPromptly()
+{
+    launch_as::broker::BrokerChildProcess child;
+    if (!Expect(launch_as::broker::CreateBrokerJob(child) == ERROR_SUCCESS,
+            L"Could not create the broker teardown-failure test job."))
+    {
+        return false;
+    }
+    launch_as::broker::SetBrokerJobQueryFailureForTesting(true);
+    const ULONGLONG start = GetTickCount64();
+    const bool treeExited = child.TerminateAndWaitForExit();
+    const ULONGLONG elapsed = GetTickCount64() - start;
+    launch_as::broker::SetBrokerJobQueryFailureForTesting(false);
+    return Expect(!treeExited,
+               L"The broker reported an unqueryable Job process tree as terminated.") &&
+           Expect(elapsed < 1'000,
+               L"The broker did not return promptly after failing to query its Job process tree.");
+}
+
 } // namespace
 
 int wmain()
 {
-    if (!TestWorkingDirectoryValidation() || !TestJobTerminationConfirmsActiveProcessZero())
+    if (!TestWorkingDirectoryValidation() || !TestJobTerminationConfirmsActiveProcessZero() ||
+        !TestTeardownFailureReturnsPromptly())
     {
         return 1;
     }

@@ -17,6 +17,16 @@ namespace launch_as::broker
 namespace
 {
 
+[[nodiscard]] bool IsDirectorySeparator(wchar_t character) noexcept
+{
+    return character == L'\\' || character == L'/';
+}
+
+[[nodiscard]] bool HasNetworkOrDevicePrefix(std::wstring_view path) noexcept
+{
+    return path.size() >= 2 && IsDirectorySeparator(path[0]) && IsDirectorySeparator(path[1]);
+}
+
 class EnabledProcessPrivileges final
 {
   public:
@@ -326,6 +336,45 @@ DWORD CreateBrokerJob(BrokerChildProcess& child)
     return ERROR_SUCCESS;
 }
 
+DWORD ResolveBrokerWorkingDirectory(
+    std::wstring_view workingDirectory, std::wstring& resolvedDirectory)
+{
+    resolvedDirectory.clear();
+    if (workingDirectory.empty())
+    {
+        return ERROR_INVALID_PARAMETER;
+    }
+    if (HasNetworkOrDevicePrefix(workingDirectory))
+    {
+        return ERROR_BAD_PATHNAME;
+    }
+
+    const std::filesystem::path requestedDirectory(workingDirectory);
+    if (!requestedDirectory.is_absolute())
+    {
+        return ERROR_BAD_PATHNAME;
+    }
+
+    std::error_code directoryError;
+    const std::filesystem::path canonicalDirectory =
+        std::filesystem::canonical(requestedDirectory, directoryError);
+    if (directoryError)
+    {
+        return static_cast<DWORD>(directoryError.value());
+    }
+    if (!canonicalDirectory.is_absolute() || HasNetworkOrDevicePrefix(canonicalDirectory.native()))
+    {
+        return ERROR_BAD_PATHNAME;
+    }
+    if (!std::filesystem::is_directory(canonicalDirectory, directoryError))
+    {
+        return directoryError ? static_cast<DWORD>(directoryError.value()) : ERROR_DIRECTORY;
+    }
+
+    resolvedDirectory = canonicalDirectory.native();
+    return ERROR_SUCCESS;
+}
+
 DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
     BrokerChildProcess& child)
@@ -335,12 +384,11 @@ DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,
     {
         return ERROR_INVALID_PARAMETER;
     }
-    std::error_code workingDirectoryError;
-    if (!std::filesystem::is_directory(
-            std::filesystem::path(workingDirectory), workingDirectoryError))
+    std::wstring directory;
+    const DWORD workingDirectoryError = ResolveBrokerWorkingDirectory(workingDirectory, directory);
+    if (workingDirectoryError != ERROR_SUCCESS)
     {
-        return workingDirectoryError ? static_cast<DWORD>(workingDirectoryError.value())
-                                     : ERROR_DIRECTORY;
+        return workingDirectoryError;
     }
     const DWORD jobError = CreateBrokerJob(child);
     if (jobError != ERROR_SUCCESS)
@@ -367,7 +415,6 @@ DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,
     STARTUPINFOW startupInfo {};
     startupInfo.cb = sizeof(startupInfo);
     PROCESS_INFORMATION processInfo {};
-    const std::wstring directory(workingDirectory);
     std::wstring mutableAccountName(accountName);
     PROFILEINFOW profileInfo {};
     profileInfo.dwSize = sizeof(profileInfo);

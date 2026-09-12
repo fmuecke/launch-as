@@ -48,6 +48,8 @@ class BrokerChildProcess final
 };
 
 [[nodiscard]] DWORD CreateBrokerJob(BrokerChildProcess& child);
+[[nodiscard]] DWORD ResolveBrokerWorkingDirectory(
+    std::wstring_view workingDirectory, std::wstring& resolvedDirectory);
 [[nodiscard]] DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
     BrokerChildProcess& child);

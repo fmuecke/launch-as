@@ -5,6 +5,8 @@
 #include "BrokerProcessLauncher.h"
 
 #include <Windows.h>
+#include <array>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -19,6 +21,54 @@ namespace
         std::wcerr << message << L"\n";
     }
     return condition;
+}
+
+[[nodiscard]] bool TestWorkingDirectoryValidation()
+{
+    constexpr std::array rejectedPaths {
+        L"relative",
+        L"C:relative",
+        L"\\rooted",
+        L"/rooted",
+        L"\\\\server\\share",
+        L"//server/share",
+        L"\\\\?\\C:\\Windows",
+        L"//?/C:/Windows",
+        L"\\\\.\\C:\\Windows",
+        L"//./C:/Windows",
+    };
+    for (const wchar_t* path : rejectedPaths)
+    {
+        std::wstring resolved = L"must be cleared";
+        if (!Expect(launch_as::broker::ResolveBrokerWorkingDirectory(path, resolved) ==
+                        ERROR_BAD_PATHNAME,
+                L"The broker accepted a relative, network, or device working directory.") ||
+            !Expect(resolved.empty(), L"A rejected working directory left a resolved path."))
+        {
+            return false;
+        }
+    }
+
+    std::error_code pathError;
+    const std::filesystem::path currentDirectory = std::filesystem::current_path(pathError);
+    if (!Expect(!pathError, L"Could not resolve the current directory for path validation."))
+    {
+        return false;
+    }
+    const std::filesystem::path expectedDirectory =
+        std::filesystem::canonical(currentDirectory, pathError);
+    if (!Expect(!pathError, L"Could not canonicalize the expected working directory."))
+    {
+        return false;
+    }
+
+    std::wstring resolved;
+    const std::filesystem::path nonCanonicalDirectory = currentDirectory / L".";
+    return Expect(launch_as::broker::ResolveBrokerWorkingDirectory(
+                      nonCanonicalDirectory.native(), resolved) == ERROR_SUCCESS,
+               L"The broker rejected an existing local working directory.") &&
+           Expect(resolved == expectedDirectory.native(),
+               L"The broker did not canonicalize the working directory.");
 }
 
 [[nodiscard]] bool TestJobTerminationConfirmsActiveProcessZero()
@@ -101,7 +151,7 @@ namespace
 
 int wmain()
 {
-    if (!TestJobTerminationConfirmsActiveProcessZero())
+    if (!TestWorkingDirectoryValidation() || !TestJobTerminationConfirmsActiveProcessZero())
     {
         return 1;
     }

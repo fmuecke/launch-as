@@ -44,6 +44,7 @@ enum class RequestOperation
 
 [[nodiscard]] std::wstring_view RequestOperationName(RequestOperation operation) noexcept;
 [[nodiscard]] bool IsManagementOperation(RequestOperation operation) noexcept;
+[[nodiscard]] bool IsValidProfileId(std::wstring_view value) noexcept;
 [[nodiscard]] std::string_view RequestOperationSuccessReason(RequestOperation operation) noexcept;
 [[nodiscard]] std::string_view RequestOperationFailureReason(RequestOperation operation) noexcept;
 

@@ -197,6 +197,13 @@ struct BrokerPipeWorker
     return value.get();
 }
 
+[[nodiscard]] std::wstring AuditProfileId(std::wstring_view fieldName, std::wstring_view profileId)
+{
+    const std::wstring_view value =
+        launch_as::broker::IsValidProfileId(profileId) ? profileId : L"<invalid>";
+    return std::wstring(fieldName) + L"=" + std::wstring(value);
+}
+
 void AuditRequest(launch_as::broker::BrokerAuditEvent event, WORD type,
     const launch_as::broker::BrokerRequest& request,
     const launch_as::broker::BrokerCallerIdentity& caller, DWORD result, DWORD processId = 0)
@@ -204,7 +211,7 @@ void AuditRequest(launch_as::broker::BrokerAuditEvent event, WORD type,
     const std::vector<std::wstring> fields {
         L"requestId=" + request.requestId,
         L"operation=" + std::wstring(launch_as::broker::RequestOperationName(request.operation)),
-        L"account=" + request.profileId,
+        AuditProfileId(L"account", request.profileId),
         L"callerSid=" + AuditCallerSid(caller),
         L"callerSession=" + std::to_wstring(caller.sessionId),
         L"result=" + std::wstring(result == ERROR_SUCCESS ? L"allowed" : L"rejected"),
@@ -651,7 +658,7 @@ void FinishProfileSession(
     {
         const std::array<std::wstring, 3> fields {
             L"operation=launch",
-            L"profileId=" + request.profileId,
+            AuditProfileId(L"profileId", request.profileId),
             L"reason=process_tree_not_confirmed",
         };
         static_cast<void>(launch_as::broker::WriteBrokerAuditEvent(EVENTLOG_ERROR_TYPE,

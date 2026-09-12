@@ -121,6 +121,14 @@ int wmain()
         return 1;
     }
 
+    if (!Expect(launch_as::broker::IsValidProfileId(L"LaunchAsUser"),
+            L"A valid profile id was rejected by the shared validator.") ||
+        !Expect(!launch_as::broker::IsValidProfileId(L"LaunchAsUser=result=allowed"),
+            L"The shared profile validator accepted an audit-field separator."))
+    {
+        return 1;
+    }
+
     if (!Expect(launch_as::broker::ParseBrokerRequest(ListRequest, request) ==
                         launch_as::broker::ParseResult::Success &&
                     request.operation == launch_as::broker::RequestOperation::List,

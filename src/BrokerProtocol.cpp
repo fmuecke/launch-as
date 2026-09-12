@@ -301,15 +301,6 @@ class JsonReader final
     return true;
 }
 
-[[nodiscard]] bool IsProfileId(const std::wstring& value)
-{
-    constexpr std::wstring_view invalidCharacters = L"\\/[]:;|=,+*?<>\"";
-    return !value.empty() && value.size() <= UNLEN &&
-           value.find_first_of(invalidCharacters) == std::wstring::npos &&
-           std::all_of(
-               value.begin(), value.end(), [](wchar_t character) { return character >= L' '; });
-}
-
 [[nodiscard]] bool IsConsolePipeName(const std::wstring& value)
 {
     constexpr std::wstring_view prefix = L"\\\\.\\pipe\\launch-as-";
@@ -360,7 +351,8 @@ class JsonReader final
     for (;;)
     {
         std::wstring account;
-        if (!reader.String(account) || !IsProfileId(account) || accounts.size() == MaximumArguments)
+        if (!reader.String(account) || !IsValidProfileId(account) ||
+            accounts.size() == MaximumArguments)
         {
             return false;
         }
@@ -502,6 +494,15 @@ std::wstring_view RequestOperationName(RequestOperation operation) noexcept
     return L"unknown";
 }
 
+bool IsValidProfileId(std::wstring_view value) noexcept
+{
+    constexpr std::wstring_view invalidCharacters = L"\\/[]:;|=,+*?<>\"";
+    return !value.empty() && value.size() <= UNLEN &&
+           value.find_first_of(invalidCharacters) == std::wstring::npos &&
+           std::all_of(
+               value.begin(), value.end(), [](wchar_t character) { return character >= L' '; });
+}
+
 bool IsManagementOperation(RequestOperation operation) noexcept
 {
     return operation != RequestOperation::ConsoleLaunch;
@@ -638,7 +639,7 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
         else if (name == L"profileId" && !profileSeen)
         {
             profileSeen = true;
-            profile = reader.String(request.profileId) && IsProfileId(request.profileId);
+            profile = reader.String(request.profileId) && IsValidProfileId(request.profileId);
         }
         else if (name == L"mode" && !modeSeen)
         {

@@ -7,15 +7,15 @@
 #include <Aclapi.h>
 #include <ShlObj.h>
 #include <array>
-#include <sddl.h>
 #include <string>
+#include <vector>
 
 namespace launch_as::broker
 {
 namespace
 {
 
-constexpr wchar_t RestrictedDirectoryDacl[] = L"D:P(A;;FA;;;SY)(A;;FA;;;BA)";
+constexpr wchar_t BrokerServiceAccountName[] = L"NT SERVICE\\launch-as-broker";
 
 class LocalSecurityDescriptor final
 {
@@ -39,6 +39,115 @@ class LocalSecurityDescriptor final
   private:
     PSECURITY_DESCRIPTOR value_ = nullptr;
 };
+
+class LocalAcl final
+{
+  public:
+    ~LocalAcl()
+    {
+        if (value_ != nullptr)
+        {
+            LocalFree(value_);
+        }
+    }
+
+    [[nodiscard]] PACL* address() noexcept { return &value_; }
+    [[nodiscard]] PACL get() const noexcept { return value_; }
+
+  private:
+    PACL value_ = nullptr;
+};
+
+[[nodiscard]] DWORD LookupBrokerServiceSid(std::vector<BYTE>& sid)
+{
+    sid.clear();
+    DWORD sidSize = 0;
+    DWORD domainSize = 0;
+    SID_NAME_USE use = {};
+    if (LookupAccountNameW(
+            nullptr, BrokerServiceAccountName, nullptr, &sidSize, nullptr, &domainSize, &use))
+    {
+        return ERROR_INVALID_DATA;
+    }
+    const DWORD lookupError = GetLastError();
+    if (lookupError == ERROR_NONE_MAPPED)
+    {
+        return ERROR_SUCCESS;
+    }
+    if (lookupError != ERROR_INSUFFICIENT_BUFFER || sidSize == 0)
+    {
+        return lookupError;
+    }
+    sid.resize(sidSize);
+    std::vector<wchar_t> domain(domainSize);
+    if (!LookupAccountNameW(nullptr,
+            BrokerServiceAccountName,
+            sid.data(),
+            &sidSize,
+            domain.data(),
+            &domainSize,
+            &use))
+    {
+        const DWORD retryError = GetLastError();
+        sid.clear();
+        return retryError;
+    }
+    return ERROR_SUCCESS;
+}
+
+[[nodiscard]] DWORD CreateDirectorySecurityDescriptor(
+    PSID serviceSid, LocalAcl& dacl, SECURITY_DESCRIPTOR& descriptor)
+{
+    std::array<BYTE, SECURITY_MAX_SID_SIZE> systemSid {};
+    std::array<BYTE, SECURITY_MAX_SID_SIZE> administratorsSid {};
+    DWORD systemSidSize = static_cast<DWORD>(systemSid.size());
+    DWORD administratorsSidSize = static_cast<DWORD>(administratorsSid.size());
+    if (!CreateWellKnownSid(WinLocalSystemSid, nullptr, systemSid.data(), &systemSidSize))
+    {
+        const DWORD systemSidError = GetLastError();
+        return systemSidError;
+    }
+    if (!CreateWellKnownSid(
+            WinBuiltinAdministratorsSid, nullptr, administratorsSid.data(), &administratorsSidSize))
+    {
+        const DWORD administratorsSidError = GetLastError();
+        return administratorsSidError;
+    }
+
+    std::array<EXPLICIT_ACCESSW, 3> entries {};
+    const std::array<PSID, 3> sids {systemSid.data(), administratorsSid.data(), serviceSid};
+    const std::size_t entryCount = serviceSid == nullptr ? 2 : 3;
+    for (std::size_t index = 0; index < entryCount; ++index)
+    {
+        entries[index].grfAccessPermissions = FILE_ALL_ACCESS;
+        entries[index].grfAccessMode = GRANT_ACCESS;
+        entries[index].grfInheritance = SUB_CONTAINERS_AND_OBJECTS_INHERIT;
+        entries[index].Trustee.TrusteeForm = TRUSTEE_IS_SID;
+        entries[index].Trustee.ptstrName = reinterpret_cast<LPWSTR>(sids[index]);
+    }
+    const DWORD daclError =
+        SetEntriesInAclW(static_cast<ULONG>(entryCount), entries.data(), nullptr, dacl.address());
+    if (daclError != ERROR_SUCCESS)
+    {
+        return daclError;
+    }
+    if (!InitializeSecurityDescriptor(&descriptor, SECURITY_DESCRIPTOR_REVISION))
+    {
+        const DWORD descriptorError = GetLastError();
+        return descriptorError;
+    }
+    if (!SetSecurityDescriptorDacl(&descriptor, TRUE, dacl.get(), FALSE))
+    {
+        const DWORD descriptorError = GetLastError();
+        return descriptorError;
+    }
+    if (!SetSecurityDescriptorControl(&descriptor, SE_DACL_PROTECTED, SE_DACL_PROTECTED))
+    {
+        const DWORD descriptorError = GetLastError();
+        return descriptorError;
+    }
+    return ERROR_SUCCESS;
+}
 
 // A pre-existing directory is only trustworthy if SYSTEM or Administrators already owns it;
 // NTFS ownership grants implicit READ_CONTROL | WRITE_DAC regardless of the DACL we stamp, so an
@@ -94,16 +203,23 @@ DWORD CreateSecureDirectory(std::wstring_view path)
     }
     const std::wstring directoryPath(path);
 
-    LocalSecurityDescriptor securityDescriptor;
-    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            RestrictedDirectoryDacl, SDDL_REVISION_1, securityDescriptor.address(), nullptr))
+    std::vector<BYTE> serviceSid;
+    const DWORD serviceSidError = LookupBrokerServiceSid(serviceSid);
+    if (serviceSidError != ERROR_SUCCESS)
     {
-        const DWORD descriptorError = GetLastError();
+        return serviceSidError;
+    }
+    SECURITY_DESCRIPTOR securityDescriptor {};
+    LocalAcl dacl;
+    const DWORD descriptorError = CreateDirectorySecurityDescriptor(
+        serviceSid.empty() ? nullptr : serviceSid.data(), dacl, securityDescriptor);
+    if (descriptorError != ERROR_SUCCESS)
+    {
         return descriptorError;
     }
     SECURITY_ATTRIBUTES securityAttributes {};
     securityAttributes.nLength = sizeof(securityAttributes);
-    securityAttributes.lpSecurityDescriptor = securityDescriptor.get();
+    securityAttributes.lpSecurityDescriptor = &securityDescriptor;
     if (CreateDirectoryW(directoryPath.c_str(), &securityAttributes))
     {
         return ERROR_SUCCESS;
@@ -135,7 +251,7 @@ DWORD CreateSecureDirectory(std::wstring_view path)
 
     if (!SetFileSecurityW(directoryPath.c_str(),
             DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-            securityDescriptor.get()))
+            &securityDescriptor))
     {
         const DWORD securityError = GetLastError();
         return securityError;

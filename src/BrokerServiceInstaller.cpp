@@ -27,6 +27,8 @@ constexpr wchar_t BrokerServiceDisplayName[] = L"launch-as Broker";
 constexpr wchar_t BrokerServiceDescription[] =
     L"Launches enrolled accounts in isolated console sessions.";
 constexpr wchar_t BrokerInstallDacl[] = L"D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200A9;;;BU)";
+constexpr wchar_t BrokerRequiredPrivileges[] =
+    L"SeAssignPrimaryTokenPrivilege\0SeIncreaseQuotaPrivilege\0SeImpersonatePrivilege\0\0";
 constexpr DWORD ServiceStopTimeoutMilliseconds = 10'000;
 
 class ServiceHandle final
@@ -517,6 +519,29 @@ DWORD InstallDemandStartBrokerService(
     {
         const DWORD configurationError = GetLastError();
         return configurationError;
+    }
+    SERVICE_SID_INFO serviceSidInfo {};
+    serviceSidInfo.dwServiceSidType = SERVICE_SID_TYPE_RESTRICTED;
+    if (!ChangeServiceConfig2W(service.get(), SERVICE_CONFIG_SERVICE_SID_INFO, &serviceSidInfo))
+    {
+        const DWORD serviceSidError = GetLastError();
+        if (created)
+        {
+            DeleteService(service.get());
+        }
+        return serviceSidError;
+    }
+    SERVICE_REQUIRED_PRIVILEGES_INFOW requiredPrivileges {};
+    requiredPrivileges.pmszRequiredPrivileges = const_cast<LPWSTR>(BrokerRequiredPrivileges);
+    if (!ChangeServiceConfig2W(
+            service.get(), SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO, &requiredPrivileges))
+    {
+        const DWORD privilegesError = GetLastError();
+        if (created)
+        {
+            DeleteService(service.get());
+        }
+        return privilegesError;
     }
     SERVICE_DESCRIPTIONW description {};
     description.lpDescription = const_cast<LPWSTR>(BrokerServiceDescription);

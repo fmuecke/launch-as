@@ -109,8 +109,15 @@ function(configure_launch_as_target target)
             /EHsc
             /permissive-
             /sdl
+            /guard:cf
+            /Qspectre
             /utf-8
             /MP
+        )
+        target_link_options(${target} PRIVATE
+            /guard:cf
+            /CETCOMPAT
+            /DEPENDENTLOADFLAG:0x800
         )
         set_property(TARGET ${target} PROPERTY
             MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
@@ -689,6 +696,17 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
         LABELS "broker;integration"
     )
 
+    add_test(
+        NAME launcher.broker_service_installer
+        COMMAND
+            "$<TARGET_FILE:LauncherBrokerServiceInstallerTests>"
+            "$<TARGET_FILE:launch_as_broker>"
+    )
+    set_tests_properties(launcher.broker_service_installer PROPERTIES
+        LABELS "broker;elevated;integration"
+        SKIP_RETURN_CODE 77
+    )
+
     add_executable(LauncherArgvProbe
         tests/ArgvProbe.cpp
     )
@@ -736,6 +754,21 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
             "$<TARGET_FILE:launch_as>"
     )
     set_tests_properties(launcher.manifest PROPERTIES
+        LABELS "launcher;unit"
+    )
+
+    add_executable(LauncherBinaryMitigationTests
+        tests/BinaryMitigationTests.cpp
+    )
+    configure_launch_as_target(LauncherBinaryMitigationTests)
+
+    add_test(
+        NAME launcher.binary_mitigations
+        COMMAND
+            "$<TARGET_FILE:LauncherBinaryMitigationTests>"
+            "$<TARGET_FILE:launch_as>"
+    )
+    set_tests_properties(launcher.binary_mitigations PROPERTIES
         LABELS "launcher;unit"
     )
 

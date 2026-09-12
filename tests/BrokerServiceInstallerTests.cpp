@@ -18,6 +18,11 @@ namespace
 constexpr wchar_t BrokerServiceDisplayName[] = L"launch-as Broker";
 constexpr wchar_t BrokerServiceDescription[] =
     L"Launches enrolled accounts in isolated console sessions.";
+constexpr std::array<std::wstring_view, 3> BrokerRequiredPrivileges {
+    L"SeAssignPrimaryTokenPrivilege",
+    L"SeIncreaseQuotaPrivilege",
+    L"SeImpersonatePrivilege",
+};
 
 class ServiceHandle final
 {
@@ -89,6 +94,22 @@ class TemporaryDirectory final
     return condition;
 }
 
+[[nodiscard]] bool IsCurrentProcessElevated()
+{
+    HANDLE rawToken = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &rawToken))
+    {
+        return false;
+    }
+    launch_as::UniqueHandle token(rawToken);
+    TOKEN_ELEVATION elevation {};
+    DWORD bytesReturned = 0;
+    return GetTokenInformation(
+               token.get(), TokenElevation, &elevation, sizeof(elevation), &bytesReturned) !=
+               FALSE &&
+           elevation.TokenIsElevated != 0;
+}
+
 [[nodiscard]] bool HasExpectedConfiguration(
     const std::wstring& name, const std::wstring& executablePath)
 {
@@ -141,6 +162,62 @@ class TemporaryDirectory final
     const auto* description = reinterpret_cast<const SERVICE_DESCRIPTIONW*>(buffer.data());
     return description->lpDescription != nullptr &&
            std::wstring_view(description->lpDescription) == BrokerServiceDescription;
+}
+
+[[nodiscard]] bool HasExpectedHardening(const std::wstring& name)
+{
+    ServiceHandle manager(OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT));
+    ServiceHandle service(
+        manager ? OpenServiceW(manager.get(), name.c_str(), SERVICE_QUERY_CONFIG) : nullptr);
+    if (!service)
+    {
+        return false;
+    }
+    SERVICE_SID_INFO serviceSidInfo {};
+    DWORD bytesWritten = 0;
+    if (!QueryServiceConfig2W(service.get(),
+            SERVICE_CONFIG_SERVICE_SID_INFO,
+            reinterpret_cast<BYTE*>(&serviceSidInfo),
+            sizeof(serviceSidInfo),
+            &bytesWritten) ||
+        serviceSidInfo.dwServiceSidType != SERVICE_SID_TYPE_RESTRICTED)
+    {
+        return false;
+    }
+
+    DWORD requiredBytes = 0;
+    QueryServiceConfig2W(
+        service.get(), SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO, nullptr, 0, &requiredBytes);
+    const DWORD sizeError = GetLastError();
+    if (sizeError != ERROR_INSUFFICIENT_BUFFER || requiredBytes == 0)
+    {
+        return false;
+    }
+    std::vector<BYTE> buffer(requiredBytes);
+    if (!QueryServiceConfig2W(service.get(),
+            SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO,
+            buffer.data(),
+            requiredBytes,
+            &requiredBytes))
+    {
+        return false;
+    }
+    const auto* requiredPrivileges =
+        reinterpret_cast<const SERVICE_REQUIRED_PRIVILEGES_INFOW*>(buffer.data());
+    if (requiredPrivileges->pmszRequiredPrivileges == nullptr)
+    {
+        return false;
+    }
+    const wchar_t* privilege = requiredPrivileges->pmszRequiredPrivileges;
+    for (const std::wstring_view expected : BrokerRequiredPrivileges)
+    {
+        if (std::wstring_view(privilege) != expected)
+        {
+            return false;
+        }
+        privilege += expected.size() + 1;
+    }
+    return *privilege == L'\0';
 }
 
 [[nodiscard]] bool CreateEmptyFile(const std::filesystem::path& path)
@@ -229,6 +306,11 @@ int wmain(int argumentCount, wchar_t* arguments[])
         std::wcerr << L"Expected the broker executable path.\n";
         return 1;
     }
+    if (!IsCurrentProcessElevated())
+    {
+        std::wcerr << L"Skipping service-installer test because it requires elevation.\n";
+        return 77;
+    }
     TestService service(L"launch-as-broker-test-" + std::to_wstring(GetCurrentProcessId()));
     const DWORD installError =
         launch_as::broker::InstallDemandStartBrokerService(service.name(), arguments[1]);
@@ -240,7 +322,9 @@ int wmain(int argumentCount, wchar_t* arguments[])
     return Expect(HasExpectedConfiguration(service.name(), arguments[1]),
                L"Disposable service configuration does not match the broker contract.") &&
                    Expect(HasExpectedDescription(service.name()),
-                       L"Disposable service description does not match the broker contract.")
+                       L"Disposable service description does not match the broker contract.") &&
+                   Expect(HasExpectedHardening(service.name()),
+                       L"Disposable service hardening does not match the broker contract.")
                ? 0
                : 1;
 }

@@ -11,6 +11,7 @@
 #include <iostream>
 #include <sddl.h>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -95,8 +96,53 @@ class ScopedEnvironmentVariable final
     return condition;
 }
 
+[[nodiscard]] bool LookupBrokerServiceSid(std::vector<BYTE>& sid, bool& found)
+{
+    constexpr wchar_t BrokerServiceAccountName[] = L"NT SERVICE\\launch-as-broker";
+    sid.clear();
+    found = false;
+    DWORD sidSize = 0;
+    DWORD domainSize = 0;
+    SID_NAME_USE use = {};
+    if (LookupAccountNameW(
+            nullptr, BrokerServiceAccountName, nullptr, &sidSize, nullptr, &domainSize, &use))
+    {
+        return false;
+    }
+    const DWORD lookupError = GetLastError();
+    if (lookupError == ERROR_NONE_MAPPED)
+    {
+        return true;
+    }
+    if (lookupError != ERROR_INSUFFICIENT_BUFFER || sidSize == 0)
+    {
+        return false;
+    }
+    sid.resize(sidSize);
+    std::vector<wchar_t> domain(domainSize);
+    if (!LookupAccountNameW(nullptr,
+            BrokerServiceAccountName,
+            sid.data(),
+            &sidSize,
+            domain.data(),
+            &domainSize,
+            &use))
+    {
+        sid.clear();
+        return false;
+    }
+    found = IsValidSid(sid.data()) != FALSE;
+    return found;
+}
+
 [[nodiscard]] bool HasProtectedSystemAndAdministratorsDacl(std::wstring_view path)
 {
+    std::vector<BYTE> brokerServiceSid;
+    bool brokerServiceSidFound = false;
+    if (!LookupBrokerServiceSid(brokerServiceSid, brokerServiceSidFound))
+    {
+        return false;
+    }
     PSECURITY_DESCRIPTOR descriptor = nullptr;
     PACL dacl = nullptr;
     const DWORD securityError = GetNamedSecurityInfoW(const_cast<wchar_t*>(path.data()),
@@ -120,8 +166,12 @@ class ScopedEnvironmentVariable final
     const BOOL controlled = GetSecurityDescriptorControl(descriptor, &control, &revision);
     ACL_SIZE_INFORMATION aclInfo {};
     const BOOL sized = GetAclInformation(dacl, &aclInfo, sizeof(aclInfo), AclSizeInformation);
+    const DWORD expectedAceCount = brokerServiceSidFound ? 3U : 2U;
     bool valid = controlled != FALSE && (control & SE_DACL_PROTECTED) != 0 && sized != FALSE &&
-                 aclInfo.AceCount == 2;
+                 aclInfo.AceCount == expectedAceCount;
+    bool hasSystem = false;
+    bool hasAdministrators = false;
+    bool hasService = false;
     for (DWORD index = 0; valid && index < aclInfo.AceCount; ++index)
     {
         void* rawAce = nullptr;
@@ -145,15 +195,36 @@ class ScopedEnvironmentVariable final
             !CreateWellKnownSid(WinBuiltinAdministratorsSid,
                 nullptr,
                 administratorsSid.data(),
-                &administratorsSidSize) ||
-            (EqualSid(sid, systemSid.data()) == FALSE &&
-                EqualSid(sid, administratorsSid.data()) == FALSE))
+                &administratorsSidSize))
         {
             valid = false;
+            break;
+        }
+        if (EqualSid(sid, systemSid.data()))
+        {
+            hasSystem = true;
+        }
+        else if (EqualSid(sid, administratorsSid.data()))
+        {
+            hasAdministrators = true;
+        }
+        else if (brokerServiceSidFound && EqualSid(sid, brokerServiceSid.data()))
+        {
+            if (hasService)
+            {
+                valid = false;
+                break;
+            }
+            hasService = true;
+        }
+        else
+        {
+            valid = false;
+            break;
         }
     }
     LocalFree(descriptor);
-    return valid;
+    return valid && hasSystem && hasAdministrators && hasService == brokerServiceSidFound;
 }
 
 // Junctions never require elevation or SeCreateSymbolicLinkPrivilege to create, unlike symlinks,

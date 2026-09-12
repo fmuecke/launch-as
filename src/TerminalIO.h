@@ -14,6 +14,9 @@ namespace launch_as
 inline constexpr COORD DefaultTerminalSize {120, 30};
 inline constexpr DWORD RelayBufferBytes = 16 * 1024;
 inline constexpr DWORD OutputDrainGraceMilliseconds = 250;
+// Far larger than any real display, but small enough that a hostile resize
+// cannot force a multi-gigabyte ConPTY text-buffer allocation.
+inline constexpr SHORT MaximumTerminalDimension = 2000;
 
 [[nodiscard]] bool IsUsableHandle(HANDLE handle) noexcept;
 void RelayInput(HANDLE source, HANDLE destination) noexcept;

@@ -6,6 +6,7 @@
 
 #include "Win32Support.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 
@@ -111,7 +112,32 @@ bool ReadTerminalSize(HANDLE source, COORD& size) noexcept
     {
         return false;
     }
-    size = receivedSize;
+
+    // Coalesce a burst of queued resize frames into the most recent one, so a
+    // fast or malicious resizer triggers at most one ResizePseudoConsole call
+    // here instead of one per frame. A malformed queued frame just ends the
+    // drain; the last known-good size is kept rather than failing outright.
+    for (;;)
+    {
+        DWORD bytesAvailable = 0;
+        if (!PeekNamedPipe(source, nullptr, 0, nullptr, &bytesAvailable, nullptr) ||
+            bytesAvailable < sizeof(COORD))
+        {
+            break;
+        }
+        COORD nextSize {};
+        if (!ReadAll(source,
+                reinterpret_cast<std::byte*>(&nextSize),
+                static_cast<DWORD>(sizeof(nextSize))) ||
+            nextSize.X <= 0 || nextSize.Y <= 0)
+        {
+            break;
+        }
+        receivedSize = nextSize;
+    }
+
+    size.X = std::min(receivedSize.X, MaximumTerminalDimension);
+    size.Y = std::min(receivedSize.Y, MaximumTerminalDimension);
     return true;
 }
 

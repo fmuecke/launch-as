@@ -169,9 +169,15 @@ void WaitForControlConnectionClose(HANDLE pipe, HANDLE stopEvent)
     const BOOL openedToken = OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &rawToken);
     const DWORD tokenError = openedToken ? ERROR_SUCCESS : GetLastError();
     const BOOL reverted = RevertToSelf();
-    const DWORD revertError = reverted ? ERROR_SUCCESS : GetLastError();
+    if (!reverted)
+    {
+        // Continuing this worker under the caller's token would make its cleanup run under an
+        // untrusted identity. A process-wide fail-fast is safer than returning impersonated.
+        RaiseFailFastException(nullptr, nullptr, 0);
+        return false;
+    }
     UniqueHandle token(rawToken);
-    if (!openedToken || !reverted)
+    if (!openedToken)
     {
         return false;
     }
@@ -179,8 +185,8 @@ void WaitForControlConnectionClose(HANDLE pipe, HANDLE stopEvent)
     DWORD tokenUserBytes = 0;
     GetTokenInformation(token.get(), TokenUser, nullptr, 0, &tokenUserBytes);
     const DWORD sizeError = GetLastError();
-    if (tokenError != ERROR_SUCCESS || revertError != ERROR_SUCCESS ||
-        sizeError != ERROR_INSUFFICIENT_BUFFER || tokenUserBytes == 0)
+    if (tokenError != ERROR_SUCCESS || sizeError != ERROR_INSUFFICIENT_BUFFER ||
+        tokenUserBytes == 0)
     {
         return false;
     }

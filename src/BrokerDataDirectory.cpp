@@ -92,6 +92,7 @@ DWORD CreateSecureDirectory(std::wstring_view path)
     {
         return ERROR_INVALID_PARAMETER;
     }
+    const std::wstring directoryPath(path);
 
     LocalSecurityDescriptor securityDescriptor;
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
@@ -103,7 +104,7 @@ DWORD CreateSecureDirectory(std::wstring_view path)
     SECURITY_ATTRIBUTES securityAttributes {};
     securityAttributes.nLength = sizeof(securityAttributes);
     securityAttributes.lpSecurityDescriptor = securityDescriptor.get();
-    if (CreateDirectoryW(path.data(), &securityAttributes))
+    if (CreateDirectoryW(directoryPath.c_str(), &securityAttributes))
     {
         return ERROR_SUCCESS;
     }
@@ -113,8 +114,7 @@ DWORD CreateSecureDirectory(std::wstring_view path)
         return createError;
     }
 
-    const std::wstring existingPath(path);
-    const DWORD attributes = GetFileAttributesW(existingPath.c_str());
+    const DWORD attributes = GetFileAttributesW(directoryPath.c_str());
     if (attributes == INVALID_FILE_ATTRIBUTES)
     {
         return GetLastError();
@@ -127,13 +127,13 @@ DWORD CreateSecureDirectory(std::wstring_view path)
     {
         return ERROR_DIRECTORY;
     }
-    const DWORD ownerError = VerifyTrustedOwner(existingPath);
+    const DWORD ownerError = VerifyTrustedOwner(directoryPath);
     if (ownerError != ERROR_SUCCESS)
     {
         return ownerError;
     }
 
-    if (!SetFileSecurityW(path.data(),
+    if (!SetFileSecurityW(directoryPath.c_str(),
             DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
             securityDescriptor.get()))
     {

@@ -180,7 +180,8 @@ struct HostInvocation
 [[nodiscard]] bool OpenPipeClient(
     std::wstring_view pipeName, DWORD access, UniqueHandle& pipe, std::wstring& error)
 {
-    HANDLE rawPipe = CreateFileW(pipeName.data(),
+    const std::wstring nullTerminatedPipeName(pipeName);
+    HANDLE rawPipe = CreateFileW(nullTerminatedPipeName.c_str(),
         access,
         0,
         nullptr,

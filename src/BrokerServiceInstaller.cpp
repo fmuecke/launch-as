@@ -100,13 +100,14 @@ class LocalSecurityDescriptor final
 
 [[nodiscard]] DWORD SetBrokerInstallSecurity(std::wstring_view path)
 {
+    const std::wstring installPath(path);
     LocalSecurityDescriptor descriptor;
     const DWORD descriptorError = CreateBrokerInstallSecurityDescriptor(descriptor);
     if (descriptorError != ERROR_SUCCESS)
     {
         return descriptorError;
     }
-    if (!SetFileSecurityW(path.data(),
+    if (!SetFileSecurityW(installPath.c_str(),
             DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
             descriptor.get()))
     {
@@ -118,6 +119,7 @@ class LocalSecurityDescriptor final
 
 [[nodiscard]] DWORD CreateOrSecureBrokerInstallDirectory(std::wstring_view path)
 {
+    const std::wstring installPath(path);
     LocalSecurityDescriptor descriptor;
     const DWORD descriptorError = CreateBrokerInstallSecurityDescriptor(descriptor);
     if (descriptorError != ERROR_SUCCESS)
@@ -127,7 +129,7 @@ class LocalSecurityDescriptor final
     SECURITY_ATTRIBUTES securityAttributes {};
     securityAttributes.nLength = sizeof(securityAttributes);
     securityAttributes.lpSecurityDescriptor = descriptor.get();
-    if (CreateDirectoryW(path.data(), &securityAttributes))
+    if (CreateDirectoryW(installPath.c_str(), &securityAttributes))
     {
         return ERROR_SUCCESS;
     }
@@ -136,7 +138,7 @@ class LocalSecurityDescriptor final
     {
         return createError;
     }
-    const DWORD attributes = GetFileAttributesW(path.data());
+    const DWORD attributes = GetFileAttributesW(installPath.c_str());
     const DWORD attributesError =
         attributes == INVALID_FILE_ATTRIBUTES ? GetLastError() : ERROR_SUCCESS;
     if (attributes == INVALID_FILE_ATTRIBUTES)
@@ -147,7 +149,7 @@ class LocalSecurityDescriptor final
     {
         return ERROR_DIRECTORY;
     }
-    if (!SetFileSecurityW(path.data(),
+    if (!SetFileSecurityW(installPath.c_str(),
             DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
             descriptor.get()))
     {

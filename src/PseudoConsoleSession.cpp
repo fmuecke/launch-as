@@ -42,11 +42,11 @@ bool PseudoConsoleSession::Initialize(COORD terminalSize, bool inheritCursor, HA
         return false;
     }
 
-    inputRelayCompleteEvent_.reset(CreateEventW(nullptr, TRUE, FALSE, nullptr));
-    if (!inputRelayCompleteEvent_)
+    inputRelayFailedEvent_.reset(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+    if (!inputRelayFailedEvent_)
     {
         const DWORD eventError = GetLastError();
-        error = L"Could not create the pseudoconsole input completion event: " +
+        error = L"Could not create the pseudoconsole input failure event: " +
                 FormatWindowsError(eventError);
         return false;
     }
@@ -136,9 +136,9 @@ bool PseudoConsoleSession::Initialize(COORD terminalSize, bool inheritCursor, HA
 
 STARTUPINFOW* PseudoConsoleSession::startupInfo() noexcept { return &startupInfo_.StartupInfo; }
 
-HANDLE PseudoConsoleSession::inputRelayCompleteEvent() const noexcept
+HANDLE PseudoConsoleSession::inputRelayFailedEvent() const noexcept
 {
-    return inputRelayCompleteEvent_.get();
+    return inputRelayFailedEvent_.get();
 }
 
 bool PseudoConsoleSession::StartRelays(std::wstring& error)
@@ -153,18 +153,18 @@ bool PseudoConsoleSession::StartRelays(std::wstring& error)
         return false;
     }
 
-    UniqueHandle inputRelayWrite(std::exchange(inputWrite_, {}));
-
     relaysStarted_ = true;
     try
     {
         inputRelay_ = std::jthread(
-            [source = parentInput_,
-                destination = std::move(inputRelayWrite),
-                completionEvent = inputRelayCompleteEvent_.get()]() noexcept
+            [this, source = parentInput_, failureEvent = inputRelayFailedEvent_.get()]() noexcept
             {
-                RelayInput(source, destination.get());
-                SetEvent(completionEvent);
+                // ConPTY treats a closed input endpoint as Ctrl+C, so EOF only stops the relay.
+                // The session owner closes the endpoint after the child has exited or disconnected.
+                if (RelayInput(source, inputWrite_.get()) == InputRelayResult::Error)
+                {
+                    SetEvent(failureEvent);
+                }
             });
 
         UniqueHandle outputRead(std::exchange(outputRead_, {}));

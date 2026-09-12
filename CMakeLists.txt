@@ -628,6 +628,11 @@ if(BUILD_TESTING)
     )
     configure_launch_as_target(LauncherTerminalSizeProbe)
 
+    add_executable(LauncherExitCodeProbe
+        tests/ExitCodeProbe.cpp
+    )
+    configure_launch_as_target(LauncherExitCodeProbe)
+
     add_executable(LauncherCommandLineTests
         tests/CommandLineTests.cpp
         src/WindowsCommandLine.cpp
@@ -742,10 +747,11 @@ if(BUILD_TESTING)
         COMMAND
             "$<TARGET_FILE:LauncherTerminalDisconnectTests>"
             "$<TARGET_FILE:launch_as>"
+            "$<TARGET_FILE:LauncherExitCodeProbe>"
     )
     set_tests_properties(launcher.terminal_disconnect PROPERTIES
         LABELS "launcher;integration;terminal"
-        PASS_REGULAR_EXPRESSION "Terminal disconnect stopped the interactive helper"
+        PASS_REGULAR_EXPRESSION "Redirected stdin EOF preserved the helper exit code"
         TIMEOUT 15
     )
 

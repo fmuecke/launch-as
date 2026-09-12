@@ -2,13 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Project: https://github.com/fmuecke/launch-as
 
-#include "LauncherOptions.h"
 #include "TerminalBridge.h"
 #include "Win32Support.h"
 #include "WindowsCommandLine.h"
 
 #include <Windows.h>
-#include <array>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -18,12 +16,12 @@ namespace
 {
 
 using launch_as::BuildWindowsCommandLine;
-using launch_as::ExitCancelled;
 using launch_as::FormatWindowsError;
 using launch_as::TerminalBridge;
 using launch_as::UniqueHandle;
 
 constexpr DWORD ProcessTimeoutMilliseconds = 10'000;
+constexpr DWORD ExpectedChildExitCode = 7;
 
 class StandardInputOverride final
 {
@@ -73,34 +71,22 @@ class StandardInputOverride final
     bool active_ = false;
 };
 
-[[nodiscard]] std::filesystem::path GetCommandPromptPath()
-{
-    std::array<wchar_t, MAX_PATH> systemDirectory {};
-    const UINT characters =
-        GetSystemDirectoryW(systemDirectory.data(), static_cast<UINT>(systemDirectory.size()));
-    if (characters == 0 || characters >= systemDirectory.size())
-    {
-        return {};
-    }
-    return std::filesystem::path(std::wstring(systemDirectory.data(), characters)) / L"cmd.exe";
-}
-
 } // namespace
 
 int wmain(int argumentCount, wchar_t* arguments[])
 {
-    if (argumentCount != 2)
+    if (argumentCount != 3)
     {
-        std::wcerr << L"Expected the launcher path.\n";
+        std::wcerr << L"Expected the launcher and exit-code probe paths.\n";
         return 1;
     }
 
     const std::filesystem::path launcherPath(arguments[1]);
-    const std::filesystem::path commandPrompt = GetCommandPromptPath();
+    const std::filesystem::path exitCodeProbe(arguments[2]);
     if (!launcherPath.is_absolute() || !std::filesystem::is_regular_file(launcherPath) ||
-        commandPrompt.empty())
+        !exitCodeProbe.is_absolute() || !std::filesystem::is_regular_file(exitCodeProbe))
     {
-        std::wcerr << L"The launcher or cmd.exe path is invalid.\n";
+        std::wcerr << L"The launcher or exit-code probe path is invalid.\n";
         return 1;
     }
 
@@ -147,9 +133,9 @@ int wmain(int argumentCount, wchar_t* arguments[])
         L"120",
         L"30",
         L"--",
-        commandPrompt.native(),
-        L"/d",
-        L"/q"
+        exitCodeProbe.native(),
+        L"1000",
+        L"7"
     };
     std::wstring commandLine = BuildWindowsCommandLine(launcherPath.native(), helperArguments);
 
@@ -207,7 +193,7 @@ int wmain(int argumentCount, wchar_t* arguments[])
     if (WaitForSingleObject(process.get(), 250) != WAIT_TIMEOUT)
     {
         terminalBridge.Stop();
-        std::wcerr << L"The interactive helper exited before its terminal was disconnected.\n";
+        std::wcerr << L"The helper exited before redirected input reached EOF.\n";
         return 1;
     }
 
@@ -222,7 +208,7 @@ int wmain(int argumentCount, wchar_t* arguments[])
 
     if (waitResult != WAIT_OBJECT_0)
     {
-        std::wcerr << L"The helper remained alive after its terminal input was closed.\n";
+        std::wcerr << L"The helper did not exit after redirected input reached EOF.\n";
         return 1;
     }
 
@@ -234,13 +220,13 @@ int wmain(int argumentCount, wchar_t* arguments[])
                    << FormatWindowsError(exitCodeError) << L"\n";
         return 1;
     }
-    if (exitCode != ExitCancelled)
+    if (exitCode != ExpectedChildExitCode)
     {
-        std::wcerr << L"The disconnected helper returned " << exitCode << L"; expected "
-                   << ExitCancelled << L".\n";
+        std::wcerr << L"The helper returned " << exitCode << L"; expected " << ExpectedChildExitCode
+                   << L".\n";
         return 1;
     }
 
-    std::wcout << L"Terminal disconnect stopped the interactive helper.\n";
+    std::wcout << L"Redirected stdin EOF preserved the helper exit code.\n";
     return 0;
 }

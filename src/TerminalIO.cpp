@@ -53,21 +53,27 @@ bool IsUsableHandle(HANDLE handle) noexcept
     return handle != nullptr && handle != INVALID_HANDLE_VALUE;
 }
 
-void RelayInput(HANDLE source, HANDLE destination) noexcept
+InputRelayResult RelayInput(HANDLE source, HANDLE destination) noexcept
 {
     std::array<std::byte, RelayBufferBytes> buffer {};
     for (;;)
     {
         DWORD bytesRead = 0;
         if (!ReadFile(
-                source, buffer.data(), static_cast<DWORD>(buffer.size()), &bytesRead, nullptr) ||
-            bytesRead == 0)
+                source, buffer.data(), static_cast<DWORD>(buffer.size()), &bytesRead, nullptr))
         {
-            return;
+            const DWORD readError = GetLastError();
+            return readError == ERROR_BROKEN_PIPE || readError == ERROR_HANDLE_EOF
+                       ? InputRelayResult::EndOfFile
+                       : InputRelayResult::Error;
+        }
+        if (bytesRead == 0)
+        {
+            return InputRelayResult::EndOfFile;
         }
         if (!WriteAll(destination, buffer.data(), bytesRead))
         {
-            return;
+            return InputRelayResult::Error;
         }
     }
 }

@@ -304,9 +304,7 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
         return ExitFailure;
     }
 
-    const std::array<HANDLE, 2> waitHandles {
-        process.get(), pseudoConsole.inputRelayCompleteEvent()
-    };
+    const std::array<HANDLE, 2> waitHandles {process.get(), pseudoConsole.inputRelayFailedEvent()};
     const DWORD waitResult = WaitForMultipleObjects(
         static_cast<DWORD>(waitHandles.size()), waitHandles.data(), FALSE, INFINITE);
     if (waitResult == WAIT_OBJECT_0 + 1)
@@ -320,12 +318,14 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
         {
             if (!terminated)
             {
-                std::wcerr << L"Could not terminate the disconnected pseudoconsole child: "
+                std::wcerr << L"Could not terminate the pseudoconsole child after input relay "
+                              L"failure: "
                            << FormatWindowsError(terminationError) << L"\n";
             }
             else
             {
-                std::wcerr << L"The disconnected pseudoconsole child did not terminate in time.\n";
+                std::wcerr << L"The pseudoconsole child did not terminate after input relay "
+                              L"failure.\n";
             }
             return ExitFailure;
         }

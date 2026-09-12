@@ -30,7 +30,7 @@ class PseudoConsoleSession final
     [[nodiscard]] bool Initialize(COORD terminalSize, bool inheritCursor, HANDLE parentInput,
         HANDLE parentOutput, HANDLE resizeInput, std::wstring& error);
     [[nodiscard]] STARTUPINFOW* startupInfo() noexcept;
-    [[nodiscard]] HANDLE inputRelayCompleteEvent() const noexcept;
+    [[nodiscard]] HANDLE inputRelayFailedEvent() const noexcept;
     [[nodiscard]] bool StartRelays(std::wstring& error);
     void StopRelays() noexcept;
 
@@ -55,7 +55,7 @@ class PseudoConsoleSession final
     std::vector<std::byte> attributeListStorage_;
     UniqueHandle inputWrite_;
     UniqueHandle outputRead_;
-    UniqueHandle inputRelayCompleteEvent_;
+    UniqueHandle inputRelayFailedEvent_;
     UniqueHandle outputCompleteEvent_;
     HANDLE parentInput_ = nullptr;
     HANDLE parentOutput_ = nullptr;

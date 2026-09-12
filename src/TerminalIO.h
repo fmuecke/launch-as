@@ -18,8 +18,14 @@ inline constexpr DWORD OutputDrainGraceMilliseconds = 250;
 // cannot force a multi-gigabyte ConPTY text-buffer allocation.
 inline constexpr SHORT MaximumTerminalDimension = 2000;
 
+enum class InputRelayResult
+{
+    EndOfFile,
+    Error
+};
+
 [[nodiscard]] bool IsUsableHandle(HANDLE handle) noexcept;
-void RelayInput(HANDLE source, HANDLE destination) noexcept;
+[[nodiscard]] InputRelayResult RelayInput(HANDLE source, HANDLE destination) noexcept;
 void RelayOutput(
     HANDLE source, HANDLE destination, std::stop_token stopToken = std::stop_token {}) noexcept;
 [[nodiscard]] bool WriteTerminalSize(HANDLE destination, COORD size) noexcept;

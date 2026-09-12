@@ -552,14 +552,15 @@ bool TerminalBridge::Start(std::wstring& error)
         return false;
     }
 
-    UniqueHandle inputRelayWrite(std::exchange(inputWrite_, {}));
-
     started_ = true;
     try
     {
         inputRelay_ = std::jthread(
-            [source = parentInput_, destination = std::move(inputRelayWrite)]() noexcept
-            { RelayInput(source, destination.get()); });
+            [this, source = parentInput_]() noexcept
+            {
+                // Keep ConPTY input open after stdin EOF; closing it injects Ctrl+C into the child.
+                static_cast<void>(RelayInput(source, inputWrite_.get()));
+            });
 
         outputRelay_ = std::jthread(
             [source = outputRead_.get(),

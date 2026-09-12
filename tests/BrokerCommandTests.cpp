@@ -18,9 +18,6 @@
 namespace
 {
 
-constexpr int SkipInstalledBrokerService = 77;
-constexpr wchar_t BrokerServiceName[] = L"launch-as-broker";
-
 [[nodiscard]] bool Expect(bool condition, const wchar_t* message)
 {
     if (!condition)
@@ -68,25 +65,6 @@ constexpr wchar_t BrokerServiceName[] = L"launch-as-broker";
     return exitCode;
 }
 
-[[nodiscard]] bool IsBrokerServiceInstalled()
-{
-    const SC_HANDLE manager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
-    if (manager == nullptr)
-    {
-        return false;
-    }
-    const SC_HANDLE service = OpenServiceW(manager, BrokerServiceName, 0);
-    if (service != nullptr)
-    {
-        CloseServiceHandle(service);
-        CloseServiceHandle(manager);
-        return true;
-    }
-    const DWORD serviceError = GetLastError();
-    CloseServiceHandle(manager);
-    return serviceError == ERROR_ACCESS_DENIED;
-}
-
 struct CommandResult
 {
     DWORD exitCode = ERROR_GEN_FAILURE;
@@ -103,6 +81,18 @@ struct CommandResult
     SECURITY_ATTRIBUTES attributes {};
     attributes.nLength = sizeof(attributes);
     attributes.bInheritHandle = TRUE;
+    HANDLE rawInputRead = nullptr;
+    HANDLE rawInputWrite = nullptr;
+    if (!CreatePipe(&rawInputRead, &rawInputWrite, &attributes, 0))
+    {
+        return {.exitCode = GetLastError()};
+    }
+    launch_as::UniqueHandle inputRead(rawInputRead);
+    launch_as::UniqueHandle inputWrite(rawInputWrite);
+    if (!SetHandleInformation(inputWrite.get(), HANDLE_FLAG_INHERIT, 0))
+    {
+        return {.exitCode = GetLastError()};
+    }
     HANDLE rawRead = nullptr;
     HANDLE rawWrite = nullptr;
     if (!CreatePipe(&rawRead, &rawWrite, &attributes, 0))
@@ -119,7 +109,7 @@ struct CommandResult
     STARTUPINFOW startupInfo {};
     startupInfo.cb = sizeof(startupInfo);
     startupInfo.dwFlags = STARTF_USESTDHANDLES;
-    startupInfo.hStdInput = nullptr;
+    startupInfo.hStdInput = inputRead.get();
     startupInfo.hStdOutput = write.get();
     startupInfo.hStdError = write.get();
     PROCESS_INFORMATION processInfo {};
@@ -138,6 +128,7 @@ struct CommandResult
     }
     CloseHandle(processInfo.hThread);
     write.reset();
+    inputWrite.reset();
     WaitForSingleObject(processInfo.hProcess, INFINITE);
 
     CommandResult result;
@@ -202,6 +193,13 @@ class ServerThread final
         if (!ConnectNamedPipe(pipe, &overlapped))
         {
             const DWORD connectError = GetLastError();
+            if (connectError == ERROR_PIPE_CONNECTED)
+            {
+                connected_ = true;
+                launch_as::broker::ServeControlPipeRequest(pipe, stopEvent);
+                DisconnectNamedPipe(pipe);
+                return;
+            }
             if (connectError != ERROR_IO_PENDING ||
                 WaitForSingleObject(connectEvent.get(), 1'000) != WAIT_OBJECT_0)
             {
@@ -243,12 +241,6 @@ int wmain(int argumentCount, wchar_t* arguments[])
     {
         return 1;
     }
-    if (IsBrokerServiceInstalled())
-    {
-        std::wcout << L"Skipped: the broker service is installed.\n";
-        return SkipInstalledBrokerService;
-    }
-
     const CommandResult unconfirmedEnroll =
         RunCommandAndCapture(adminPath, L"enroll arbitrary-profile");
     const CommandResult unconfirmedUnenroll =
@@ -291,11 +283,6 @@ int wmain(int argumentCount, wchar_t* arguments[])
     if (!server)
     {
         const DWORD pipeError = GetLastError();
-        if (pipeError == ERROR_ACCESS_DENIED)
-        {
-            std::wcout << L"Skipped: another broker instance owns the control pipe.\n";
-            return SkipInstalledBrokerService;
-        }
         std::wcerr << L"Could not create the broker control pipe: "
                    << launch_as::FormatWindowsError(pipeError) << L"\n";
         return 1;

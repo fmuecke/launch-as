@@ -341,17 +341,59 @@ if(BUILD_TESTING)
         Userenv
     )
     configure_launch_as_target(LauncherBrokerCommandTests)
+    target_compile_definitions(LauncherBrokerCommandTests PRIVATE
+        LAUNCH_AS_TEST_CONTROL_PIPE
+    )
+
+    add_executable(LauncherBrokerAdminTestClient
+        src/BrokerAccountProvisioner.cpp
+        src/BrokerAccountProvisioner.h
+        src/BrokerAdmin.cpp
+        src/BrokerAdminCli.cpp
+        src/BrokerAdminCli.h
+        src/BrokerAudit.cpp
+        src/BrokerAudit.h
+        src/BrokerCallerPolicy.cpp
+        src/BrokerCallerPolicy.h
+        src/BrokerControlPipe.cpp
+        src/BrokerControlPipe.h
+        src/BrokerDataDirectory.cpp
+        src/BrokerDataDirectory.h
+        src/LicenseHeader.cpp
+        src/LicenseHeader.h
+        src/BrokerProtocol.cpp
+        src/BrokerProtocol.h
+        src/BrokerServiceInstaller.cpp
+        src/BrokerServiceInstaller.h
+        src/Win32Support.cpp
+        src/Win32Support.h
+    )
+    target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
+        Advapi32
+        Netapi32
+        Ole32
+        Shell32
+    )
+    target_include_directories(LauncherBrokerAdminTestClient PRIVATE
+        "${CMAKE_CURRENT_BINARY_DIR}"
+    )
+    configure_launch_as_target(LauncherBrokerAdminTestClient)
+    target_compile_definitions(LauncherBrokerAdminTestClient PRIVATE
+        LAUNCH_AS_TEST_CONTROL_PIPE
+    )
+    set_target_properties(LauncherBrokerAdminTestClient PROPERTIES
+        OUTPUT_NAME "launch-as-admin-test"
+    )
 
     add_test(
         NAME launcher.broker_command
         COMMAND
             "$<TARGET_FILE:LauncherBrokerCommandTests>"
-            "$<TARGET_FILE:launch_as_admin>"
+            "$<TARGET_FILE:LauncherBrokerAdminTestClient>"
             "$<TARGET_FILE:launch_as_broker>"
     )
     set_tests_properties(launcher.broker_command PROPERTIES
         LABELS "broker;integration"
-        SKIP_RETURN_CODE 77
         TIMEOUT 15
     )
 

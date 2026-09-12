@@ -14,7 +14,11 @@
 namespace launch_as::broker
 {
 
+#ifdef LAUNCH_AS_TEST_CONTROL_PIPE
+inline constexpr std::wstring_view ControlPipeName = L"\\\\.\\pipe\\launch-as-broker-test.v1";
+#else
 inline constexpr std::wstring_view ControlPipeName = L"\\\\.\\pipe\\launch-as-broker.v1";
+#endif
 inline constexpr std::size_t MaximumMessageBytes = 64 * 1024;
 inline constexpr std::size_t MaximumArguments = 64;
 

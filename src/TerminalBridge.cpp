@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstddef>
 #include <exception>
+#include <iostream>
 #include <memory>
 #include <objbase.h>
 #include <sddl.h>
@@ -24,6 +25,7 @@ namespace
 constexpr DWORD PipeMode =
     PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS;
 constexpr DWORD BrokerPipeConnectionTimeoutMilliseconds = 5'000;
+constexpr auto ResizePollInterval = std::chrono::milliseconds(50);
 
 struct LocalFreeDeleter
 {
@@ -545,10 +547,12 @@ bool TerminalBridge::Start(std::wstring& error)
     }
 
     const COORD initialSize = terminalSize();
-    if (!SendResize(initialSize))
+    DWORD resizeError = ERROR_SUCCESS;
+    if (!SendResize(initialSize, resizeError))
     {
         terminalMode_.Restore();
-        error = L"Could not send the initial terminal size to the pseudoconsole host.";
+        error = L"Could not send the initial terminal size to the pseudoconsole host: " +
+                FormatWindowsError(resizeError);
         return false;
     }
 
@@ -576,10 +580,15 @@ bool TerminalBridge::Start(std::wstring& error)
             {
                 while (!stopToken.stop_requested())
                 {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                    std::this_thread::sleep_for(ResizePollInterval);
                     const COORD size = terminalSize();
-                    if ((size.X != previousSize.X || size.Y != previousSize.Y) && !SendResize(size))
+                    DWORD resizeError = ERROR_SUCCESS;
+                    if ((size.X != previousSize.X || size.Y != previousSize.Y) &&
+                        !SendResize(size, resizeError))
                     {
+                        std::wcerr << L"Could not send the terminal resize to the pseudoconsole "
+                                      L"host: "
+                                   << FormatWindowsError(resizeError) << L"\n";
                         return;
                     }
                     previousSize = size;
@@ -654,7 +663,18 @@ void TerminalBridge::Stop() noexcept
 
 bool TerminalBridge::SendResize(COORD size) noexcept
 {
-    return resizeWrite_ && WriteTerminalSize(resizeWrite_.get(), size);
+    DWORD ignored = ERROR_SUCCESS;
+    return SendResize(size, ignored);
+}
+
+bool TerminalBridge::SendResize(COORD size, DWORD& error) noexcept
+{
+    if (!resizeWrite_)
+    {
+        error = ERROR_INVALID_HANDLE;
+        return false;
+    }
+    return WriteTerminalSize(resizeWrite_.get(), size, error);
 }
 
 COORD TerminalBridge::terminalSize() const noexcept { return CurrentTerminalSize(parentOutput_); }

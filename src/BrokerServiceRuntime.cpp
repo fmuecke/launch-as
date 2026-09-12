@@ -305,10 +305,19 @@ void JoinWorkers(std::vector<std::unique_ptr<BrokerPipeWorker>>& workers)
     {
         return false;
     }
-    BrokerPipeWorker* workerState = worker.get();
     try
     {
-        worker->thread = std::thread(
+        workers.push_back(std::move(worker));
+    }
+    catch (...)
+    {
+        return false;
+    }
+
+    BrokerPipeWorker* workerState = workers.back().get();
+    try
+    {
+        workerState->thread = std::thread(
             [ownedPipe = std::move(pipe), &launchPolicy, workerState]() mutable
             {
                 launch_as::broker::ServeControlPipeRequest(ownedPipe.get(),
@@ -325,9 +334,9 @@ void JoinWorkers(std::vector<std::unique_ptr<BrokerPipeWorker>>& workers)
     }
     catch (...)
     {
+        workers.pop_back();
         return false;
     }
-    workers.push_back(std::move(worker));
     return true;
 }
 

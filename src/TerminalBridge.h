@@ -44,6 +44,7 @@ class TerminalBridge final
     void Stop() noexcept;
 
     [[nodiscard]] bool SendResize(COORD size) noexcept;
+    [[nodiscard]] bool SendResize(COORD size, DWORD& error) noexcept;
     [[nodiscard]] COORD terminalSize() const noexcept;
     [[nodiscard]] bool supportsCursorInheritance() const noexcept;
 

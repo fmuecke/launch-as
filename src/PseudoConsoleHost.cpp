@@ -298,9 +298,12 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
     UniqueHandle process(processInformation.hProcess);
     UniqueHandle thread(processInformation.hThread);
 
-    if (ResumeThread(thread.get()) == static_cast<DWORD>(-1))
+    const DWORD suspendedCount = ResumeThread(thread.get());
+    const DWORD resumeError = suspendedCount == static_cast<DWORD>(-1)
+                                  ? GetLastError()
+                                  : (suspendedCount == 1 ? ERROR_SUCCESS : ERROR_INVALID_STATE);
+    if (resumeError != ERROR_SUCCESS)
     {
-        const DWORD resumeError = GetLastError();
         TerminateProcess(process.get(), ExitFailure);
         WaitForSingleObject(process.get(), ProcessTerminationTimeoutMilliseconds);
         std::wcerr << L"Could not resume the pseudoconsole child: "

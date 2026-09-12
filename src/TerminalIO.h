@@ -30,7 +30,7 @@ enum class InputRelayResult
     HANDLE source, HANDLE destination, std::stop_token stopToken = std::stop_token {}) noexcept;
 void RelayOutput(
     HANDLE source, HANDLE destination, std::stop_token stopToken = std::stop_token {}) noexcept;
-[[nodiscard]] bool WriteTerminalSize(HANDLE destination, COORD size) noexcept;
+[[nodiscard]] bool WriteTerminalSize(HANDLE destination, COORD size, DWORD& error) noexcept;
 [[nodiscard]] bool ReadTerminalSize(HANDLE source, COORD& size) noexcept;
 [[nodiscard]] COORD CurrentTerminalSize(HANDLE output) noexcept;
 [[nodiscard]] bool SupportsTerminalCursorInheritance(HANDLE input, HANDLE output) noexcept;

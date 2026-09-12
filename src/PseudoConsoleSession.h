@@ -55,6 +55,8 @@ class PseudoConsoleSession final
     std::vector<std::byte> attributeListStorage_;
     UniqueHandle inputWrite_;
     UniqueHandle outputRead_;
+    UniqueHandle nullInput_;
+    UniqueHandle nullOutput_;
     UniqueHandle inputRelayFailedEvent_;
     UniqueHandle outputCompleteEvent_;
     HANDLE parentInput_ = nullptr;

@@ -82,6 +82,35 @@ bool PseudoConsoleSession::Initialize(COORD terminalSize, bool inheritCursor, HA
     outputRead_.reset(rawOutputRead);
     UniqueHandle pseudoOutput(rawPseudoOutput);
 
+    nullInput_.reset(CreateFileW(L"NUL",
+        GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        nullptr,
+        OPEN_EXISTING,
+        0,
+        nullptr));
+    if (!nullInput_)
+    {
+        const DWORD nullInputError = GetLastError();
+        error =
+            L"Could not open the pseudoconsole null input: " + FormatWindowsError(nullInputError);
+        return false;
+    }
+    nullOutput_.reset(CreateFileW(L"NUL",
+        GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        nullptr,
+        OPEN_EXISTING,
+        0,
+        nullptr));
+    if (!nullOutput_)
+    {
+        const DWORD nullOutputError = GetLastError();
+        error =
+            L"Could not open the pseudoconsole null output: " + FormatWindowsError(nullOutputError);
+        return false;
+    }
+
     const DWORD flags = inheritCursor ? PSEUDOCONSOLE_INHERIT_CURSOR : 0;
     const HRESULT createResult =
         api_.create(terminalSize, pseudoInput.get(), pseudoOutput.get(), flags, &pseudoConsole_);
@@ -105,9 +134,9 @@ bool PseudoConsoleSession::Initialize(COORD terminalSize, bool inheritCursor, HA
     attributeListStorage_.resize(attributeListBytes);
     startupInfo_.StartupInfo.cb = sizeof(startupInfo_);
     startupInfo_.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-    startupInfo_.StartupInfo.hStdInput = nullptr;
-    startupInfo_.StartupInfo.hStdOutput = nullptr;
-    startupInfo_.StartupInfo.hStdError = nullptr;
+    startupInfo_.StartupInfo.hStdInput = nullInput_.get();
+    startupInfo_.StartupInfo.hStdOutput = nullOutput_.get();
+    startupInfo_.StartupInfo.hStdError = nullOutput_.get();
     startupInfo_.lpAttributeList =
         reinterpret_cast<PPROC_THREAD_ATTRIBUTE_LIST>(attributeListStorage_.data());
     if (!InitializeProcThreadAttributeList(startupInfo_.lpAttributeList, 1, 0, &attributeListBytes))

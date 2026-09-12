@@ -123,6 +123,14 @@ int wmain(int argumentCount, wchar_t* arguments[])
         std::wcerr << L"The launcher or terminal-size probe path is invalid.\n";
         return 1;
     }
+    TerminalBridge unopenedBridge;
+    DWORD resizeError = ERROR_SUCCESS;
+    if (unopenedBridge.SendResize(COORD {120, 30}, resizeError) ||
+        resizeError != ERROR_INVALID_HANDLE)
+    {
+        std::wcerr << L"An unopened terminal bridge did not report its resize write error.\n";
+        return 1;
+    }
     if (!VerifyTargetReceivesOnlyPipeClients())
     {
         return 1;

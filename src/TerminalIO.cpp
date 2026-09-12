@@ -15,15 +15,22 @@ namespace launch_as
 namespace
 {
 
-[[nodiscard]] bool WriteAll(HANDLE destination, const std::byte* data, DWORD bytes) noexcept
+[[nodiscard]] bool WriteAll(
+    HANDLE destination, const std::byte* data, DWORD bytes, DWORD& error) noexcept
 {
+    error = ERROR_SUCCESS;
     DWORD bytesWritten = 0;
     while (bytesWritten < bytes)
     {
         DWORD written = 0;
-        if (!WriteFile(destination, data + bytesWritten, bytes - bytesWritten, &written, nullptr) ||
-            written == 0)
+        if (!WriteFile(destination, data + bytesWritten, bytes - bytesWritten, &written, nullptr))
         {
+            error = GetLastError();
+            return false;
+        }
+        if (written == 0)
+        {
+            error = ERROR_WRITE_FAULT;
             return false;
         }
         bytesWritten += written;
@@ -109,7 +116,8 @@ InputRelayResult RelayInput(HANDLE source, HANDLE destination, std::stop_token s
         {
             return InputRelayResult::EndOfFile;
         }
-        if (!WriteAll(destination, buffer.data(), bytesRead))
+        DWORD writeError = ERROR_SUCCESS;
+        if (!WriteAll(destination, buffer.data(), bytesRead, writeError))
         {
             return InputRelayResult::Error;
         }
@@ -131,19 +139,23 @@ void RelayOutput(HANDLE source, HANDLE destination, std::stop_token stopToken) n
         }
         if (destinationAvailable)
         {
-            destinationAvailable = WriteAll(destination, buffer.data(), bytesRead);
+            DWORD writeError = ERROR_SUCCESS;
+            destinationAvailable = WriteAll(destination, buffer.data(), bytesRead, writeError);
         }
     }
 }
 
-bool WriteTerminalSize(HANDLE destination, COORD size) noexcept
+bool WriteTerminalSize(HANDLE destination, COORD size, DWORD& error) noexcept
 {
     if (size.X <= 0 || size.Y <= 0)
     {
+        error = ERROR_INVALID_PARAMETER;
         return false;
     }
-    return WriteAll(
-        destination, reinterpret_cast<const std::byte*>(&size), static_cast<DWORD>(sizeof(size)));
+    return WriteAll(destination,
+        reinterpret_cast<const std::byte*>(&size),
+        static_cast<DWORD>(sizeof(size)),
+        error);
 }
 
 bool ReadTerminalSize(HANDLE source, COORD& size) noexcept

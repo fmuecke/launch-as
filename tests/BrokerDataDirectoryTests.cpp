@@ -123,7 +123,8 @@ class TemporaryDirectory final
 // so this reproduces what an unprivileged attacker can pre-plant at the target path.
 [[nodiscard]] bool CreateDirectoryJunction(const std::wstring& path, const std::wstring& target)
 {
-    std::wstring commandLine = L"cmd.exe /c mklink /J \"" + path + L"\" \"" + target + L"\" >NUL 2>&1";
+    std::wstring commandLine =
+        L"cmd.exe /c mklink /J \"" + path + L"\" \"" + target + L"\" >NUL 2>&1";
     STARTUPINFOW startupInfo {};
     startupInfo.cb = sizeof(startupInfo);
     PROCESS_INFORMATION processInfo {};

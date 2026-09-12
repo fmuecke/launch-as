@@ -241,7 +241,7 @@ void AuditRequest(launch_as::broker::BrokerAuditEvent event, WORD type,
     securityAttributes.lpSecurityDescriptor = securityDescriptor.get();
 
     const DWORD openMode = PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED |
-        (firstInstance ? FILE_FLAG_FIRST_PIPE_INSTANCE : 0);
+                           (firstInstance ? FILE_FLAG_FIRST_PIPE_INSTANCE : 0);
     HANDLE pipe = CreateNamedPipeW(launch_as::broker::ControlPipeName.data(),
         openMode,
         PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
@@ -381,8 +381,7 @@ void JoinWorkers(std::vector<std::unique_ptr<BrokerPipeWorker>>& workers)
                     L"reason=first_pipe_instance_unavailable",
                     L"win32Error=" + std::to_wstring(createError),
                 };
-                static_cast<void>(launch_as::broker::WriteBrokerAuditEvent(
-                    EVENTLOG_ERROR_TYPE,
+                static_cast<void>(launch_as::broker::WriteBrokerAuditEvent(EVENTLOG_ERROR_TYPE,
                     launch_as::broker::BrokerAuditEvent::ControlPipeCreationFailed,
                     fields));
                 serviceExitCode = createError;

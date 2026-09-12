@@ -141,7 +141,8 @@ constexpr std::array<LPCWSTR, 5> AllowedTokenPrivilegeNames {
     std::array<LUID, AllowedTokenPrivilegeNames.size()> allowedPrivileges {};
     for (std::size_t index = 0; index < AllowedTokenPrivilegeNames.size(); ++index)
     {
-        if (!LookupPrivilegeValueW(nullptr, AllowedTokenPrivilegeNames[index], &allowedPrivileges[index]))
+        if (!LookupPrivilegeValueW(
+                nullptr, AllowedTokenPrivilegeNames[index], &allowedPrivileges[index]))
         {
             const DWORD lookupError = GetLastError();
             return lookupError;

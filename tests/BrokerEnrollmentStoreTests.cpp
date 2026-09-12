@@ -36,11 +36,12 @@ class TemporaryDirectory final
 
     ~TemporaryDirectory()
     {
-        for (const wchar_t* fileName : {L"First.enrollment",
-                 L"Second.enrollment",
-                 L"Corrupt.enrollment",
-                 L"Tampered.enrollment",
-                 L"enrollment.key"})
+        for (const wchar_t* fileName :
+            {L"First.enrollment",
+                L"Second.enrollment",
+                L"Corrupt.enrollment",
+                L"Tampered.enrollment",
+                L"enrollment.key"})
         {
             DeleteFileW((path_ + L"\\" + fileName).c_str());
         }
@@ -116,7 +117,7 @@ class TemporaryDirectory final
     BYTE value = 0;
     DWORD transferred = 0;
     const bool read = SetFilePointerEx(file, lastByteOffset, nullptr, FILE_BEGIN) != FALSE &&
-                       ReadFile(file, &value, 1, &transferred, nullptr) != FALSE && transferred == 1;
+                      ReadFile(file, &value, 1, &transferred, nullptr) != FALSE && transferred == 1;
     if (!read)
     {
         CloseHandle(file);
@@ -124,7 +125,8 @@ class TemporaryDirectory final
     }
     value = static_cast<BYTE>(~value);
     const bool wrote = SetFilePointerEx(file, lastByteOffset, nullptr, FILE_BEGIN) != FALSE &&
-                        WriteFile(file, &value, 1, &transferred, nullptr) != FALSE && transferred == 1;
+                       WriteFile(file, &value, 1, &transferred, nullptr) != FALSE &&
+                       transferred == 1;
     CloseHandle(file);
     return wrote;
 }

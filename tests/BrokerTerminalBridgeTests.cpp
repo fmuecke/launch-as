@@ -254,11 +254,17 @@ int wmain(int argumentCount, wchar_t* arguments[])
     launch_as::TerminalBridge terminalBridge;
     launch_as::TerminalPipeNames pipeNames;
     std::wstring error;
-    if (!Expect(terminalBridge.InitializeForBroker(L"", pipeNames, error),
+    if (!Expect(terminalBridge.InitializeForBroker(L"S-1-5-32-545", pipeNames, error),
             L"Could not create broker terminal pipes."))
     {
         return 1;
     }
+
+    launch_as::TerminalBridge invalidSidBridge;
+    launch_as::TerminalPipeNames invalidSidPipeNames;
+    std::wstring invalidSidError;
+    const bool invalidSidRejected =
+        !invalidSidBridge.InitializeForBroker(L"not-a-sid", invalidSidPipeNames, invalidSidError);
 
     const ULONGLONG started = GetTickCount64();
     const bool connected = terminalBridge.ConnectBrokerChild(error);
@@ -274,7 +280,9 @@ int wmain(int argumentCount, wchar_t* arguments[])
         return SkipNoConsoleAttached;
     }
 
-    return Expect(!connected, L"The broker terminal bridge accepted an absent host.") &&
+    return Expect(
+               invalidSidRejected, L"The broker terminal bridge accepted an invalid child SID.") &&
+                   Expect(!connected, L"The broker terminal bridge accepted an absent host.") &&
                    Expect(elapsed < 7'000,
                        L"The broker terminal bridge did not time out when the host was absent.") &&
                    Expect(error.find(L"Timed out") != std::wstring::npos,

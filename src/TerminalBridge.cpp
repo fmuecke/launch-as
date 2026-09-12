@@ -4,6 +4,7 @@
 
 #include "TerminalBridge.h"
 
+#include <Aclapi.h>
 #include <Windows.h>
 #include <array>
 #include <chrono>
@@ -40,6 +41,14 @@ struct LocalFreeDeleter
 
 using UniqueLocalMemory = std::unique_ptr<void, LocalFreeDeleter>;
 
+struct PipeSecurityDescriptor final
+{
+    SECURITY_DESCRIPTOR value {};
+    UniqueLocalMemory dacl;
+
+    [[nodiscard]] PSECURITY_DESCRIPTOR get() noexcept { return &value; }
+};
+
 enum class PipeDirection
 {
     ParentWrites,
@@ -47,7 +56,7 @@ enum class PipeDirection
 };
 
 [[nodiscard]] bool CreatePipeSecurityDescriptor(
-    std::wstring_view childSid, UniqueLocalMemory& descriptor, std::wstring& error)
+    std::wstring_view childSid, PipeSecurityDescriptor& descriptor, std::wstring& error)
 {
     HANDLE rawToken = nullptr;
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &rawToken))
@@ -79,35 +88,91 @@ enum class PipeDirection
     }
 
     const auto* tokenUser = reinterpret_cast<const TOKEN_USER*>(tokenStorage.data());
-    wchar_t* rawSid = nullptr;
     if (!IsValidSid(tokenUser->User.Sid))
     {
         error = L"The launcher token contains an invalid SID.";
         return false;
     }
-    if (!ConvertSidToStringSidW(tokenUser->User.Sid, &rawSid))
+
+    std::array<BYTE, SECURITY_MAX_SID_SIZE> systemSid {};
+    DWORD systemSidBytes = static_cast<DWORD>(systemSid.size());
+    if (!CreateWellKnownSid(WinLocalSystemSid, nullptr, systemSid.data(), &systemSidBytes))
     {
-        const DWORD sidError = GetLastError();
-        error = L"Could not format the launcher identity for terminal-pipe security: " +
-                FormatWindowsError(sidError);
+        const DWORD systemSidError = GetLastError();
+        error = L"Could not create the SYSTEM identity for terminal-pipe security: " +
+                FormatWindowsError(systemSidError);
         return false;
     }
-    std::unique_ptr<wchar_t, LocalFreeDeleter> sid(rawSid);
 
-    std::wstring securityDefinition = L"D:P(A;;GA;;;SY)(A;;GA;;;" + std::wstring(sid.get()) + L")";
+    UniqueLocalMemory childSidStorage;
+    PSID childSidValue = nullptr;
     if (!childSid.empty())
     {
-        securityDefinition += L"(A;;GRGW;;;" + std::wstring(childSid) + L")";
+        const std::wstring childSidText(childSid);
+        const BOOL convertedChildSid = ConvertStringSidToSidW(childSidText.c_str(), &childSidValue);
+        const DWORD childSidError = convertedChildSid ? ERROR_SUCCESS : GetLastError();
+        if (!convertedChildSid)
+        {
+            error = L"The broker child identity is not a valid SID: " +
+                    FormatWindowsError(childSidError);
+            return false;
+        }
+        childSidStorage.reset(childSidValue);
+        if (!IsValidSid(childSidValue))
+        {
+            error = L"The broker child identity is not a valid SID.";
+            return false;
+        }
     }
-    PSECURITY_DESCRIPTOR rawDescriptor = nullptr;
-    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            securityDefinition.c_str(), SDDL_REVISION_1, &rawDescriptor, nullptr))
+
+    std::array<EXPLICIT_ACCESSW, 3> accessEntries {};
+    const auto grantAccess = [](EXPLICIT_ACCESSW& entry, PSID sid, DWORD access)
     {
-        const DWORD descriptorError = GetLastError();
-        error = L"Could not create terminal-pipe security: " + FormatWindowsError(descriptorError);
+        entry.grfAccessPermissions = access;
+        entry.grfAccessMode = GRANT_ACCESS;
+        entry.grfInheritance = NO_INHERITANCE;
+        entry.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+        entry.Trustee.TrusteeType = TRUSTEE_IS_USER;
+        entry.Trustee.ptstrName = reinterpret_cast<LPWSTR>(sid);
+    };
+    grantAccess(accessEntries[0], systemSid.data(), GENERIC_ALL);
+    grantAccess(accessEntries[1], tokenUser->User.Sid, GENERIC_ALL);
+    ULONG entryCount = 2;
+    if (childSidValue != nullptr)
+    {
+        grantAccess(accessEntries[entryCount], childSidValue, GENERIC_READ | GENERIC_WRITE);
+        ++entryCount;
+    }
+
+    PACL rawDacl = nullptr;
+    const DWORD aclError = SetEntriesInAclW(entryCount, accessEntries.data(), nullptr, &rawDacl);
+    if (aclError != ERROR_SUCCESS)
+    {
+        error = L"Could not create terminal-pipe ACL: " + FormatWindowsError(aclError);
         return false;
     }
-    descriptor.reset(rawDescriptor);
+    UniqueLocalMemory dacl(rawDacl);
+    if (!InitializeSecurityDescriptor(descriptor.get(), SECURITY_DESCRIPTOR_REVISION))
+    {
+        const DWORD descriptorError = GetLastError();
+        error =
+            L"Could not initialize terminal-pipe security: " + FormatWindowsError(descriptorError);
+        return false;
+    }
+    if (!SetSecurityDescriptorDacl(descriptor.get(), TRUE, rawDacl, FALSE))
+    {
+        const DWORD descriptorError = GetLastError();
+        error =
+            L"Could not configure terminal-pipe security: " + FormatWindowsError(descriptorError);
+        return false;
+    }
+    if (!SetSecurityDescriptorControl(descriptor.get(), SE_DACL_PROTECTED, SE_DACL_PROTECTED))
+    {
+        const DWORD descriptorError = GetLastError();
+        error = L"Could not protect terminal-pipe security: " + FormatWindowsError(descriptorError);
+        return false;
+    }
+    descriptor.dacl = std::move(dacl);
     return true;
 }
 
@@ -330,7 +395,7 @@ bool TerminalBridge::Initialize(STARTUPINFOW& childStartupInformation, std::wstr
         return false;
     }
 
-    UniqueLocalMemory pipeSecurity;
+    PipeSecurityDescriptor pipeSecurity;
     if (!CreatePipeSecurityDescriptor(L"", pipeSecurity, error))
     {
         return false;
@@ -338,7 +403,7 @@ bool TerminalBridge::Initialize(STARTUPINFOW& childStartupInformation, std::wstr
 
     if (!CreateTerminalPipePair(L"input",
             PipeDirection::ParentWrites,
-            static_cast<PSECURITY_DESCRIPTOR>(pipeSecurity.get()),
+            pipeSecurity.get(),
             inputWrite_,
             childInputRead_,
             error))
@@ -348,7 +413,7 @@ bool TerminalBridge::Initialize(STARTUPINFOW& childStartupInformation, std::wstr
 
     if (!CreateTerminalPipePair(L"output",
             PipeDirection::ParentReads,
-            static_cast<PSECURITY_DESCRIPTOR>(pipeSecurity.get()),
+            pipeSecurity.get(),
             outputRead_,
             childOutputWrite_,
             error))
@@ -358,7 +423,7 @@ bool TerminalBridge::Initialize(STARTUPINFOW& childStartupInformation, std::wstr
 
     if (!CreateTerminalPipePair(L"resize",
             PipeDirection::ParentWrites,
-            static_cast<PSECURITY_DESCRIPTOR>(pipeSecurity.get()),
+            pipeSecurity.get(),
             resizeWrite_,
             childResizeRead_,
             error))
@@ -394,26 +459,26 @@ bool TerminalBridge::InitializeForBroker(
                 FormatWindowsError(eventError);
         return false;
     }
-    UniqueLocalMemory pipeSecurity;
+    PipeSecurityDescriptor pipeSecurity;
     if (!CreatePipeSecurityDescriptor(childSid, pipeSecurity, error))
     {
         return false;
     }
     if (!CreateTerminalPipeServer(L"input",
             PipeDirection::ParentWrites,
-            static_cast<PSECURITY_DESCRIPTOR>(pipeSecurity.get()),
+            pipeSecurity.get(),
             inputWrite_,
             pipeNames.input,
             error) ||
         !CreateTerminalPipeServer(L"output",
             PipeDirection::ParentReads,
-            static_cast<PSECURITY_DESCRIPTOR>(pipeSecurity.get()),
+            pipeSecurity.get(),
             outputRead_,
             pipeNames.output,
             error) ||
         !CreateTerminalPipeServer(L"resize",
             PipeDirection::ParentWrites,
-            static_cast<PSECURITY_DESCRIPTOR>(pipeSecurity.get()),
+            pipeSecurity.get(),
             resizeWrite_,
             pipeNames.resize,
             error))

@@ -13,7 +13,9 @@
 #include <Windows.h>
 #include <array>
 #include <iostream>
+#include <ntsecapi.h>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -73,7 +75,7 @@ class TemporaryDirectory final
     {
         if (created_)
         {
-            const std::wstring search = path_ + L"\\*.enrollment*";
+            const std::wstring search = path_ + L"\\*";
             WIN32_FIND_DATAW file {};
             HANDLE find = FindFirstFileW(search.c_str(), &file);
             if (find != INVALID_HANDLE_VALUE)
@@ -174,6 +176,35 @@ class TemporaryDirectory final
     NetApiBufferFree(buffer);
     return NetUserSetInfo(nullptr, name.c_str(), 1008, reinterpret_cast<LPBYTE>(&flags), nullptr) ==
            NERR_Success;
+}
+
+void InitLsaString(LSA_UNICODE_STRING& lsaString, const wchar_t* value)
+{
+    const size_t length = wcslen(value);
+    lsaString.Buffer = const_cast<wchar_t*>(value);
+    lsaString.Length = static_cast<USHORT>(length * sizeof(wchar_t));
+    lsaString.MaximumLength = static_cast<USHORT>((length + 1) * sizeof(wchar_t));
+}
+
+// Whether Backup-Operators membership actually confers SeBackupPrivilege depends on the local or
+// domain "User Rights Assignment" policy, which varies by machine (e.g. a hardened GPO baseline).
+// Granting the right directly is deterministic and, since it manipulates the exact LSA account
+// right ValidateTokenPrivilegeAllowList inspects via TokenPrivileges, a more precise test of it.
+[[nodiscard]] bool SetBackupPrivilege(PSID accountSid, bool grant)
+{
+    LSA_OBJECT_ATTRIBUTES objectAttributes {};
+    LSA_HANDLE policyHandle = nullptr;
+    if (LsaOpenPolicy(nullptr, &objectAttributes, POLICY_ALL_ACCESS, &policyHandle) != 0)
+    {
+        return false;
+    }
+    LSA_UNICODE_STRING privilegeName {};
+    InitLsaString(privilegeName, SE_BACKUP_NAME);
+    const NTSTATUS status =
+        grant ? LsaAddAccountRights(policyHandle, accountSid, &privilegeName, 1)
+              : LsaRemoveAccountRights(policyHandle, accountSid, FALSE, &privilegeName, 1);
+    LsaClose(policyHandle);
+    return status == 0;
 }
 
 } // namespace
@@ -282,5 +313,65 @@ int wmain()
     {
         return 1;
     }
+
+    // A minted logon token must be rejected once it carries a privilege beyond the standard
+    // allow-list, even for a right (SeBackupPrivilege) that the Administrators-only membership
+    // check never looks at.
+    // Local SAM account names are capped at 20 characters regardless of UNLEN, so this mirrors
+    // the disposable account's naming budget above rather than adding a longer distinguishing
+    // infix.
+    TestAccount privilegedAccount(L"lac" + std::to_wstring(GetCurrentProcessId()) + L"-" +
+                                  std::to_wstring(GetTickCount() % 100'000'000));
+    if (!Expect(AccountDoesNotExist(privilegedAccount.name()),
+            L"The privileged disposable account name is already in use."))
+    {
+        return 1;
+    }
+    launch_as::broker::RegistrationService privilegedRegistration(credentialDirectory.path());
+    privilegedAccount.MarkCreated();
+    const DWORD privilegedRegistrationError =
+        privilegedRegistration.Enroll(privilegedAccount.name());
+    if (!Expect(privilegedRegistrationError == ERROR_SUCCESS,
+            L"Could not register the privileged disposable account."))
+    {
+        std::wcerr << L"Registration status: " << privilegedRegistrationError << L"\n";
+        return 1;
+    }
+    std::vector<BYTE> privilegedAccountSid;
+    if (!Expect(launch_as::broker::GetBrokerAccountSid(
+                    privilegedAccount.name(), privilegedAccountSid) == ERROR_SUCCESS,
+            L"Could not resolve the privileged disposable account SID."))
+    {
+        return 1;
+    }
+    if (!Expect(SetBackupPrivilege(privilegedAccountSid.data(), true),
+            L"Could not grant SeBackupPrivilege to the disposable account."))
+    {
+        return 1;
+    }
+    launch_as::broker::SecurePassword privilegedPassword;
+    const DWORD privilegedPasswordError =
+        launch_as::broker::GenerateBrokerPassword(privilegedPassword);
+    const DWORD privilegedResetError =
+        privilegedPasswordError == ERROR_SUCCESS
+            ? privilegedRegistration.ResetPassword(privilegedAccount.name(), privilegedPassword)
+            : privilegedPasswordError;
+    launch_as::broker::BrokerLogonToken privilegedToken;
+    const DWORD privilegedLogonError =
+        privilegedResetError == ERROR_SUCCESS
+            ? launch_as::broker::LogOnBrokerAccount(
+                  privilegedAccount.name(), privilegedPassword, privilegedToken)
+            : privilegedResetError;
+    privilegedPassword.Clear();
+    static_cast<void>(SetBackupPrivilege(privilegedAccountSid.data(), false));
+    if (!Expect(privilegedResetError == ERROR_SUCCESS,
+            L"Could not reset the password for the disposable SeBackupPrivilege account.") ||
+        !Expect(privilegedLogonError == ERROR_ACCESS_DENIED && !static_cast<bool>(privilegedToken),
+            L"Broker minted a usable token for an account holding SeBackupPrivilege."))
+    {
+        std::wcerr << L"Privileged logon status: " << privilegedLogonError << L"\n";
+        return 1;
+    }
+
     return 0;
 }

@@ -567,6 +567,14 @@ if(BUILD_TESTING)
     )
     configure_launch_as_target(LauncherBrokerAccountProvisioningTests)
 
+    add_test(
+        NAME launcher.broker_account_provisioning
+        COMMAND "$<TARGET_FILE:LauncherBrokerAccountProvisioningTests>"
+    )
+    set_tests_properties(launcher.broker_account_provisioning PROPERTIES
+        LABELS "broker;elevated;integration"
+    )
+
     add_executable(LauncherBrokerServiceInstallerTests
         tests/BrokerServiceInstallerTests.cpp
         src/BrokerAudit.cpp

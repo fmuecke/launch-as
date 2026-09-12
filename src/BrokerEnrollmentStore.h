@@ -25,6 +25,7 @@ class EnrollmentStore final
 
   private:
     [[nodiscard]] std::wstring RecordPath(std::wstring_view accountName) const;
+    [[nodiscard]] std::wstring MachineKeyPath() const;
 
     std::wstring directory_;
 };

@@ -41,6 +41,7 @@ class TemporaryDirectory final
     }
 
     [[nodiscard]] bool created() const noexcept { return created_; }
+    [[nodiscard]] const std::wstring& path() const noexcept { return path_; }
     [[nodiscard]] std::wstring CredentialDirectory() const { return path_ + L"\\credentials"; }
 
   private:
@@ -118,6 +119,35 @@ class TemporaryDirectory final
     return valid;
 }
 
+// Junctions never require elevation or SeCreateSymbolicLinkPrivilege to create, unlike symlinks,
+// so this reproduces what an unprivileged attacker can pre-plant at the target path.
+[[nodiscard]] bool CreateDirectoryJunction(const std::wstring& path, const std::wstring& target)
+{
+    std::wstring commandLine = L"cmd.exe /c mklink /J \"" + path + L"\" \"" + target + L"\" >NUL 2>&1";
+    STARTUPINFOW startupInfo {};
+    startupInfo.cb = sizeof(startupInfo);
+    PROCESS_INFORMATION processInfo {};
+    if (!CreateProcessW(nullptr,
+            commandLine.data(),
+            nullptr,
+            nullptr,
+            FALSE,
+            CREATE_NO_WINDOW,
+            nullptr,
+            nullptr,
+            &startupInfo,
+            &processInfo))
+    {
+        return false;
+    }
+    WaitForSingleObject(processInfo.hProcess, INFINITE);
+    DWORD exitCode = 1;
+    const BOOL gotExitCode = GetExitCodeProcess(processInfo.hProcess, &exitCode);
+    CloseHandle(processInfo.hProcess);
+    CloseHandle(processInfo.hThread);
+    return gotExitCode != FALSE && exitCode == 0;
+}
+
 } // namespace
 
 int wmain()
@@ -128,10 +158,32 @@ int wmain()
         return 1;
     }
     const std::wstring credentialDirectory = directory.CredentialDirectory();
-    return Expect(launch_as::broker::CreateSecureDirectory(credentialDirectory) == ERROR_SUCCESS,
-               L"Could not create the secure credential directory.") &&
-                   Expect(HasProtectedSystemAndAdministratorsDacl(credentialDirectory),
-                       L"Credential directory DACL is not restricted to SYSTEM and Administrators.")
-               ? 0
-               : 1;
+    const bool freshCreationOk =
+        Expect(launch_as::broker::CreateSecureDirectory(credentialDirectory) == ERROR_SUCCESS,
+            L"Could not create the secure credential directory.") &&
+        Expect(HasProtectedSystemAndAdministratorsDacl(credentialDirectory),
+            L"Credential directory DACL is not restricted to SYSTEM and Administrators.");
+
+    // A directory the caller itself already owns (i.e. a standard user pre-created it before the
+    // broker ever ran) must never be adopted, even though NTFS ownership would let the owner
+    // re-grant themselves access no matter what DACL gets stamped on top of it afterwards.
+    const std::wstring untrustedOwnerDirectory = directory.path() + L"\\untrusted-owner";
+    const bool untrustedOwnerRejected =
+        Expect(CreateDirectoryW(untrustedOwnerDirectory.c_str(), nullptr) != FALSE,
+            L"Could not pre-create the untrusted-owner directory fixture.") &&
+        Expect(launch_as::broker::CreateSecureDirectory(untrustedOwnerDirectory) != ERROR_SUCCESS,
+            L"CreateSecureDirectory adopted a pre-existing directory it does not own.");
+    RemoveDirectoryW(untrustedOwnerDirectory.c_str());
+
+    // A pre-existing reparse point must be rejected outright: SetFileSecurityW follows reparse
+    // points, so adopting one would let an attacker redirect the DACL stamp anywhere.
+    const std::wstring junctionDirectory = directory.path() + L"\\reparse-point";
+    const bool reparsePointRejected =
+        Expect(CreateDirectoryJunction(junctionDirectory, directory.path()),
+            L"Could not pre-create the reparse-point directory fixture.") &&
+        Expect(launch_as::broker::CreateSecureDirectory(junctionDirectory) != ERROR_SUCCESS,
+            L"CreateSecureDirectory followed a reparse point instead of rejecting it.");
+    RemoveDirectoryW(junctionDirectory.c_str());
+
+    return freshCreationOk && untrustedOwnerRejected && reparsePointRejected ? 0 : 1;
 }

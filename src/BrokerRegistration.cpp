@@ -87,7 +87,7 @@ DWORD RegistrationService::Unenroll(std::wstring_view accountName)
     const DWORD enrollmentError = enrollments_.Load(accountName, enrolledSid);
     if (enrollmentError != ERROR_SUCCESS)
     {
-        return enrollmentError;
+        return enrollmentError == ERROR_FILE_NOT_FOUND ? ERROR_NOT_FOUND : enrollmentError;
     }
     const std::wstring name(accountName);
     LPBYTE rawAccount = nullptr;

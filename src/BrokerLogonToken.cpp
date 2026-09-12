@@ -4,6 +4,7 @@
 
 #include "BrokerLogonToken.h"
 
+#include <algorithm>
 #include <array>
 #include <string>
 #include <vector>
@@ -116,6 +117,71 @@ namespace
     return ERROR_SUCCESS;
 }
 
+// Membership-based rejection only ever covers the groups it explicitly names (Administrators),
+// so Backup Operators, Hyper-V Administrators, and any locally-granted powerful privilege sail
+// through. Enumerate what the minted token can actually do instead, and allow only the handful
+// of privileges every standard token carries. Well-known privilege LUIDs are not exposed to
+// user-mode code as constants (only the SE_xxx_NAME strings are), so each name is resolved via
+// LookupPrivilegeValueW.
+constexpr std::array<LPCWSTR, 5> AllowedTokenPrivilegeNames {
+    SE_CHANGE_NOTIFY_NAME,
+    SE_INC_WORKING_SET_NAME,
+    SE_SHUTDOWN_NAME,
+    SE_UNDOCK_NAME,
+    SE_TIME_ZONE_NAME,
+};
+
+[[nodiscard]] bool LuidEqual(const LUID& a, const LUID& b) noexcept
+{
+    return a.LowPart == b.LowPart && a.HighPart == b.HighPart;
+}
+
+[[nodiscard]] DWORD ValidateTokenPrivilegeAllowList(HANDLE token)
+{
+    std::array<LUID, AllowedTokenPrivilegeNames.size()> allowedPrivileges {};
+    for (std::size_t index = 0; index < AllowedTokenPrivilegeNames.size(); ++index)
+    {
+        if (!LookupPrivilegeValueW(nullptr, AllowedTokenPrivilegeNames[index], &allowedPrivileges[index]))
+        {
+            const DWORD lookupError = GetLastError();
+            return lookupError;
+        }
+    }
+
+    DWORD tokenPrivilegesBytes = 0;
+    GetTokenInformation(token, TokenPrivileges, nullptr, 0, &tokenPrivilegesBytes);
+    const DWORD sizeError = GetLastError();
+    if (sizeError != ERROR_INSUFFICIENT_BUFFER || tokenPrivilegesBytes == 0)
+    {
+        return sizeError;
+    }
+    std::vector<BYTE> tokenPrivilegesBuffer(tokenPrivilegesBytes);
+    if (!GetTokenInformation(token,
+            TokenPrivileges,
+            tokenPrivilegesBuffer.data(),
+            tokenPrivilegesBytes,
+            &tokenPrivilegesBytes))
+    {
+        const DWORD tokenPrivilegesError = GetLastError();
+        return tokenPrivilegesError;
+    }
+    const auto* tokenPrivileges =
+        reinterpret_cast<const TOKEN_PRIVILEGES*>(tokenPrivilegesBuffer.data());
+    for (DWORD index = 0; index < tokenPrivileges->PrivilegeCount; ++index)
+    {
+        const LUID& privilege = tokenPrivileges->Privileges[index].Luid;
+        const bool allowed = std::any_of(allowedPrivileges.begin(),
+            allowedPrivileges.end(),
+            [&privilege](const LUID& allowedPrivilege)
+            { return LuidEqual(allowedPrivilege, privilege); });
+        if (!allowed)
+        {
+            return ERROR_ACCESS_DENIED;
+        }
+    }
+    return ERROR_SUCCESS;
+}
+
 } // namespace
 
 BrokerLogonToken::~BrokerLogonToken() { Reset(); }
@@ -178,6 +244,12 @@ DWORD LogOnBrokerAccount(
     {
         token.Reset();
         return tokenGroupsError;
+    }
+    const DWORD tokenPrivilegeError = ValidateTokenPrivilegeAllowList(token.get());
+    if (tokenPrivilegeError != ERROR_SUCCESS)
+    {
+        token.Reset();
+        return tokenPrivilegeError;
     }
     return ERROR_SUCCESS;
 }

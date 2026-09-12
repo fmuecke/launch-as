@@ -18,6 +18,7 @@ namespace
 {
 
 constexpr DWORD RequestTimeoutMilliseconds = 5'000;
+constexpr DWORD ControlConnectionCloseTimeoutMilliseconds = 5'000;
 
 [[nodiscard]] bool WaitForOperation(HANDLE pipe, HANDLE stopEvent, OVERLAPPED& overlapped,
     HANDLE operationEvent, DWORD& bytesTransferred)
@@ -145,9 +146,10 @@ void WaitForControlConnectionClose(HANDLE pipe, HANDLE stopEvent)
         return;
     }
     const std::array waitHandles {stopEvent, operationEvent.get()};
-    if (WaitForMultipleObjects(
-            static_cast<DWORD>(waitHandles.size()), waitHandles.data(), FALSE, INFINITE) !=
-        WAIT_OBJECT_0 + 1)
+    if (WaitForMultipleObjects(static_cast<DWORD>(waitHandles.size()),
+            waitHandles.data(),
+            FALSE,
+            ControlConnectionCloseTimeoutMilliseconds) != WAIT_OBJECT_0 + 1)
     {
         CancelIoEx(pipe, &overlapped);
         static_cast<void>(GetOverlappedResult(pipe, &overlapped, &bytesRead, TRUE));

@@ -276,6 +276,60 @@ void CloseHandleIfPresent(HANDLE& handle) noexcept
 
 #ifdef LAUNCH_AS_TESTING
 void SetBrokerJobQueryFailureForTesting(bool fail) noexcept { failBrokerJobQueryForTesting = fail; }
+
+DWORD LaunchQuickBrokerChildForTesting(BrokerChildProcess& child)
+{
+    const DWORD jobError = CreateBrokerJob(child);
+    if (jobError != ERROR_SUCCESS)
+    {
+        return jobError;
+    }
+    std::wstring executablePath;
+    const DWORD executableError = GetProbeExecutablePath(executablePath);
+    if (executableError != ERROR_SUCCESS)
+    {
+        child.Reset();
+        return executableError;
+    }
+    std::wstring commandLine = L"\"" + executablePath + L"\" /d /c exit 0";
+    std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
+    mutableCommandLine.push_back(L'\0');
+    STARTUPINFOW startupInfo {};
+    startupInfo.cb = sizeof(startupInfo);
+    PROCESS_INFORMATION processInfo {};
+    if (!CreateProcessW(executablePath.c_str(),
+            mutableCommandLine.data(),
+            nullptr,
+            nullptr,
+            FALSE,
+            CREATE_NO_WINDOW | CREATE_SUSPENDED,
+            nullptr,
+            nullptr,
+            &startupInfo,
+            &processInfo))
+    {
+        const DWORD processError = GetLastError();
+        child.Reset();
+        return processError;
+    }
+    if (!AssignProcessToJobObject(child.job_, processInfo.hProcess))
+    {
+        const DWORD assignmentError = GetLastError();
+        static_cast<void>(TerminateProcess(processInfo.hProcess, ERROR_CANCELLED));
+        static_cast<void>(WaitForSingleObject(processInfo.hProcess, INFINITE));
+        CloseHandle(processInfo.hThread);
+        CloseHandle(processInfo.hProcess);
+        child.Reset();
+        return assignmentError;
+    }
+    child.SetProcess(processInfo.hProcess, processInfo.hThread);
+    const DWORD resumeError = child.Resume();
+    if (resumeError != ERROR_SUCCESS)
+    {
+        static_cast<void>(child.TerminateAndWaitForExit());
+    }
+    return resumeError;
+}
 #endif
 
 BrokerChildProcess::~BrokerChildProcess() { Reset(); }

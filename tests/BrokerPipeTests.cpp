@@ -7,6 +7,7 @@
 #include "Win32Support.h"
 
 #include <Windows.h>
+#include <array>
 #include <iostream>
 #include <string>
 #include <thread>
@@ -16,6 +17,8 @@ namespace
 {
 
 [[nodiscard]] bool Expect(bool condition, const wchar_t* message);
+
+constexpr DWORD WorkerReleaseTimeoutMilliseconds = 7'000;
 
 struct LaunchCapture
 {
@@ -73,6 +76,12 @@ DWORD CaptureLaunchRequest(void* context, const launch_as::broker::BrokerRequest
     return ERROR_BUSY;
 }
 
+DWORD LaunchQuickChild(void*, const launch_as::broker::BrokerRequest&,
+    const launch_as::broker::BrokerCallerIdentity&, launch_as::broker::BrokerChildProcess& child)
+{
+    return launch_as::broker::LaunchQuickBrokerChildForTesting(child);
+}
+
 class ServerThread final
 {
   public:
@@ -106,6 +115,68 @@ class ServerThread final
   private:
     std::thread thread_;
     bool connected_ = false;
+};
+
+class SessionServerThread final
+{
+  public:
+    SessionServerThread(HANDLE pipe, HANDLE stopEvent)
+        : completed_(CreateEventW(nullptr, TRUE, FALSE, nullptr)),
+          thread_(
+              [pipe, stopEvent, this]
+              {
+                  launch_as::UniqueHandle connectEvent(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+                  if (!connectEvent)
+                  {
+                      return;
+                  }
+                  OVERLAPPED overlapped {};
+                  overlapped.hEvent = connectEvent.get();
+                  const BOOL connected = ConnectNamedPipe(pipe, &overlapped);
+                  const DWORD connectError = connected ? ERROR_SUCCESS : GetLastError();
+                  if (!connected && connectError == ERROR_IO_PENDING)
+                  {
+                      if (WaitForSingleObject(connectEvent.get(),
+                              WorkerReleaseTimeoutMilliseconds) != WAIT_OBJECT_0)
+                      {
+                          CancelIoEx(pipe, &overlapped);
+                          DWORD ignored = 0;
+                          static_cast<void>(GetOverlappedResult(pipe, &overlapped, &ignored, TRUE));
+                          return;
+                      }
+                      DWORD ignored = 0;
+                      if (!GetOverlappedResult(pipe, &overlapped, &ignored, FALSE))
+                      {
+                          return;
+                      }
+                  }
+                  else if (!connected && connectError != ERROR_PIPE_CONNECTED)
+                  {
+                      return;
+                  }
+                  launch_as::broker::ServeControlPipeRequest(
+                      pipe, stopEvent, nullptr, nullptr, LaunchQuickChild);
+                  SetEvent(completed_.get());
+              })
+    {
+    }
+
+    ~SessionServerThread()
+    {
+        if (thread_.joinable())
+        {
+            thread_.join();
+        }
+    }
+
+    [[nodiscard]] bool WaitForCompletion(DWORD timeout) const
+    {
+        return completed_ && WaitForSingleObject(completed_.get(), timeout) == WAIT_OBJECT_0;
+    }
+
+  private:
+    launch_as::UniqueHandle completed_;
+    std::thread thread_;
 };
 
 [[nodiscard]] bool Expect(bool condition, const wchar_t* message)
@@ -177,6 +248,70 @@ class ServerThread final
                L"The broker did not return the stable unsupported-mode response.");
 }
 
+[[nodiscard]] bool TestWorkerReleasesHeldControlClient()
+{
+    const std::wstring pipeName = L"\\\\.\\pipe\\launch-as-broker-held-control-test-" +
+                                  std::to_wstring(GetCurrentProcessId());
+    launch_as::UniqueHandle server(CreateNamedPipeW(pipeName.c_str(),
+        PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+        1,
+        static_cast<DWORD>(launch_as::broker::MaximumMessageBytes),
+        static_cast<DWORD>(launch_as::broker::MaximumMessageBytes),
+        0,
+        nullptr));
+    launch_as::UniqueHandle stopEvent(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+    if (!Expect(static_cast<bool>(server) && static_cast<bool>(stopEvent),
+            L"Could not create the held-control-client test pipe."))
+    {
+        return false;
+    }
+
+    SessionServerThread serverThread(server.get(), stopEvent.get());
+    launch_as::UniqueHandle client(CreateFileW(
+        pipeName.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr));
+    if (!Expect(static_cast<bool>(client), L"Could not connect the held-control-client test pipe."))
+    {
+        return false;
+    }
+
+    constexpr char request[] =
+        R"json({"version":1,"requestId":"123e4567-e89b-12d3-a456-426614174000","operation":"launch","profileId":"LaunchAsUser","mode":"console","arguments":[],"workingDirectory":"C:\\repo","console":{"pipeIn":"\\\\.\\pipe\\launch-as-test-in","pipeOut":"\\\\.\\pipe\\launch-as-test-out","pipeResize":"\\\\.\\pipe\\launch-as-test-resize","cols":120,"rows":30}})json";
+    DWORD bytesWritten = 0;
+    if (!Expect(WriteFile(client.get(), request, sizeof(request) - 1, &bytesWritten, nullptr) &&
+                    bytesWritten == sizeof(request) - 1,
+            L"Could not send the held-control-client launch request."))
+    {
+        return false;
+    }
+
+    std::array<char, launch_as::broker::MaximumMessageBytes> response {};
+    DWORD bytesRead = 0;
+    if (!Expect(ReadFile(client.get(),
+                    response.data(),
+                    static_cast<DWORD>(response.size()),
+                    &bytesRead,
+                    nullptr) &&
+                    bytesRead != 0,
+            L"The held-control-client test did not receive the launch response.") ||
+        !Expect(ReadFile(client.get(),
+                    response.data(),
+                    static_cast<DWORD>(response.size()),
+                    &bytesRead,
+                    nullptr) &&
+                    bytesRead != 0,
+            L"The held-control-client test did not receive the exit response."))
+    {
+        return false;
+    }
+
+    const bool released = serverThread.WaitForCompletion(WorkerReleaseTimeoutMilliseconds);
+    client.reset();
+    static_cast<void>(serverThread.WaitForCompletion(WorkerReleaseTimeoutMilliseconds));
+    return Expect(released,
+        L"The broker worker remained occupied after a client held its control connection open.");
+}
+
 } // namespace
 
 int wmain()
@@ -229,7 +364,8 @@ int wmain()
         return 1;
     }
     response.resize(bytesRead);
-    if (!TestInteractiveModeRejected() || !TestUnconfirmedTeardownFinishesSession())
+    if (!TestInteractiveModeRejected() || !TestUnconfirmedTeardownFinishesSession() ||
+        !TestWorkerReleasesHeldControlClient())
     {
         return 1;
     }

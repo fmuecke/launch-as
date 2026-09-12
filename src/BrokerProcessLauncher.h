@@ -50,6 +50,9 @@ class BrokerChildProcess final
         std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
         BrokerChildProcess& child);
     friend DWORD LaunchFixedBrokerProbe(HANDLE token, BrokerChildProcess& child);
+#ifdef LAUNCH_AS_TESTING
+    friend DWORD LaunchQuickBrokerChildForTesting(BrokerChildProcess& child);
+#endif
 };
 
 [[nodiscard]] DWORD CreateBrokerJob(BrokerChildProcess& child);
@@ -64,6 +67,7 @@ class BrokerChildProcess final
 
 #ifdef LAUNCH_AS_TESTING
 void SetBrokerJobQueryFailureForTesting(bool fail) noexcept;
+[[nodiscard]] DWORD LaunchQuickBrokerChildForTesting(BrokerChildProcess& child);
 #endif
 
 } // namespace launch_as::broker

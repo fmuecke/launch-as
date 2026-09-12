@@ -306,6 +306,9 @@ if(BUILD_TESTING)
         Userenv
     )
     configure_launch_as_target(LauncherBrokerPipeTests)
+    target_compile_definitions(LauncherBrokerPipeTests PRIVATE
+        LAUNCH_AS_TESTING
+    )
 
     add_test(
         NAME launcher.broker_pipe

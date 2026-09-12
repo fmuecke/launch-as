@@ -33,6 +33,7 @@ namespace
 
 constexpr wchar_t ServiceName[] = L"launch-as-broker";
 constexpr DWORD BrokerIdleTimeoutMilliseconds = 30'000;
+constexpr DWORD WorkerSlotWaitTimeoutMilliseconds = BrokerIdleTimeoutMilliseconds;
 constexpr std::size_t MaximumConcurrentSessions = 4;
 constexpr std::size_t MaximumConcurrentSessionsPerAccount = 2;
 constexpr DWORD MaximumConcurrentPipeWorkers = 8;
@@ -330,7 +331,13 @@ void JoinWorkers(std::vector<std::unique_ptr<BrokerPipeWorker>>& workers)
     return true;
 }
 
-[[nodiscard]] bool WaitForAvailableWorkerSlot(
+enum class WorkerSlotWaitResult
+{
+    Available,
+    Stopped,
+};
+
+[[nodiscard]] WorkerSlotWaitResult WaitForAvailableWorkerSlot(
     std::vector<std::unique_ptr<BrokerPipeWorker>>& workers)
 {
     while (workers.size() >= MaximumConcurrentPipeWorkers)
@@ -342,21 +349,33 @@ void JoinWorkers(std::vector<std::unique_ptr<BrokerPipeWorker>>& workers)
         {
             waitHandles.push_back(worker->completedEvent.get());
         }
-        const DWORD wait = WaitForMultipleObjects(
-            static_cast<DWORD>(waitHandles.size()), waitHandles.data(), FALSE, INFINITE);
+        const DWORD wait = WaitForMultipleObjects(static_cast<DWORD>(waitHandles.size()),
+            waitHandles.data(),
+            FALSE,
+            WorkerSlotWaitTimeoutMilliseconds);
+        if (wait == WAIT_TIMEOUT)
+        {
+            ReapCompletedWorkers(workers);
+            if (workers.size() < MaximumConcurrentPipeWorkers)
+            {
+                return WorkerSlotWaitResult::Available;
+            }
+            SetEvent(stopEvent);
+            return WorkerSlotWaitResult::Stopped;
+        }
         if (wait == WAIT_OBJECT_0)
         {
-            return false;
+            return WorkerSlotWaitResult::Stopped;
         }
         if (wait < WAIT_OBJECT_0 + 1 ||
             wait >= WAIT_OBJECT_0 + static_cast<DWORD>(waitHandles.size()))
         {
             SetEvent(stopEvent);
-            return false;
+            return WorkerSlotWaitResult::Stopped;
         }
         ReapCompletedWorkers(workers);
     }
-    return true;
+    return WorkerSlotWaitResult::Available;
 }
 
 [[nodiscard]] DWORD RunPipeServer(BrokerLaunchPolicy& launchPolicy)
@@ -367,7 +386,8 @@ void JoinWorkers(std::vector<std::unique_ptr<BrokerPipeWorker>>& workers)
     while (WaitForSingleObject(stopEvent, 0) == WAIT_TIMEOUT)
     {
         ReapCompletedWorkers(workers);
-        if (!WaitForAvailableWorkerSlot(workers))
+        const WorkerSlotWaitResult workerSlotResult = WaitForAvailableWorkerSlot(workers);
+        if (workerSlotResult == WorkerSlotWaitResult::Stopped)
         {
             break;
         }

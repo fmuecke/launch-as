@@ -188,8 +188,8 @@ void InitLsaString(LSA_UNICODE_STRING& lsaString, const wchar_t* value)
 
 // Whether Backup-Operators membership actually confers SeBackupPrivilege depends on the local or
 // domain "User Rights Assignment" policy, which varies by machine (e.g. a hardened GPO baseline).
-// Granting the right directly is deterministic and, since it manipulates the exact LSA account
-// right ValidateTokenPrivilegeAllowList inspects via TokenPrivileges, a more precise test of it.
+// Granting the right directly is deterministic and exercises the broker's account-right admission
+// check even when a local policy does not project the right into an interactive token.
 [[nodiscard]] bool SetBackupPrivilege(PSID accountSid, bool grant)
 {
     LSA_OBJECT_ATTRIBUTES objectAttributes {};
@@ -314,9 +314,9 @@ int wmain()
         return 1;
     }
 
-    // A minted logon token must be rejected once it carries a privilege beyond the standard
-    // allow-list, even for a right (SeBackupPrivilege) that the Administrators-only membership
-    // check never looks at.
+    // An account with a directly assigned privilege beyond the standard allow-list must be
+    // rejected, even when local policy does not project it into the interactive token and the
+    // Administrators-only membership check never sees it.
     // Local SAM account names are capped at 20 characters regardless of UNLEN, so this mirrors
     // the disposable account's naming budget above rather than adding a longer distinguishing
     // infix.

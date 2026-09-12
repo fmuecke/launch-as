@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <ntsecapi.h>
 #include <string>
 #include <vector>
 
@@ -131,6 +132,13 @@ constexpr std::array<LPCWSTR, 5> AllowedTokenPrivilegeNames {
     SE_TIME_ZONE_NAME,
 };
 
+[[nodiscard]] bool IsAllowedTokenPrivilege(std::wstring_view privilegeName) noexcept
+{
+    return std::any_of(AllowedTokenPrivilegeNames.begin(),
+        AllowedTokenPrivilegeNames.end(),
+        [privilegeName](LPCWSTR allowedPrivilege) { return privilegeName == allowedPrivilege; });
+}
+
 [[nodiscard]] bool LuidEqual(const LUID& a, const LUID& b) noexcept
 {
     return a.LowPart == b.LowPart && a.HighPart == b.HighPart;
@@ -183,6 +191,55 @@ constexpr std::array<LPCWSTR, 5> AllowedTokenPrivilegeNames {
     return ERROR_SUCCESS;
 }
 
+[[nodiscard]] DWORD ValidateAccountPrivilegeAllowList(PSID accountSid)
+{
+    LSA_OBJECT_ATTRIBUTES attributes {};
+    LSA_HANDLE policy = nullptr;
+    const NTSTATUS openStatus = LsaOpenPolicy(nullptr, &attributes, POLICY_LOOKUP_NAMES, &policy);
+    if (openStatus != 0)
+    {
+        return LsaNtStatusToWinError(openStatus);
+    }
+
+    PLSA_UNICODE_STRING accountRights = nullptr;
+    ULONG accountRightCount = 0;
+    const NTSTATUS enumerateStatus =
+        LsaEnumerateAccountRights(policy, accountSid, &accountRights, &accountRightCount);
+    LsaClose(policy);
+    if (enumerateStatus != 0)
+    {
+        const DWORD enumerateError = LsaNtStatusToWinError(enumerateStatus);
+        return enumerateError == ERROR_FILE_NOT_FOUND ? ERROR_SUCCESS : enumerateError;
+    }
+
+    DWORD validationError = ERROR_SUCCESS;
+    for (ULONG index = 0; index < accountRightCount; ++index)
+    {
+        const LSA_UNICODE_STRING& right = accountRights[index];
+        if (right.Buffer == nullptr || right.Length % sizeof(wchar_t) != 0)
+        {
+            validationError = ERROR_INVALID_DATA;
+            break;
+        }
+        const std::wstring_view rightName(right.Buffer, right.Length / sizeof(wchar_t));
+        constexpr std::wstring_view PrivilegePrefix = L"Se";
+        constexpr std::wstring_view PrivilegeSuffix = L"Privilege";
+        const bool isPrivilege =
+            rightName.size() >= PrivilegePrefix.size() + PrivilegeSuffix.size() &&
+            rightName.starts_with(PrivilegePrefix) && rightName.ends_with(PrivilegeSuffix);
+        if (isPrivilege && !IsAllowedTokenPrivilege(rightName))
+        {
+            validationError = ERROR_ACCESS_DENIED;
+            break;
+        }
+    }
+    if (accountRights != nullptr)
+    {
+        LsaFreeMemory(accountRights);
+    }
+    return validationError;
+}
+
 } // namespace
 
 BrokerLogonToken::~BrokerLogonToken() { Reset(); }
@@ -213,6 +270,17 @@ DWORD LogOnBrokerAccount(
     {
         return ERROR_INVALID_PARAMETER;
     }
+    std::vector<BYTE> expectedSid;
+    const DWORD expectedSidError = LookupLocalUserSid(accountName, expectedSid);
+    if (expectedSidError != ERROR_SUCCESS)
+    {
+        return expectedSidError;
+    }
+    const DWORD accountPrivilegeError = ValidateAccountPrivilegeAllowList(expectedSid.data());
+    if (accountPrivilegeError != ERROR_SUCCESS)
+    {
+        return accountPrivilegeError;
+    }
     HANDLE rawToken = nullptr;
     const BOOL loggedOn = LogonUserW(std::wstring(accountName).c_str(),
         L".",
@@ -227,13 +295,6 @@ DWORD LogOnBrokerAccount(
     }
     token.Reset(rawToken);
 
-    std::vector<BYTE> expectedSid;
-    const DWORD expectedSidError = LookupLocalUserSid(accountName, expectedSid);
-    if (expectedSidError != ERROR_SUCCESS)
-    {
-        token.Reset();
-        return expectedSidError;
-    }
     const DWORD tokenUserError = ValidateTokenUser(token.get(), expectedSid);
     if (tokenUserError != ERROR_SUCCESS)
     {

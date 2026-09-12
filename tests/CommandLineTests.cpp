@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -53,6 +54,21 @@ class UniqueHandle
     return false;
 }
 
+[[nodiscard]] bool ExpectInvalidExecutableRejected()
+{
+    try
+    {
+        (void)launch_as::BuildWindowsCommandLine(LR"(C:\a"b\probe.exe)", {});
+    }
+    catch (const std::invalid_argument&)
+    {
+        return true;
+    }
+
+    std::wcerr << L"embedded quote in executable path was not rejected.\n";
+    return false;
+}
+
 } // namespace
 
 int wmain(int argc, wchar_t* argv[])
@@ -74,7 +90,14 @@ int wmain(int argc, wchar_t* argv[])
             L"embedded quote") ||
         !ExpectEqual(launch_as::QuoteWindowsCommandLineArgument(L"trailing slash\\"),
             L"\"trailing slash\\\\\"",
-            L"trailing backslash"))
+            L"trailing backslash") ||
+        !ExpectEqual(launch_as::BuildWindowsCommandLine(LR"(C:\Program Files\probe.exe)", {}),
+            LR"("C:\Program Files\probe.exe")",
+            L"argv[0] quoting") ||
+        !ExpectEqual(launch_as::BuildWindowsCommandLine(LR"(C:\tools\)", {}),
+            LR"("C:\tools\")",
+            L"argv[0] trailing backslash") ||
+        !ExpectInvalidExecutableRejected())
     {
         return 1;
     }

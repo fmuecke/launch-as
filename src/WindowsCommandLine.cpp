@@ -5,6 +5,7 @@
 #include "WindowsCommandLine.h"
 
 #include <cstddef>
+#include <stdexcept>
 
 namespace launch_as
 {
@@ -51,7 +52,19 @@ std::wstring QuoteWindowsCommandLineArgument(std::wstring_view argument)
 std::wstring BuildWindowsCommandLine(
     std::wstring_view executable, std::span<const std::wstring> arguments)
 {
-    std::wstring commandLine = QuoteWindowsCommandLineArgument(executable);
+    if (executable.find(L'"') != std::wstring_view::npos)
+    {
+        throw std::invalid_argument("The executable path cannot contain a quote.");
+    }
+
+    // argv[0] has different parsing rules from the remaining arguments: backslashes are
+    // literal and a quote terminates the quoted executable name. Always quote the token and
+    // reject embedded quotes above rather than applying the general argument escaping rules.
+    std::wstring commandLine;
+    commandLine.reserve(executable.size() + 2);
+    commandLine.push_back(L'"');
+    commandLine.append(executable);
+    commandLine.push_back(L'"');
     for (const std::wstring& argument : arguments)
     {
         commandLine.push_back(L' ');

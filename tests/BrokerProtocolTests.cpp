@@ -246,6 +246,10 @@ int wmain()
     const std::string exitResponse =
         launch_as::broker::BuildLaunchExitResponse(L"123e4567-e89b-12d3-a456-426614174000", 37);
     DWORD exitCode = 0;
+    const std::string hostFailureResponse = launch_as::broker::BuildLaunchHostFailureResponse(
+        L"123e4567-e89b-12d3-a456-426614174000", 1, L"The target could not be started.");
+    DWORD hostExitCode = 0;
+    std::wstring diagnostics;
     return Expect(launchResponse ==
                       "{\"version\":1,\"requestId\":\"123e4567-e89b-12d3-a456-426614174000\","
                       "\"status\":\"ok\",\"processId\":456,\"reasonCode\":\"launched\","
@@ -264,7 +268,21 @@ int wmain()
                    Expect(launch_as::broker::ParseLaunchExitResponse(
                               exitResponse, L"123e4567-e89b-12d3-a456-426614174000", exitCode) &&
                               exitCode == 37,
-                       L"Launch exit response was not decoded.")
+                       L"Launch exit response was not decoded.") &&
+                   Expect(
+                       hostFailureResponse ==
+                           "{\"version\":1,\"requestId\":\"123e4567-e89b-12d3-a456-426614174000\","
+                           "\"status\":\"error\",\"hostExitCode\":1,"
+                           "\"diagnostic\":\"The target could not be started.\","
+                           "\"reasonCode\":\"host_failed\",\"win32Error\":31}",
+                       L"Launch host-failure response is not stable.") &&
+                   Expect(launch_as::broker::ParseLaunchHostFailureResponse(hostFailureResponse,
+                              L"123e4567-e89b-12d3-a456-426614174000",
+                              hostExitCode,
+                              diagnostics) &&
+                              hostExitCode == 1 &&
+                              diagnostics == L"The target could not be started.",
+                       L"Launch host-failure response was not decoded.")
                ? 0
                : 1;
 }

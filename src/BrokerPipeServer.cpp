@@ -380,8 +380,13 @@ void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
             DWORD exitCode = 0;
             if (GetExitCodeProcess(child.process(), &exitCode))
             {
-                waitForControlClose = WriteResponse(
-                    pipe, stopEvent, BuildLaunchExitResponse(request.requestId, exitCode));
+                DWORD childExitCode = 0;
+                std::wstring diagnostics;
+                const std::string exitResponse =
+                    child.ReadPseudoConsoleHostResult(childExitCode, diagnostics)
+                        ? BuildLaunchExitResponse(request.requestId, childExitCode)
+                        : BuildLaunchHostFailureResponse(request.requestId, exitCode, diagnostics);
+                waitForControlClose = WriteResponse(pipe, stopEvent, exitResponse);
             }
             else
             {

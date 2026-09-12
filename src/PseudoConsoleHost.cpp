@@ -4,6 +4,7 @@
 
 #include "PseudoConsoleHost.h"
 
+#include "PseudoConsoleHostReport.h"
 #include "PseudoConsoleSession.h"
 #include "TerminalIO.h"
 #include "Win32Support.h"
@@ -216,6 +217,11 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
     UniqueHandle brokerOutput;
     UniqueHandle brokerResize;
     const bool brokerPipes = !invocation.pipeIn.empty();
+    if (brokerPipes && _setmode(_fileno(stderr), _O_U8TEXT) == -1)
+    {
+        std::wcerr << L"Could not configure pseudoconsole host diagnostics for UTF-8.\n";
+        return ExitFailure;
+    }
     std::wstring pipeError;
     if (brokerPipes &&
         (!OpenPipeClient(invocation.pipeIn, GENERIC_READ, brokerInput, pipeError) ||
@@ -225,7 +231,6 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
         std::wcerr << pipeError << L"\n";
         return ExitFailure;
     }
-
     const HANDLE parentInput = brokerPipes ? brokerInput.get() : GetStdHandle(STD_INPUT_HANDLE);
     const HANDLE parentOutput = brokerPipes ? brokerOutput.get() : GetStdHandle(STD_OUTPUT_HANDLE);
     const HANDLE resizeSource = brokerPipes ? brokerResize.get() : GetStdHandle(STD_ERROR_HANDLE);
@@ -233,7 +238,7 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
     std::wstring streamError;
     if (!PrepareResizeInput(resizeSource, parentOutput, !brokerPipes, resizeInput, streamError))
     {
-        std::wcout << streamError << L"\n";
+        std::wcerr << streamError << L"\n";
         return ExitFailure;
     }
     if (brokerPipes && !ReadTerminalSize(resizeInput.get(), invocation.terminalSize))
@@ -246,8 +251,7 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
     if (!invocation.executable.is_absolute() ||
         !std::filesystem::is_regular_file(invocation.executable, pathError))
     {
-        std::wcerr << L"Pseudoconsole target is not an existing absolute file: "
-                   << invocation.executable.c_str() << L"\n";
+        std::wcerr << L"Pseudoconsole target is not an existing absolute file.\n";
         return ExitFailure;
     }
 
@@ -355,6 +359,30 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
         std::wcerr << L"Could not read the pseudoconsole child exit code: "
                    << FormatWindowsError(exitCodeError) << L"\n";
         return ExitFailure;
+    }
+    if (brokerPipes)
+    {
+        const PseudoConsoleHostExitReport report {.childExitCode = childExitCode};
+        DWORD bytesWritten = 0;
+        const HANDLE reportPipe = GetStdHandle(STD_OUTPUT_HANDLE);
+        DWORD reportError = reportPipe == INVALID_HANDLE_VALUE || reportPipe == nullptr
+                                ? GetLastError()
+                                : ERROR_SUCCESS;
+        if (reportError == ERROR_SUCCESS &&
+            !WriteFile(reportPipe, &report, sizeof(report), &bytesWritten, nullptr))
+        {
+            reportError = GetLastError();
+        }
+        if (reportError != ERROR_SUCCESS || bytesWritten != sizeof(report))
+        {
+            if (reportError == ERROR_SUCCESS)
+            {
+                reportError = ERROR_WRITE_FAULT;
+            }
+            std::wcerr << L"Could not report the pseudoconsole child exit code: "
+                       << FormatWindowsError(reportError) << L"\n";
+            return ExitFailure;
+        }
     }
     return childExitCode;
 }

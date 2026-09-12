@@ -27,18 +27,23 @@ class BrokerChildProcess final
     [[nodiscard]] DWORD processId() const noexcept;
     [[nodiscard]] explicit operator bool() const noexcept;
     [[nodiscard]] DWORD Resume() noexcept;
+    [[nodiscard]] bool ReadPseudoConsoleHostResult(
+        DWORD& childExitCode, std::wstring& diagnostics) noexcept;
     [[nodiscard]] bool TerminateAndWaitForExit() noexcept;
 
   private:
     void Reset() noexcept;
     void SetProcess(HANDLE process, HANDLE thread) noexcept;
     void SetUserProfile(HANDLE token, HANDLE profile) noexcept;
+    void SetPseudoConsoleHostReports(HANDLE exitReport, HANDLE diagnostics) noexcept;
 
     HANDLE job_ = nullptr;
     HANDLE process_ = nullptr;
     HANDLE thread_ = nullptr;
     HANDLE profileToken_ = nullptr;
     HANDLE profile_ = nullptr;
+    HANDLE exitReport_ = nullptr;
+    HANDLE diagnostics_ = nullptr;
 
     friend DWORD CreateBrokerJob(BrokerChildProcess& child);
     friend DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,

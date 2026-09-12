@@ -77,6 +77,7 @@ add_executable(launch_as
     src/LauncherOptions.h
     src/PseudoConsoleHost.cpp
     src/PseudoConsoleHost.h
+    src/PseudoConsoleHostReport.h
     src/PseudoConsoleSession.cpp
     src/PseudoConsoleSession.h
     src/LaunchProcess.cpp
@@ -153,6 +154,7 @@ add_executable(launch_as_conhost
     src/LauncherOptions.h
     src/PseudoConsoleHost.cpp
     src/PseudoConsoleHost.h
+    src/PseudoConsoleHostReport.h
     src/PseudoConsoleSession.cpp
     src/PseudoConsoleSession.h
     src/TerminalIO.cpp
@@ -195,6 +197,7 @@ add_executable(launch_as_broker
     src/LicenseHeader.h
     src/BrokerProcessLauncher.cpp
     src/BrokerProcessLauncher.h
+    src/PseudoConsoleHostReport.h
     src/BrokerRegistration.cpp
     src/BrokerRegistration.h
     src/BrokerPipeServer.cpp
@@ -287,6 +290,7 @@ if(BUILD_TESTING)
         tests/BrokerPipeTests.cpp
         src/BrokerProcessLauncher.cpp
         src/BrokerProcessLauncher.h
+        src/PseudoConsoleHostReport.h
         src/BrokerPipeServer.cpp
         src/BrokerPipeServer.h
         src/BrokerProtocol.cpp
@@ -317,6 +321,7 @@ if(BUILD_TESTING)
         src/BrokerControlPipe.h
         src/BrokerProcessLauncher.cpp
         src/BrokerProcessLauncher.h
+        src/PseudoConsoleHostReport.h
         src/BrokerPipeServer.cpp
         src/BrokerPipeServer.h
         src/BrokerProtocol.cpp

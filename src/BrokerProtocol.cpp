@@ -1087,4 +1087,97 @@ bool ParseLaunchExitResponse(
     return true;
 }
 
+std::string BuildLaunchHostFailureResponse(
+    std::wstring_view requestId, DWORD hostExitCode, std::wstring_view diagnostics)
+{
+    std::string response = "{\"version\":1,\"requestId\":";
+    AppendJsonString(response, requestId);
+    response += ",\"status\":\"error\",\"hostExitCode\":" + std::to_string(hostExitCode);
+    response += ",\"diagnostic\":";
+    AppendJsonString(response, diagnostics);
+    response +=
+        ",\"reasonCode\":\"host_failed\",\"win32Error\":" + std::to_string(ERROR_GEN_FAILURE) + "}";
+    return response;
+}
+
+bool ParseLaunchHostFailureResponse(std::string_view response, std::wstring_view requestId,
+    DWORD& hostExitCode, std::wstring& diagnostics)
+{
+    hostExitCode = 0;
+    diagnostics.clear();
+    JsonReader reader(response);
+    if (!reader.Consume('{'))
+    {
+        return false;
+    }
+    bool version = false;
+    bool responseId = false;
+    bool status = false;
+    bool hostExit = false;
+    bool diagnostic = false;
+    bool reason = false;
+    bool error = false;
+    for (;;)
+    {
+        std::wstring name;
+        if (!reader.String(name) || !reader.Consume(':'))
+        {
+            return false;
+        }
+        if (name == L"version" && !version)
+        {
+            DWORD value = 0;
+            version = reader.Unsigned(value) && value == 1;
+        }
+        else if (name == L"requestId" && !responseId)
+        {
+            std::wstring value;
+            responseId = reader.String(value) && value == requestId;
+        }
+        else if (name == L"status" && !status)
+        {
+            std::wstring value;
+            status = reader.String(value) && value == L"error";
+        }
+        else if (name == L"hostExitCode" && !hostExit)
+        {
+            hostExit = reader.Unsigned(hostExitCode);
+        }
+        else if (name == L"diagnostic" && !diagnostic)
+        {
+            diagnostic = reader.String(diagnostics);
+        }
+        else if (name == L"reasonCode" && !reason)
+        {
+            std::wstring value;
+            reason = reader.String(value) && value == L"host_failed";
+        }
+        else if (name == L"win32Error" && !error)
+        {
+            DWORD value = 0;
+            error = reader.Unsigned(value) && value == ERROR_GEN_FAILURE;
+        }
+        else
+        {
+            return false;
+        }
+        if (reader.Consume('}'))
+        {
+            break;
+        }
+        if (!reader.Consume(','))
+        {
+            return false;
+        }
+    }
+    if (!(reader.End() && version && responseId && status && hostExit && diagnostic && reason &&
+            error))
+    {
+        hostExitCode = 0;
+        diagnostics.clear();
+        return false;
+    }
+    return true;
+}
+
 } // namespace launch_as::broker

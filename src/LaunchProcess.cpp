@@ -213,12 +213,20 @@ ExitCode RunBrokerConsole(const AccountIdentity& account, const Options& options
         return ExitFailure;
     }
     DWORD childExitCode = 0;
-    const DWORD exitError = WaitForBrokerConsoleExit(connection, childExitCode);
+    std::wstring exitDiagnostics;
+    const DWORD exitError = WaitForBrokerConsoleExit(connection, childExitCode, exitDiagnostics);
     connection.Reset();
     if (exitError != ERROR_SUCCESS)
     {
-        std::wcerr << L"Could not read the broker terminal exit code: "
-                   << FormatWindowsError(exitError) << L"\n";
+        if (!exitDiagnostics.empty())
+        {
+            std::wcerr << exitDiagnostics << L"\n";
+        }
+        else
+        {
+            std::wcerr << L"Could not read the broker terminal exit code: "
+                       << FormatWindowsError(exitError) << L"\n";
+        }
         return ExitFailure;
     }
     std::wcout << L"Broker terminal session ended.\n";

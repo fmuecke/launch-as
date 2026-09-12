@@ -225,9 +225,11 @@ DWORD LaunchBrokerConsole(std::wstring_view profileId, std::span<const std::wstr
     return ERROR_INVALID_DATA;
 }
 
-DWORD WaitForBrokerConsoleExit(BrokerControlConnection& connection, DWORD& exitCode)
+DWORD WaitForBrokerConsoleExit(
+    BrokerControlConnection& connection, DWORD& exitCode, std::wstring& diagnostics)
 {
     exitCode = 0;
+    diagnostics.clear();
     if (!connection.get())
     {
         return ERROR_INVALID_HANDLE;
@@ -248,6 +250,14 @@ DWORD WaitForBrokerConsoleExit(BrokerControlConnection& connection, DWORD& exitC
     if (broker::ParseLaunchExitResponse(response, connection.requestId(), exitCode))
     {
         return ERROR_SUCCESS;
+    }
+    DWORD hostExitCode = 0;
+    if (broker::ParseLaunchHostFailureResponse(
+            response, connection.requestId(), hostExitCode, diagnostics))
+    {
+        diagnostics = L"Broker console host failed (exit code " + std::to_wstring(hostExitCode) +
+                      L"): " + diagnostics;
+        return ERROR_GEN_FAILURE;
     }
     DWORD brokerError = ERROR_INVALID_DATA;
     if (broker::ParseErrorResponse(response, connection.requestId(), brokerError))

@@ -19,7 +19,7 @@ param(
     [switch] $RunElevatedTests,
 
     [Parameter()]
-    [switch] $WaitForElevatedTestResults,
+    [string] $ElevatedTestOutputPath,
 
     [Parameter()]
     [switch] $RunAcceptanceTest,
@@ -72,17 +72,28 @@ function Invoke-ElevatedCtestTests {
         return
     }
 
+    Write-Host ""
     Write-Host 'Requesting UAC approval to run elevated CTest tests'
     $hostExecutable = (Get-Process -Id $PID).Path
     if ([string]::IsNullOrWhiteSpace($hostExecutable)) {
         throw 'Could not determine the current PowerShell executable for the elevated test run.'
     }
-    $elevatedArguments = "-NoProfile -File `"$PSCommandPath`" -Configuration $Configuration -RunElevatedTests -WaitForElevatedTestResults"
+    $elevatedTestOutputPath = Join-Path $buildDirectory "elevated-ctest-$Configuration.log"
+    if (Test-Path -LiteralPath $elevatedTestOutputPath) {
+        Remove-Item -LiteralPath $elevatedTestOutputPath -Force
+    }
+    $elevatedArguments = "-NoProfile -File `"$PSCommandPath`" -Configuration $Configuration -RunElevatedTests -ElevatedTestOutputPath `"$elevatedTestOutputPath`""
     try {
         $process = Start-Process -FilePath $hostExecutable -ArgumentList $elevatedArguments -Verb RunAs -Wait -PassThru -WorkingDirectory $projectRoot
     }
     catch {
         throw "Could not start elevated CTest tests: $($_.Exception.Message)"
+    }
+    if (Test-Path -LiteralPath $elevatedTestOutputPath) {
+        Get-Content -LiteralPath $elevatedTestOutputPath
+    }
+    else {
+        Write-Warning "Elevated CTest output was not captured: $elevatedTestOutputPath"
     }
     if ($process.ExitCode -ne 0) {
         throw "Elevated CTest tests failed with exit code $($process.ExitCode)."
@@ -93,17 +104,31 @@ if ($RunElevatedTests) {
     if (-not (Test-IsAdministrator)) {
         throw '-RunElevatedTests must be run from an elevated PowerShell process.'
     }
+    if (-not [string]::IsNullOrWhiteSpace($ElevatedTestOutputPath)) {
+        $outputDirectory = Split-Path -Parent $ElevatedTestOutputPath
+        if (-not [string]::IsNullOrWhiteSpace($outputDirectory)) {
+            $null = New-Item -ItemType Directory -Force -Path $outputDirectory
+        }
+    }
     $elevatedTestExitCode = 0
     try {
-        Invoke-CtestTests -Description 'all elevated' -LabelOption '--label-regex' -LabelValue 'elevated'
+        if ([string]::IsNullOrWhiteSpace($ElevatedTestOutputPath)) {
+            Invoke-CtestTests -Description 'all elevated' -LabelOption '--label-regex' -LabelValue 'elevated'
+        }
+        else {
+            & {
+                Invoke-CtestTests -Description 'all elevated' -LabelOption '--label-regex' -LabelValue 'elevated'
+            } *>&1 | Out-File -LiteralPath $ElevatedTestOutputPath -Encoding utf8
+        }
     }
     catch {
-        Write-Host $_.Exception.Message -ForegroundColor Red
+        if ([string]::IsNullOrWhiteSpace($ElevatedTestOutputPath)) {
+            Write-Host $_.Exception.Message -ForegroundColor Red
+        }
+        else {
+            $_ | Out-File -LiteralPath $ElevatedTestOutputPath -Append -Encoding utf8
+        }
         $elevatedTestExitCode = 1
-    }
-    if ($WaitForElevatedTestResults) {
-        Write-Host
-        Read-Host 'Elevated tests are complete. Press Enter to close this window.'
     }
     if ($elevatedTestExitCode -ne 0) {
         exit $elevatedTestExitCode

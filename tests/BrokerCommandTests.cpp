@@ -18,6 +18,8 @@
 namespace
 {
 
+constexpr ULONGLONG BusyPipeResponseBoundMilliseconds = 1'000;
+
 [[nodiscard]] bool Expect(bool condition, const wchar_t* message)
 {
     if (!condition)
@@ -318,9 +320,12 @@ int wmain(int argumentCount, wchar_t* arguments[])
         return 1;
     }
     HANDLE rawSecondPipe = nullptr;
+    const ULONGLONG busyStarted = GetTickCount64();
     const DWORD busyError = launch_as::broker::OpenBrokerControlPipe(rawSecondPipe);
+    const ULONGLONG busyElapsed = GetTickCount64() - busyStarted;
     launch_as::UniqueHandle secondPipe(rawSecondPipe);
-    if (!Expect(busyError == ERROR_PIPE_BUSY && !secondPipe,
+    if (!Expect(busyError == ERROR_PIPE_BUSY && !secondPipe &&
+                    busyElapsed < BusyPipeResponseBoundMilliseconds,
             L"A second broker launch did not fail immediately while the pipe was busy."))
     {
         return 1;

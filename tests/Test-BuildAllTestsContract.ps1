@@ -28,9 +28,18 @@ if ($scriptText -notmatch 'Start-Process.*-Verb RunAs.*-Wait.*-PassThru') {
 if ($scriptText -notmatch '-RunElevatedTests') {
     throw 'The elevated child process must use the internal elevated-test switch.'
 }
-if ($scriptText -notmatch '-WaitForElevatedTestResults') {
-    throw 'The elevated child process must wait for the user to inspect its test results.'
+if ($scriptText -notmatch '\[string\]\s*\$ElevatedTestOutputPath') {
+    throw 'build.ps1 must accept the elevated-test output path.'
 }
-if ($scriptText -notmatch "Read-Host 'Elevated tests are complete\. Press Enter to close this window\.'") {
-    throw 'The elevated test window must remain open until the user has inspected the results.'
+if ($scriptText -notmatch '-ElevatedTestOutputPath') {
+    throw 'The elevated child process must receive the elevated-test output path.'
+}
+if ($scriptText -notmatch 'Out-File -LiteralPath \$ElevatedTestOutputPath') {
+    throw 'The elevated child process must capture CTest output in the requested file.'
+}
+if ($scriptText -notmatch 'Get-Content -LiteralPath \$elevatedTestOutputPath') {
+    throw 'The parent process must print the captured elevated-test output.'
+}
+if ($scriptText -match 'Read-Host') {
+    throw 'The elevated test run must not wait for interactive input.'
 }

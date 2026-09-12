@@ -18,7 +18,7 @@ namespace
 
 [[nodiscard]] bool Expect(bool condition, const wchar_t* message);
 
-constexpr DWORD WorkerReleaseTimeoutMilliseconds = 7'000;
+constexpr DWORD WorkerReleaseTimeoutMilliseconds = 1'000;
 
 struct LaunchCapture
 {

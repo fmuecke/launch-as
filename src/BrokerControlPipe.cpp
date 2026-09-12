@@ -16,6 +16,11 @@ namespace
 
 constexpr wchar_t ServiceName[] = L"launch-as-broker";
 constexpr DWORD BrokerStartTimeoutMilliseconds = 5'000;
+#ifdef LAUNCH_AS_TEST_CONTROL_PIPE
+constexpr DWORD BusyControlPipeTimeoutMilliseconds = 250;
+#else
+constexpr DWORD BusyControlPipeTimeoutMilliseconds = BrokerStartTimeoutMilliseconds;
+#endif
 
 class ServiceHandle final
 {
@@ -68,6 +73,7 @@ DWORD OpenBrokerControlPipe(HANDLE& pipe)
     pipe = nullptr;
     bool serviceStartAttempted = false;
     const ULONGLONG deadline = GetTickCount64() + BrokerStartTimeoutMilliseconds;
+    ULONGLONG busyDeadline = 0;
     DWORD lastError = ERROR_FILE_NOT_FOUND;
     do
     {
@@ -86,6 +92,14 @@ DWORD OpenBrokerControlPipe(HANDLE& pipe)
         lastError = GetLastError();
         if (lastError == ERROR_PIPE_BUSY)
         {
+            if (busyDeadline == 0)
+            {
+                busyDeadline = GetTickCount64() + BusyControlPipeTimeoutMilliseconds;
+            }
+            if (GetTickCount64() >= busyDeadline)
+            {
+                return lastError;
+            }
             static_cast<void>(WaitNamedPipeW(ControlPipeName.data(), 50));
             continue;
         }

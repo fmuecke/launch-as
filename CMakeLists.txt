@@ -820,6 +820,9 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
         Ole32
     )
     configure_launch_as_target(LauncherBrokerTerminalBridgeTests)
+    target_compile_definitions(LauncherBrokerTerminalBridgeTests PRIVATE
+        LAUNCH_AS_TESTING
+    )
 
     add_test(
         NAME launcher.broker_terminal_bridge

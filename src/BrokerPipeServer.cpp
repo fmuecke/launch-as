@@ -18,7 +18,7 @@ namespace
 {
 
 constexpr DWORD RequestTimeoutMilliseconds = 5'000;
-constexpr DWORD ControlConnectionCloseTimeoutMilliseconds = 5'000;
+constexpr DWORD ControlConnectionCloseTimeoutMilliseconds = 250;
 
 [[nodiscard]] bool WaitForOperation(HANDLE pipe, HANDLE stopEvent, OVERLAPPED& overlapped,
     HANDLE operationEvent, DWORD& bytesTransferred)

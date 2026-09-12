@@ -18,6 +18,7 @@ namespace
 
 constexpr int SkipNoConsoleAttached = 77;
 constexpr DWORD StopWithConsoleStdinTimeoutMilliseconds = 2'000;
+constexpr ULONGLONG BrokerConnectionTimeoutBoundMilliseconds = 1'000;
 
 [[nodiscard]] bool Expect(bool condition, const wchar_t* message)
 {
@@ -283,7 +284,7 @@ int wmain(int argumentCount, wchar_t* arguments[])
     return Expect(
                invalidSidRejected, L"The broker terminal bridge accepted an invalid child SID.") &&
                    Expect(!connected, L"The broker terminal bridge accepted an absent host.") &&
-                   Expect(elapsed < 7'000,
+                   Expect(elapsed < BrokerConnectionTimeoutBoundMilliseconds,
                        L"The broker terminal bridge did not time out when the host was absent.") &&
                    Expect(error.find(L"Timed out") != std::wstring::npos,
                        L"The broker terminal bridge did not report its connection timeout.") &&

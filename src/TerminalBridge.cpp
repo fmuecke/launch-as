@@ -25,7 +25,11 @@ namespace
 
 constexpr DWORD PipeMode =
     PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS;
+#ifdef LAUNCH_AS_TESTING
+constexpr DWORD BrokerPipeConnectionTimeoutMilliseconds = 250;
+#else
 constexpr DWORD BrokerPipeConnectionTimeoutMilliseconds = 5'000;
+#endif
 constexpr auto ResizePollInterval = std::chrono::milliseconds(50);
 
 struct LocalFreeDeleter

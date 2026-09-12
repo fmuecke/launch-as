@@ -38,15 +38,15 @@ namespace
 }
 
 [[nodiscard]] DWORD ForwardManagementRequest(launch_as::broker::RequestOperation operation,
-    std::wstring_view accountName, bool confirmed, std::vector<std::wstring>* accounts)
+    std::wstring_view accountName, bool confirmed, bool force, std::vector<std::wstring>* accounts)
 {
     const std::optional<std::wstring> requestId = CreateRequestId();
     if (!requestId)
     {
         return ERROR_GEN_FAILURE;
     }
-    const std::string request =
-        launch_as::broker::BuildManagementRequest(operation, *requestId, accountName, confirmed);
+    const std::string request = launch_as::broker::BuildManagementRequest(
+        operation, *requestId, accountName, confirmed, force);
 
     HANDLE rawPipe = nullptr;
     const DWORD openError = launch_as::broker::OpenBrokerControlPipe(rawPipe);
@@ -107,24 +107,27 @@ namespace
                    << L" without an interactive console. Re-run with --force to continue.\n";
         return false;
     }
-    std::wcout << description << L". Type yes to continue: ";
+    std::wcout << description << L". Type YES to continue: ";
     std::wstring answer;
-    return std::getline(std::wcin, answer) && answer == L"yes";
+    return std::getline(std::wcin, answer) && answer == L"YES";
 }
 
 void PrintUsage()
 {
     launch_as::PrintLicenseHeader();
-    std::wcerr << LR"usage(Usage:
-  launch-as-admin install                         Stop active sessions, then create or update the broker service.
-  launch-as-admin uninstall [--force]             Stop and remove the service; accounts are retained.
-  launch-as-admin enroll <account> [--force]      Create an account or take over an existing one; changes its password.
-  launch-as-admin list                            Show owned accounts.
-  launch-as-admin unenroll <account> [--force]    End its sessions, forget it, and disable the account.
-  launch-as-admin unenroll-all [--force]          Unenroll every owned account.
+    std::wcerr << LR"usage(Usage:  launch-as-admin <COMMAND> <PARAMS...>
 
-install, uninstall, enroll, unenroll, and unenroll-all require elevation.
-uninstall, enroll, unenroll, and unenroll-all require consent; --force skips the prompt.
+  Commands are:
+    install                         Stop active sessions, then create or update the broker service.
+    uninstall [--force]             Stop and remove the service; accounts are retained.
+    create <account>                Create a new account owned by launch-as; it fails if the name exists.
+    create --takeover <account>  [--force]    Take over an existing account and make it launch-as-owned.
+    list                            Show owned accounts.
+    forget <account> [--force]      Deregister it; leave the Windows account unchanged.
+    delete <account> [--force]      Delete an owned account after its sessions end.
+
+install, uninstall, create, forget, and delete require elevation.
+uninstall, create --takeover, forget, and delete require consent; --force skips the prompt.
 
 )usage";
 }
@@ -170,7 +173,7 @@ int RunConfigurationCommand(int argumentCount, wchar_t* arguments[])
     {
         std::vector<std::wstring> accounts;
         const DWORD listError = ForwardManagementRequest(
-            launch_as::broker::RequestOperation::List, L"", false, &accounts);
+            launch_as::broker::RequestOperation::List, L"", false, false, &accounts);
         if (listError == ERROR_SUCCESS)
         {
             if (accounts.empty())
@@ -192,9 +195,94 @@ int RunConfigurationCommand(int argumentCount, wchar_t* arguments[])
         }
         return static_cast<int>(listError);
     }
+    if (argumentCount >= 2 && std::wstring_view(arguments[1]) == L"create")
+    {
+        bool forced = false;
+        bool takeOverExisting = false;
+        std::wstring accountName;
+        for (int index = 2; index < argumentCount; ++index)
+        {
+            const std::wstring_view argument(arguments[index]);
+            if (argument == L"--force" && !forced)
+            {
+                forced = true;
+            }
+            else if (argument == L"--takeover" && !takeOverExisting && accountName.empty() &&
+                     index + 1 < argumentCount)
+            {
+                takeOverExisting = true;
+                accountName = arguments[++index];
+            }
+            else if (!takeOverExisting && accountName.empty() && !argument.starts_with(L"--"))
+            {
+                accountName = argument;
+            }
+            else
+            {
+                PrintUsage();
+                return ERROR_INVALID_PARAMETER;
+            }
+        }
+        if (accountName.empty())
+        {
+            PrintUsage();
+            return ERROR_INVALID_PARAMETER;
+        }
+        if (forced && !takeOverExisting)
+        {
+            PrintUsage();
+            return ERROR_INVALID_PARAMETER;
+        }
+        if (!launch_as::broker::IsValidBrokerAccountName(accountName))
+        {
+            std::wcerr << L"Invalid account name: " << accountName << L"\n";
+            PrintUsage();
+            return ERROR_INVALID_PARAMETER;
+        }
+        const DWORD validationError =
+            launch_as::broker::ValidateBrokerAccountForRegistration(accountName);
+        if (validationError == ERROR_MEMBER_IN_GROUP)
+        {
+            std::wcerr << L"Broker takeover refused for " << accountName
+                       << L": the account is a member of the local Administrators group.\n";
+            return static_cast<int>(validationError);
+        }
+        if (validationError != ERROR_SUCCESS)
+        {
+            std::wcerr << L"Broker account preflight failed: "
+                       << launch_as::FormatWindowsError(validationError) << L"\n";
+            return static_cast<int>(validationError);
+        }
+        const std::wstring action =
+            L"Take over " + accountName + L", reset its password, and make it launch-as-owned";
+        if (takeOverExisting && !forced && !ConfirmDestructiveOperation(action))
+        {
+            return ERROR_CANCELLED;
+        }
+        const launch_as::broker::RequestOperation operation =
+            takeOverExisting ? launch_as::broker::RequestOperation::TakeOver
+                             : launch_as::broker::RequestOperation::Create;
+        const DWORD configurationError =
+            ForwardManagementRequest(operation, accountName, true, forced, nullptr);
+        if (configurationError == ERROR_SUCCESS)
+        {
+            std::wcout << (takeOverExisting ? L"Took over " : L"Created ") << accountName << L".\n";
+        }
+        else if (configurationError == ERROR_ACCOUNT_DISABLED && !forced)
+        {
+            std::wcerr << L"Broker takeover refused because " << accountName
+                       << L" is disabled. Re-run with --force to re-enable and take it over.\n";
+        }
+        else
+        {
+            std::wcerr << L"Broker " << (takeOverExisting ? L"takeover" : L"create") << L" failed: "
+                       << launch_as::FormatWindowsError(configurationError) << L"\n";
+        }
+        return static_cast<int>(configurationError);
+    }
     if ((argumentCount == 3 || argumentCount == 4) &&
-        (std::wstring_view(arguments[1]) == L"enroll" ||
-            std::wstring_view(arguments[1]) == L"unenroll") &&
+        (std::wstring_view(arguments[1]) == L"forget" ||
+            std::wstring_view(arguments[1]) == L"delete") &&
         (argumentCount == 3 || std::wstring_view(arguments[3]) == L"--force"))
     {
         const std::wstring_view accountName(arguments[2]);
@@ -204,94 +292,33 @@ int RunConfigurationCommand(int argumentCount, wchar_t* arguments[])
             PrintUsage();
             return ERROR_INVALID_PARAMETER;
         }
-        const std::wstring_view command(arguments[1]);
-        const bool isEnrollment = command == L"enroll";
-        if (isEnrollment)
-        {
-            const DWORD validationError =
-                launch_as::broker::ValidateBrokerAccountForRegistration(accountName);
-            if (validationError == ERROR_MEMBER_IN_GROUP)
-            {
-                std::wcerr << L"Broker enrollment refused for " << accountName
-                           << L": the account is a member of the local Administrators group.\n";
-                return static_cast<int>(validationError);
-            }
-            if (validationError != ERROR_SUCCESS)
-            {
-                std::wcerr << L"Broker enrollment preflight failed: "
-                           << launch_as::FormatWindowsError(validationError) << L"\n";
-                return static_cast<int>(validationError);
-            }
-        }
         const bool forced = argumentCount == 4;
-        const std::wstring action =
-            isEnrollment
-                ? L"Enroll " + std::wstring(accountName) + L" and create or take over its account"
-                : L"Unenroll " + std::wstring(accountName) + L" and disable the account";
+        const bool deleting = std::wstring_view(arguments[1]) == L"delete";
+        const std::wstring action = deleting
+                                        ? L"Delete launch-as account " + std::wstring(accountName)
+                                        : L"Forget launch-as account " + std::wstring(accountName) +
+                                              L" without changing the Windows account";
         if (!forced && !ConfirmDestructiveOperation(action))
         {
             return ERROR_CANCELLED;
         }
-        const launch_as::broker::RequestOperation operation =
-            isEnrollment ? launch_as::broker::RequestOperation::Enroll
-                         : launch_as::broker::RequestOperation::Unenroll;
-        if (!isEnrollment)
+        const DWORD operationError =
+            ForwardManagementRequest(deleting ? launch_as::broker::RequestOperation::Delete
+                                              : launch_as::broker::RequestOperation::Forget,
+                accountName,
+                true,
+                forced,
+                nullptr);
+        if (operationError == ERROR_SUCCESS)
         {
-            const DWORD stopError = launch_as::broker::StopBrokerService();
-            if (stopError != ERROR_SUCCESS)
-            {
-                std::wcerr << L"Could not stop broker sessions before unenrollment: "
-                           << launch_as::FormatWindowsError(stopError) << L"\n";
-                return static_cast<int>(stopError);
-            }
-        }
-        const DWORD configurationError =
-            ForwardManagementRequest(operation, accountName, true, nullptr);
-        if (configurationError == ERROR_SUCCESS)
-        {
-            std::wcout << (isEnrollment ? L"Enrolled " : L"Unenrolled ") << accountName << L".\n";
-        }
-        else if (isEnrollment && configurationError == ERROR_MEMBER_IN_GROUP)
-        {
-            std::wcerr << L"Broker enrollment refused for " << accountName
-                       << L": the account is a member of the local Administrators group.\n";
+            std::wcout << (deleting ? L"Deleted " : L"Forgot ") << accountName << L".\n";
         }
         else
         {
-            std::wcerr << L"Broker " << (isEnrollment ? L"enrollment" : L"unenrollment")
-                       << L" failed: " << launch_as::FormatWindowsError(configurationError)
-                       << L"\n";
+            std::wcerr << L"Broker " << (deleting ? L"delete" : L"forget") << L" failed: "
+                       << launch_as::FormatWindowsError(operationError) << L"\n";
         }
-        return static_cast<int>(configurationError);
-    }
-    if ((argumentCount == 2 || argumentCount == 3) &&
-        std::wstring_view(arguments[1]) == L"unenroll-all" &&
-        (argumentCount == 2 || std::wstring_view(arguments[2]) == L"--force"))
-    {
-        if (argumentCount == 2 &&
-            !ConfirmDestructiveOperation(L"Unenroll every enrolled broker account"))
-        {
-            return ERROR_CANCELLED;
-        }
-        const DWORD stopError = launch_as::broker::StopBrokerService();
-        if (stopError != ERROR_SUCCESS)
-        {
-            std::wcerr << L"Could not stop broker sessions before unenrollment: "
-                       << launch_as::FormatWindowsError(stopError) << L"\n";
-            return static_cast<int>(stopError);
-        }
-        const DWORD dropError = ForwardManagementRequest(
-            launch_as::broker::RequestOperation::UnenrollAll, L"", true, nullptr);
-        if (dropError == ERROR_SUCCESS)
-        {
-            std::wcout << L"Unenrolled all broker accounts.\n";
-        }
-        else
-        {
-            std::wcerr << L"Broker unenrollment failed: "
-                       << launch_as::FormatWindowsError(dropError) << L"\n";
-        }
-        return static_cast<int>(dropError);
+        return static_cast<int>(operationError);
     }
     PrintUsage();
     return ERROR_INVALID_PARAMETER;

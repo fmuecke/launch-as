@@ -241,27 +241,41 @@ int wmain(int argumentCount, wchar_t* arguments[])
     {
         return 1;
     }
-    const CommandResult unconfirmedEnroll =
-        RunCommandAndCapture(adminPath, L"enroll arbitrary-profile");
-    const CommandResult unconfirmedUnenroll =
-        RunCommandAndCapture(adminPath, L"unenroll arbitrary-profile");
-    if (!Expect(unconfirmedEnroll.exitCode == ERROR_CANCELLED &&
-                    unconfirmedEnroll.output.find(L"without an interactive console") !=
+    const CommandResult unconfirmedTakeover =
+        RunCommandAndCapture(adminPath, L"create --takeover arbitrary-profile");
+    const CommandResult unconfirmedForget =
+        RunCommandAndCapture(adminPath, L"forget arbitrary-profile");
+    if (!Expect(unconfirmedTakeover.exitCode == ERROR_CANCELLED &&
+                    unconfirmedTakeover.output.find(L"without an interactive console") !=
                         std::wstring::npos,
-            L"Broker enroll did not refuse a non-interactive destructive command.") ||
-        !Expect(unconfirmedUnenroll.exitCode == ERROR_CANCELLED &&
-                    unconfirmedUnenroll.output.find(L"without an interactive console") !=
+            L"Broker takeover did not refuse a non-interactive destructive command.") ||
+        !Expect(unconfirmedForget.exitCode == ERROR_CANCELLED &&
+                    unconfirmedForget.output.find(L"without an interactive console") !=
                         std::wstring::npos,
-            L"Broker unenroll did not refuse a non-interactive destructive command."))
+            L"Broker forget did not refuse a non-interactive destructive command."))
     {
         return 1;
     }
-    const CommandResult invalidCommand = RunCommandAndCapture(adminPath, L"enroll bad/name");
+    const CommandResult invalidCommand = RunCommandAndCapture(adminPath, L"create bad/name");
+    const CommandResult removedNameOption =
+        RunCommandAndCapture(adminPath, L"create --name LaunchAsUser");
+    const CommandResult missingAccount = RunCommandAndCapture(adminPath, L"create");
+    const CommandResult conflictingAccounts =
+        RunCommandAndCapture(adminPath, L"create first --takeover second --force");
     if (!Expect(invalidCommand.exitCode == ERROR_INVALID_PARAMETER,
             L"Broker invalid account did not return ERROR_INVALID_PARAMETER.") ||
         !Expect(invalidCommand.output.find(L"Invalid account name") != std::wstring::npos &&
-                    invalidCommand.output.find(L"enroll <account>") != std::wstring::npos,
-            L"Broker invalid account did not explain its parameters."))
+                    invalidCommand.output.find(L"create <account>") != std::wstring::npos,
+            L"Broker invalid account did not explain its parameters.") ||
+        !Expect(removedNameOption.exitCode == ERROR_INVALID_PARAMETER &&
+                    removedNameOption.output.find(L"create <account>") != std::wstring::npos,
+            L"Broker accepted the removed --name option.") ||
+        !Expect(missingAccount.exitCode == ERROR_INVALID_PARAMETER &&
+                    missingAccount.output.find(L"create <account>") != std::wstring::npos,
+            L"Broker accepted create without an account.") ||
+        !Expect(conflictingAccounts.exitCode == ERROR_INVALID_PARAMETER &&
+                    conflictingAccounts.output.find(L"create <account>") != std::wstring::npos,
+            L"Broker accepted conflicting create account operands."))
     {
         return 1;
     }
@@ -319,10 +333,10 @@ int wmain(int argumentCount, wchar_t* arguments[])
     }
 
     ServerThread serverThread(server.get(), stopEvent.get());
-    const DWORD result = RunCommand(adminPath, L"enroll LaunchAsUser --force");
-    return Expect(serverThread.connected(), L"Admin enroll did not connect to the control pipe.") &&
+    const DWORD result = RunCommand(adminPath, L"create LaunchAsUser");
+    return Expect(serverThread.connected(), L"Admin create did not connect to the control pipe.") &&
                    Expect(result == ERROR_NOT_READY,
-                       L"Admin enroll did not return the service response.")
+                       L"Admin create did not return the service response.")
                ? 0
                : 1;
 }

@@ -14,7 +14,11 @@ namespace launch_as::broker
 
 [[nodiscard]] bool IsValidBrokerAccountName(std::wstring_view accountName) noexcept;
 [[nodiscard]] DWORD ValidateBrokerAccountForRegistration(std::wstring_view accountName);
-[[nodiscard]] DWORD ProvisionStandardLocalAccount(
+[[nodiscard]] DWORD CreateBrokerManagedLocalAccount(
+    std::wstring_view accountName, const SecurePassword& password);
+[[nodiscard]] DWORD TakeOverExistingLocalAccount(
+    std::wstring_view accountName, const SecurePassword& password, bool allowEnable);
+[[nodiscard]] DWORD RefreshBrokerManagedLocalAccount(
     std::wstring_view accountName, const SecurePassword& password);
 
 } // namespace launch_as::broker

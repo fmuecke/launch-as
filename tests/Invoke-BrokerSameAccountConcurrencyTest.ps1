@@ -17,7 +17,7 @@ if ($caller.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrat
     throw 'Run this acceptance test from the authorised non-elevated user session.'
 }
 
-if ($null -eq ('LaunchAs.BrokerSameAccountPipes' -as [type])) {
+if ($null -eq ('LaunchAs.BrokerSameAccountPipesV2' -as [type])) {
     Add-Type @'
 using System;
 using System.Collections.Generic;
@@ -29,11 +29,17 @@ using Microsoft.Win32.SafeHandles;
 
 namespace LaunchAs
 {
-    public static class BrokerSameAccountPipes
+    public static class BrokerSameAccountPipesV2
     {
         private const uint PipeAccessInbound = 0x00000001;
         private const uint PipeAccessOutbound = 0x00000002;
         private const uint FileFlagFirstPipeInstance = 0x00080000;
+        // This is FILE_GENERIC_READ | FILE_WRITE_DATA. Do not request GENERIC_WRITE:
+        // it also asks for FILE_APPEND_DATA, which the broker deliberately withholds.
+        private const uint ControlPipeClientAccess = 0x0012008B;
+        private const uint OpenExisting = 3;
+        private const int ErrorFileNotFound = 2;
+        private const int ErrorPipeBusy = 231;
         private const uint ScManagerConnect = 0x00000001;
         private const uint ServiceStart = 0x00000010;
         private const int ErrorServiceAlreadyRunning = 1056;
@@ -58,6 +64,11 @@ namespace LaunchAs
             string name, uint openMode, uint pipeMode, uint maximumInstances,
             uint outputBufferSize, uint inputBufferSize, uint defaultTimeout,
             ref SecurityAttributes securityAttributes);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern SafeFileHandle CreateFile(
+            string name, uint desiredAccess, uint shareMode, IntPtr securityAttributes,
+            uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr LocalFree(IntPtr memory);
@@ -155,6 +166,28 @@ namespace LaunchAs
             }
         }
 
+        public static SafeFileHandle OpenControlPipe(string name)
+        {
+            DateTime deadline = DateTime.UtcNow.AddSeconds(5);
+            while (true)
+            {
+                SafeFileHandle handle = CreateFile(name, ControlPipeClientAccess, 0, IntPtr.Zero,
+                    OpenExisting, 0, IntPtr.Zero);
+                if (!handle.IsInvalid)
+                {
+                    return handle;
+                }
+                int error = Marshal.GetLastWin32Error();
+                handle.Dispose();
+                if ((error != ErrorFileNotFound && error != ErrorPipeBusy) ||
+                    DateTime.UtcNow >= deadline)
+                {
+                    throw new Win32Exception(error);
+                }
+                Thread.Sleep(25);
+            }
+        }
+
         public static void WriteTerminalSize(SafeFileHandle pipe, short columns, short rows)
         {
             var size = new byte[4];
@@ -246,7 +279,7 @@ $accountSid = ([System.Security.Principal.NTAccount]::new(
     [System.Security.Principal.SecurityIdentifier]).Value
 $pipeSddl = "D:P(A;;GA;;;SY)(A;;GRGW;;;$accountSid)"
 $windowsPowerShell = (Get-Command powershell.exe -CommandType Application).Source
-[LaunchAs.BrokerSameAccountPipes]::EnsureBrokerStarted()
+[LaunchAs.BrokerSameAccountPipesV2]::EnsureBrokerStarted()
 
 function New-BrokerSession {
     param(
@@ -261,15 +294,13 @@ function New-BrokerSession {
         "Write-Output '$readyMarker'; Start-Sleep -Seconds $SleepSeconds; exit 37"
     $dataPipePrefix = "\\.\pipe\launch-as-concurrency-$requestId"
     $dataPipes = @()
-    $controlPipe = [System.IO.Pipes.NamedPipeClientStream]::new(
-        '.', $PipeName, [System.IO.Pipes.PipeDirection]::InOut,
-        [System.IO.Pipes.PipeOptions]::None)
+    $controlPipe = $null
     try {
-        $dataPipes += [LaunchAs.BrokerSameAccountPipes]::Create(
+        $dataPipes += [LaunchAs.BrokerSameAccountPipesV2]::Create(
             "$dataPipePrefix-in", $true, $pipeSddl)
-        $dataPipes += [LaunchAs.BrokerSameAccountPipes]::Create(
+        $dataPipes += [LaunchAs.BrokerSameAccountPipesV2]::Create(
             "$dataPipePrefix-out", $false, $pipeSddl)
-        $dataPipes += [LaunchAs.BrokerSameAccountPipes]::Create(
+        $dataPipes += [LaunchAs.BrokerSameAccountPipesV2]::Create(
             "$dataPipePrefix-resize", $true, $pipeSddl)
 
         $request = [ordered]@{
@@ -290,7 +321,10 @@ function New-BrokerSession {
             }
         } | ConvertTo-Json -Compress
 
-        $controlPipe.Connect(5000)
+        $controlPipeHandle = [LaunchAs.BrokerSameAccountPipesV2]::OpenControlPipe(
+            "\\.\pipe\$PipeName")
+        $controlPipe = [System.IO.FileStream]::new(
+            $controlPipeHandle, [System.IO.FileAccess]::ReadWrite)
         $payload = [System.Text.Encoding]::UTF8.GetBytes($request)
         $controlPipe.Write($payload, 0, $payload.Length)
         $controlPipe.Flush()
@@ -315,8 +349,8 @@ function New-BrokerSession {
             $response.reasonCode -ne 'launched' -or $response.processId -le 0) {
             throw "Broker concurrency launch failed: $responseText"
         }
-        [LaunchAs.BrokerSameAccountPipes]::WriteTerminalSize($dataPipes[2], 120, 30)
-        $output = [LaunchAs.BrokerSameAccountPipes]::ReadUntil(
+        [LaunchAs.BrokerSameAccountPipesV2]::WriteTerminalSize($dataPipes[2], 120, 30)
+        $output = [LaunchAs.BrokerSameAccountPipesV2]::ReadUntil(
             $dataPipes[1], $readyMarker, 10000)
         $logonSidMatch = [regex]::Match($output, 'S-1-5-5-[0-9]+-[0-9]+')
         if (-not $logonSidMatch.Success) {
@@ -333,7 +367,9 @@ function New-BrokerSession {
         }
     }
     catch {
-        $controlPipe.Dispose()
+        if ($null -ne $controlPipe) {
+            $controlPipe.Dispose()
+        }
         $dataPipes | ForEach-Object { $_.Dispose() }
         throw
     }

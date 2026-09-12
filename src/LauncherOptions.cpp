@@ -23,7 +23,7 @@ void PrintUsage()
                       [--working-directory <directory>]
                       -- <absolute-executable> [arguments...]
 
-  Starts a console session through launch-as-broker. Enroll the account first with the
+  Starts a console session through launch-as-broker. Create or take over the account first with the
   elevated launch-as-admin command. The client never accepts or stores passwords.
 
 )usage";

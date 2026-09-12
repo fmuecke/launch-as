@@ -35,7 +35,7 @@ function Confirm-Action {
 
 if (-not (Test-Administrator)) {
     $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" " +
-        "-DefaultAccount `"$DefaultAccount`""
+    "-DefaultAccount `"$DefaultAccount`""
     if ($Force) {
         $arguments += ' -Force'
     }
@@ -79,11 +79,11 @@ if ($null -eq $service) {
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
     }
-    if (Confirm-Action "Enroll default account '$DefaultAccount'") {
-        & $admin enroll $DefaultAccount --force
+    if (Confirm-Action "Create default launch-as account '$DefaultAccount'") {
+        & $admin create $DefaultAccount
         exit $LASTEXITCODE
     }
-    Write-Host 'Broker installation completed, but account enrollment was cancelled.' -ForegroundColor Yellow
+    Write-Host 'Broker installation completed, but account creation was cancelled.' -ForegroundColor Yellow
     exit $exitCancelled
 }
 
@@ -91,7 +91,7 @@ Write-Host "Existing launch-as-broker service detected ($($service.Status))."
 $choice = if ($Force) { 'update' } else { Read-Host 'Choose update, uninstall, or cancel' }
 switch ($choice.ToLowerInvariant()) {
     'update' {
-        $updatePrompt = "Update the broker, stop any active broker sessions, and re-enroll default account '$DefaultAccount' (replacing its broker-owned password)"
+        $updatePrompt = "Update the broker, stop any active broker sessions, and take over default account '$DefaultAccount' (replacing its broker-owned password)"
         if (-not (Confirm-Action $updatePrompt)) {
             exit $exitCancelled
         }
@@ -99,7 +99,7 @@ switch ($choice.ToLowerInvariant()) {
         if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
         }
-        & $admin enroll $DefaultAccount --force
+        & $admin create --takeover $DefaultAccount
         exit $LASTEXITCODE
     }
     'uninstall' {

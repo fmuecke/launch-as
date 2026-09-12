@@ -35,10 +35,11 @@ struct ConsoleRequest
 enum class RequestOperation
 {
     ConsoleLaunch,
-    Enroll,
+    Create,
+    TakeOver,
     List,
-    Unenroll,
-    UnenrollAll
+    Forget,
+    Delete
 };
 
 [[nodiscard]] std::wstring_view RequestOperationName(RequestOperation operation) noexcept;
@@ -52,6 +53,7 @@ struct BrokerRequest
     std::wstring requestId;
     std::wstring profileId;
     bool confirmed = false;
+    bool force = false;
     std::vector<std::wstring> arguments;
     std::wstring workingDirectory;
     ConsoleRequest console;
@@ -67,7 +69,7 @@ enum class ParseResult
 
 [[nodiscard]] ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request);
 [[nodiscard]] std::string BuildManagementRequest(RequestOperation operation,
-    std::wstring_view requestId, std::wstring_view profileId, bool confirmed);
+    std::wstring_view requestId, std::wstring_view profileId, bool confirmed, bool force = false);
 [[nodiscard]] std::string BuildErrorResponse(
     std::wstring_view requestId, std::string_view reasonCode, DWORD win32Error);
 [[nodiscard]] std::string BuildSuccessResponse(

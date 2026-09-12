@@ -20,7 +20,7 @@ function Test-BrokerServiceInstalled {
 
 if (-not (Test-BrokerServiceInstalled)) {
     Write-Host 'launch-as-broker is not installed.'
-    Write-Host 'Build the project, then run .\Setup-LaunchAs.ps1 to install and enroll it.'
+    Write-Host 'Build the project, then run .\Setup-LaunchAs.ps1 to install and create its account.'
     exit 1
 }
 

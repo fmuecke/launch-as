@@ -488,14 +488,16 @@ std::wstring_view RequestOperationName(RequestOperation operation) noexcept
     {
     case RequestOperation::ConsoleLaunch:
         return L"launch";
-    case RequestOperation::Enroll:
-        return L"enroll";
+    case RequestOperation::Create:
+        return L"create";
+    case RequestOperation::TakeOver:
+        return L"takeover";
     case RequestOperation::List:
         return L"list";
-    case RequestOperation::Unenroll:
-        return L"unenroll";
-    case RequestOperation::UnenrollAll:
-        return L"unenroll-all";
+    case RequestOperation::Forget:
+        return L"forget";
+    case RequestOperation::Delete:
+        return L"delete";
     }
     return L"unknown";
 }
@@ -509,13 +511,16 @@ std::string_view RequestOperationSuccessReason(RequestOperation operation) noexc
 {
     switch (operation)
     {
-    case RequestOperation::Enroll:
-        return "enrolled";
+    case RequestOperation::Create:
+        return "created";
+    case RequestOperation::TakeOver:
+        return "taken_over";
     case RequestOperation::List:
         return "listed";
-    case RequestOperation::Unenroll:
-    case RequestOperation::UnenrollAll:
-        return "unenrolled";
+    case RequestOperation::Forget:
+        return "forgotten";
+    case RequestOperation::Delete:
+        return "deleted";
     case RequestOperation::ConsoleLaunch:
         return "launched";
     }
@@ -526,13 +531,16 @@ std::string_view RequestOperationFailureReason(RequestOperation operation) noexc
 {
     switch (operation)
     {
-    case RequestOperation::Enroll:
-        return "enrollment_failed";
+    case RequestOperation::Create:
+        return "create_failed";
+    case RequestOperation::TakeOver:
+        return "takeover_failed";
     case RequestOperation::List:
         return "list_failed";
-    case RequestOperation::Unenroll:
-    case RequestOperation::UnenrollAll:
-        return "unenrollment_failed";
+    case RequestOperation::Forget:
+        return "forget_failed";
+    case RequestOperation::Delete:
+        return "delete_failed";
     case RequestOperation::ConsoleLaunch:
         return "launch_failed";
     }
@@ -540,13 +548,13 @@ std::string_view RequestOperationFailureReason(RequestOperation operation) noexc
 }
 
 std::string BuildManagementRequest(RequestOperation operation, std::wstring_view requestId,
-    std::wstring_view profileId, bool confirmed)
+    std::wstring_view profileId, bool confirmed, bool force)
 {
     std::string request = "{\"version\":1,\"requestId\":";
     AppendJsonString(request, requestId);
     request += ",\"operation\":";
     AppendJsonString(request, RequestOperationName(operation));
-    if (operation != RequestOperation::List && operation != RequestOperation::UnenrollAll)
+    if (operation != RequestOperation::List)
     {
         request += ",\"profileId\":";
         AppendJsonString(request, profileId);
@@ -554,6 +562,10 @@ std::string BuildManagementRequest(RequestOperation operation, std::wstring_view
     if (operation != RequestOperation::List)
     {
         request += confirmed ? ",\"confirmed\":true" : ",\"confirmed\":false";
+    }
+    if (force)
+    {
+        request += ",\"force\":true";
     }
     request += '}';
     return request;
@@ -599,6 +611,7 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
     bool consoleSeen = false;
     bool confirmed = false;
     bool confirmedSeen = false;
+    bool forceSeen = false;
     for (;;)
     {
         std::wstring name;
@@ -670,6 +683,14 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
             confirmedSeen = true;
             confirmed = reader.Boolean(request.confirmed);
         }
+        else if (name == L"force" && !forceSeen)
+        {
+            forceSeen = true;
+            if (!reader.Boolean(request.force))
+            {
+                return ParseResult::InvalidRequest;
+            }
+        }
         else
         {
             return ParseResult::InvalidRequest;
@@ -691,41 +712,46 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
     {
         return ParseResult::InvalidRequest;
     }
-    if (operationName == L"list" || operationName == L"unenroll-all")
+    if (operationName == L"list")
     {
         if (profileSeen || modeSeen || argumentsSeen || workingDirectorySeen || consoleSeen ||
-            (operationName == L"list" && confirmedSeen) ||
-            (operationName == L"unenroll-all" && (!confirmedSeen || !confirmed)))
+            confirmedSeen || forceSeen)
         {
             return ParseResult::InvalidRequest;
         }
-        request.operation =
-            operationName == L"list" ? RequestOperation::List : RequestOperation::UnenrollAll;
+        request.operation = RequestOperation::List;
         return ParseResult::Success;
     }
     if (!profile)
     {
         return ParseResult::InvalidRequest;
     }
-    if (operationName == L"enroll")
+    if (operationName == L"create")
     {
         if (modeSeen || argumentsSeen || workingDirectorySeen || consoleSeen || !confirmedSeen ||
             !confirmed)
         {
             return ParseResult::InvalidRequest;
         }
-        request.operation = RequestOperation::Enroll;
+        request.operation = RequestOperation::Create;
         return ParseResult::Success;
     }
-    if (operationName == L"unenroll")
+    if (operationName == L"takeover" || operationName == L"forget" || operationName == L"delete")
     {
         if (modeSeen || argumentsSeen || workingDirectorySeen || consoleSeen || !confirmedSeen ||
             !confirmed)
         {
             return ParseResult::InvalidRequest;
         }
-        request.operation = RequestOperation::Unenroll;
+        request.operation = operationName == L"takeover" ? RequestOperation::TakeOver
+                            : operationName == L"forget" ? RequestOperation::Forget
+                            : operationName == L"delete" ? RequestOperation::Delete
+                                                         : RequestOperation::ConsoleLaunch;
         return ParseResult::Success;
+    }
+    if (forceSeen)
+    {
+        return ParseResult::InvalidRequest;
     }
     if (operationName != L"launch")
     {

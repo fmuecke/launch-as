@@ -19,20 +19,32 @@ namespace
 {
 
 constexpr DWORD RecordMagic = 0x4553414C; // LASE
-// Bumped from 1: the record now carries a trailing HMAC tag, so a v1 record fails the version
-// check and is treated as absent rather than silently trusted without a tag.
-constexpr DWORD RecordVersion = 2;
+// Version 1 had no HMAC and is rejected. Version 2 records are authenticated but carry no
+// ownership provenance, so they are conservatively treated as externally managed.
+constexpr DWORD LegacyRecordVersion = 2;
+constexpr DWORD RecordVersion = 3;
 constexpr wchar_t RecordExtension[] = L".enrollment";
 constexpr wchar_t MachineKeyFileName[] = L"\\enrollment.key";
 constexpr std::size_t MachineKeyBytes = 32;
 constexpr std::size_t RecordTagBytes = 32; // HMAC-SHA256 digest size
+
+struct RecordHeaderV2
+{
+    DWORD magic = RecordMagic;
+    DWORD version = LegacyRecordVersion;
+    DWORD sidBytes = 0;
+};
 
 struct RecordHeader
 {
     DWORD magic = RecordMagic;
     DWORD version = RecordVersion;
     DWORD sidBytes = 0;
+    DWORD flags = 0;
 };
+
+constexpr DWORD BrokerManagedRecordFlag = 0x00000001;
+constexpr DWORD KnownRecordFlags = BrokerManagedRecordFlag;
 
 [[nodiscard]] DWORD ReadExactly(HANDLE file, void* buffer, DWORD bytes)
 {
@@ -131,8 +143,8 @@ struct RecordHeader
 }
 
 [[nodiscard]] DWORD ComputeRecordTag(const std::array<BYTE, MachineKeyBytes>& key,
-    const RecordHeader& header, const std::vector<BYTE>& accountSid,
-    std::array<BYTE, RecordTagBytes>& tag)
+    const void* serializedHeader, std::size_t serializedHeaderBytes,
+    const std::vector<BYTE>& accountSid, std::array<BYTE, RecordTagBytes>& tag)
 {
     BCRYPT_ALG_HANDLE algorithm = nullptr;
     NTSTATUS status = BCryptOpenAlgorithmProvider(
@@ -152,8 +164,8 @@ struct RecordHeader
     if (status >= 0)
     {
         status = BCryptHashData(hash,
-            reinterpret_cast<PUCHAR>(const_cast<RecordHeader*>(&header)),
-            static_cast<ULONG>(sizeof(header)),
+            reinterpret_cast<PUCHAR>(const_cast<void*>(serializedHeader)),
+            static_cast<ULONG>(serializedHeaderBytes),
             0);
     }
     if (status >= 0 && !accountSid.empty())
@@ -189,7 +201,7 @@ struct RecordHeader
 EnrollmentStore::EnrollmentStore(std::wstring_view directory) : directory_(directory) {}
 
 DWORD EnrollmentStore::Store(
-    std::wstring_view accountName, const std::vector<BYTE>& accountSid) const
+    std::wstring_view accountName, const std::vector<BYTE>& accountSid, bool brokerManaged) const
 {
     if (!IsValidBrokerAccountName(accountName) || accountSid.empty() ||
         !IsValidSid(const_cast<BYTE*>(accountSid.data())))
@@ -202,9 +214,12 @@ DWORD EnrollmentStore::Store(
     {
         return keyError;
     }
-    const RecordHeader header {.sidBytes = static_cast<DWORD>(accountSid.size())};
+    const RecordHeader header {
+        .sidBytes = static_cast<DWORD>(accountSid.size()),
+        .flags = brokerManaged ? BrokerManagedRecordFlag : 0
+    };
     std::array<BYTE, RecordTagBytes> tag {};
-    const DWORD tagError = ComputeRecordTag(machineKey, header, accountSid, tag);
+    const DWORD tagError = ComputeRecordTag(machineKey, &header, sizeof(header), accountSid, tag);
     SecureZeroMemory(machineKey.data(), machineKey.size());
     if (tagError != ERROR_SUCCESS)
     {
@@ -261,9 +276,9 @@ DWORD EnrollmentStore::Store(
     return ERROR_SUCCESS;
 }
 
-DWORD EnrollmentStore::Load(std::wstring_view accountName, std::vector<BYTE>& accountSid) const
+DWORD EnrollmentStore::Load(std::wstring_view accountName, EnrollmentRecord& record) const
 {
-    accountSid.clear();
+    record = {};
     if (!IsValidBrokerAccountName(accountName))
     {
         return ERROR_INVALID_PARAMETER;
@@ -281,17 +296,34 @@ DWORD EnrollmentStore::Load(std::wstring_view accountName, std::vector<BYTE>& ac
         return openError;
     }
     const auto closeFile = [&rawFile] { CloseHandle(rawFile); };
-    RecordHeader header {};
-    DWORD readError = ReadExactly(rawFile, &header, sizeof(header));
-    if (readError != ERROR_SUCCESS || header.magic != RecordMagic ||
-        header.version != RecordVersion || header.sidBytes == 0 ||
-        header.sidBytes > SECURITY_MAX_SID_SIZE)
+    RecordHeaderV2 prefix {};
+    DWORD readError = ReadExactly(rawFile, &prefix, sizeof(prefix));
+    if (readError != ERROR_SUCCESS || prefix.magic != RecordMagic ||
+        (prefix.version != LegacyRecordVersion && prefix.version != RecordVersion) ||
+        prefix.sidBytes == 0 || prefix.sidBytes > SECURITY_MAX_SID_SIZE)
     {
         closeFile();
         return readError == ERROR_SUCCESS ? ERROR_INVALID_DATA : readError;
     }
-    std::vector<BYTE> sid(header.sidBytes);
-    readError = ReadExactly(rawFile, sid.data(), header.sidBytes);
+    RecordHeader header {.sidBytes = prefix.sidBytes};
+    const void* signedHeader = &prefix;
+    std::size_t signedHeaderBytes = sizeof(prefix);
+    if (prefix.version == RecordVersion)
+    {
+        readError = ReadExactly(rawFile, &header.flags, sizeof(header.flags));
+        if (readError != ERROR_SUCCESS || (header.flags & ~KnownRecordFlags) != 0)
+        {
+            closeFile();
+            return readError == ERROR_SUCCESS ? ERROR_INVALID_DATA : readError;
+        }
+        signedHeader = &header;
+        signedHeaderBytes = sizeof(header);
+    }
+    std::vector<BYTE> sid(prefix.sidBytes);
+    if (readError == ERROR_SUCCESS)
+    {
+        readError = ReadExactly(rawFile, sid.data(), prefix.sidBytes);
+    }
     std::array<BYTE, RecordTagBytes> storedTag {};
     if (readError == ERROR_SUCCESS)
     {
@@ -311,7 +343,8 @@ DWORD EnrollmentStore::Load(std::wstring_view accountName, std::vector<BYTE>& ac
         return keyError;
     }
     std::array<BYTE, RecordTagBytes> expectedTag {};
-    const DWORD tagError = ComputeRecordTag(machineKey, header, sid, expectedTag);
+    const DWORD tagError =
+        ComputeRecordTag(machineKey, signedHeader, signedHeaderBytes, sid, expectedTag);
     SecureZeroMemory(machineKey.data(), machineKey.size());
     if (tagError != ERROR_SUCCESS)
     {
@@ -322,8 +355,25 @@ DWORD EnrollmentStore::Load(std::wstring_view accountName, std::vector<BYTE>& ac
         return ERROR_ACCESS_DENIED;
     }
 
-    accountSid = std::move(sid);
+    record.accountSid = std::move(sid);
+    record.brokerManaged =
+        prefix.version == RecordVersion && (header.flags & BrokerManagedRecordFlag) != 0;
     return ERROR_SUCCESS;
+}
+
+DWORD EnrollmentStore::Load(std::wstring_view accountName, std::vector<BYTE>& accountSid) const
+{
+    EnrollmentRecord record;
+    const DWORD loadError = Load(accountName, record);
+    if (loadError == ERROR_SUCCESS)
+    {
+        accountSid = std::move(record.accountSid);
+    }
+    else
+    {
+        accountSid.clear();
+    }
+    return loadError;
 }
 
 DWORD EnrollmentStore::Remove(std::wstring_view accountName) const

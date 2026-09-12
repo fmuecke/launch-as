@@ -255,6 +255,7 @@ add_executable(launch_as_admin
 )
 target_link_libraries(launch_as_admin PRIVATE
     Advapi32
+    Bcrypt
     Netapi32
     Ole32
     Shell32
@@ -368,9 +369,10 @@ if(BUILD_TESTING)
         src/Win32Support.cpp
         src/Win32Support.h
     )
-    target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
-        Advapi32
-        Netapi32
+target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
+    Advapi32
+    Bcrypt
+    Netapi32
         Ole32
         Shell32
     )

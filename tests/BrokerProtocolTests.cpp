@@ -52,25 +52,27 @@ constexpr char ListRequest[] = R"json({
   "operation": "list"
 })json";
 
-constexpr char UnenrollRequest[] = R"json({
+constexpr char ForgetRequest[] = R"json({
   "version": 1,
   "requestId": "123e4567-e89b-12d3-a456-426614174000",
-  "operation": "unenroll",
+  "operation": "forget",
   "profileId": "LaunchAsUser",
   "confirmed": true
 })json";
 
-constexpr char UnenrollAllRequest[] = R"json({
+constexpr char DeleteRequest[] = R"json({
   "version": 1,
   "requestId": "123e4567-e89b-12d3-a456-426614174000",
-  "operation": "unenroll-all",
-  "confirmed": true
+  "operation": "delete",
+  "profileId": "LaunchAsUser",
+  "confirmed": true,
+  "force": true
 })json";
 
-constexpr char UnconfirmedEnrollRequest[] = R"json({
+constexpr char UnconfirmedCreateRequest[] = R"json({
   "version": 1,
   "requestId": "123e4567-e89b-12d3-a456-426614174000",
-  "operation": "enroll",
+  "operation": "create",
   "profileId": "sandbox"
 })json";
 
@@ -123,47 +125,50 @@ int wmain()
                         launch_as::broker::ParseResult::Success &&
                     request.operation == launch_as::broker::RequestOperation::List,
             L"List request was rejected.") ||
-        !Expect(launch_as::broker::ParseBrokerRequest(UnenrollRequest, request) ==
+        !Expect(launch_as::broker::ParseBrokerRequest(ForgetRequest, request) ==
                         launch_as::broker::ParseResult::Success &&
-                    request.operation == launch_as::broker::RequestOperation::Unenroll,
-            L"Unenroll request was rejected."))
+                    request.operation == launch_as::broker::RequestOperation::Forget,
+            L"Forget request was rejected."))
     {
         return 1;
     }
-    if (!Expect(launch_as::broker::ParseBrokerRequest(UnenrollAllRequest, request) ==
+    if (!Expect(launch_as::broker::ParseBrokerRequest(DeleteRequest, request) ==
                         launch_as::broker::ParseResult::Success &&
-                    request.operation == launch_as::broker::RequestOperation::UnenrollAll,
-            L"Unenroll-all request was rejected."))
+                    request.operation == launch_as::broker::RequestOperation::Delete &&
+                    request.force,
+            L"Forced delete request was rejected."))
     {
         return 1;
     }
-    if (!Expect(launch_as::broker::ParseBrokerRequest(UnconfirmedEnrollRequest, request) ==
+    if (!Expect(launch_as::broker::ParseBrokerRequest(UnconfirmedCreateRequest, request) ==
                     launch_as::broker::ParseResult::InvalidRequest,
             L"Unconfirmed registration request was accepted."))
     {
         return 1;
     }
     const std::string managementRequest =
-        launch_as::broker::BuildManagementRequest(launch_as::broker::RequestOperation::Enroll,
+        launch_as::broker::BuildManagementRequest(launch_as::broker::RequestOperation::TakeOver,
             L"123e4567-e89b-12d3-a456-426614174000",
             L"account with space",
+            true,
             true);
     if (!Expect(launch_as::broker::ParseBrokerRequest(managementRequest, request) ==
                         launch_as::broker::ParseResult::Success &&
-                    request.operation == launch_as::broker::RequestOperation::Enroll &&
-                    request.profileId == L"account with space" && request.confirmed,
+                    request.operation == launch_as::broker::RequestOperation::TakeOver &&
+                    request.profileId == L"account with space" && request.confirmed &&
+                    request.force,
             L"Built management request was not accepted by the protocol parser.") ||
         !Expect(launch_as::broker::RequestOperationSuccessReason(
-                    launch_as::broker::RequestOperation::Enroll) == "enrolled" &&
+                    launch_as::broker::RequestOperation::TakeOver) == "taken_over" &&
                     launch_as::broker::RequestOperationFailureReason(
-                        launch_as::broker::RequestOperation::Enroll) == "enrollment_failed",
+                        launch_as::broker::RequestOperation::TakeOver) == "takeover_failed",
             L"Management operation reasons are not centralized."))
     {
         return 1;
     }
 
     std::string removedOperation = managementRequest;
-    removedOperation.replace(removedOperation.find("enroll"), 6, "rotate");
+    removedOperation.replace(removedOperation.find("takeover"), 8, "rotate");
     if (!Expect(launch_as::broker::ParseBrokerRequest(removedOperation, request) ==
                     launch_as::broker::ParseResult::InvalidRequest,
             L"The removed password-rotation operation was accepted."))

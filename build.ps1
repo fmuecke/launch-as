@@ -188,6 +188,7 @@ if ($LASTEXITCODE -ne 0) {
 
 if ($RunTests -or $RunAllTests) {
     Invoke-CtestTests -Description 'all non-elevated' -LabelOption '--label-exclude' -LabelValue 'elevated|interactive'
+    $RunAcceptanceTest = $true;
 }
 
 if ($RunAllTests) {

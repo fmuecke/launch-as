@@ -20,19 +20,30 @@ RegistrationService::RegistrationService(std::wstring_view enrollmentDirectory)
 {
 }
 
-DWORD RegistrationService::Enroll(std::wstring_view accountName)
+DWORD RegistrationService::Create(std::wstring_view accountName)
 {
     if (!IsValidBrokerAccountName(accountName))
     {
         return ERROR_INVALID_PARAMETER;
     }
+    EnrollmentRecord existingEnrollment;
+    const DWORD enrollmentError = enrollments_.Load(accountName, existingEnrollment);
+    if (enrollmentError == ERROR_SUCCESS)
+    {
+        return ERROR_ALREADY_EXISTS;
+    }
+    if (enrollmentError != ERROR_FILE_NOT_FOUND)
+    {
+        return enrollmentError;
+    }
+
     SecurePassword password;
     const DWORD passwordError = GenerateBrokerPassword(password);
     if (passwordError != ERROR_SUCCESS)
     {
         return passwordError;
     }
-    const DWORD accountError = ProvisionStandardLocalAccount(accountName, password);
+    const DWORD accountError = CreateBrokerManagedLocalAccount(accountName, password);
     password.Clear();
     if (accountError != ERROR_SUCCESS)
     {
@@ -44,7 +55,56 @@ DWORD RegistrationService::Enroll(std::wstring_view accountName)
     {
         return sidError;
     }
-    return enrollments_.Store(accountName, accountSid);
+    return enrollments_.Store(accountName, accountSid, true);
+}
+
+DWORD RegistrationService::TakeOver(std::wstring_view accountName, bool allowEnable)
+{
+    if (!IsValidBrokerAccountName(accountName))
+    {
+        return ERROR_INVALID_PARAMETER;
+    }
+
+    EnrollmentRecord existingEnrollment;
+    const DWORD enrollmentError = enrollments_.Load(accountName, existingEnrollment);
+    if (enrollmentError != ERROR_SUCCESS && enrollmentError != ERROR_FILE_NOT_FOUND)
+    {
+        return enrollmentError;
+    }
+    if (enrollmentError == ERROR_SUCCESS && existingEnrollment.brokerManaged)
+    {
+        std::vector<BYTE> currentSid;
+        const DWORD sidError = GetBrokerAccountSid(accountName, currentSid);
+        if (sidError != ERROR_SUCCESS)
+        {
+            return sidError;
+        }
+        if (EqualSid(existingEnrollment.accountSid.data(), currentSid.data()) == FALSE &&
+            !allowEnable)
+        {
+            return ERROR_ACCESS_DENIED;
+        }
+    }
+
+    SecurePassword password;
+    const DWORD passwordError = GenerateBrokerPassword(password);
+    if (passwordError != ERROR_SUCCESS)
+    {
+        return passwordError;
+    }
+    const DWORD accountError = TakeOverExistingLocalAccount(accountName, password, allowEnable);
+    password.Clear();
+    if (accountError != ERROR_SUCCESS)
+    {
+        return accountError;
+    }
+    std::vector<BYTE> accountSid;
+    const DWORD sidError = GetBrokerAccountSid(accountName, accountSid);
+    if (sidError != ERROR_SUCCESS)
+    {
+        return sidError;
+    }
+    return enrollments_.Store(accountName, accountSid, true);
 }
 
 DWORD RegistrationService::ResetPassword(
@@ -54,11 +114,15 @@ DWORD RegistrationService::ResetPassword(
     {
         return ERROR_INVALID_PARAMETER;
     }
-    std::vector<BYTE> enrolledSid;
-    const DWORD enrollmentError = enrollments_.Load(accountName, enrolledSid);
+    EnrollmentRecord enrollment;
+    const DWORD enrollmentError = enrollments_.Load(accountName, enrollment);
     if (enrollmentError != ERROR_SUCCESS)
     {
         return enrollmentError;
+    }
+    if (!enrollment.brokerManaged)
+    {
+        return ERROR_ACCESS_DENIED;
     }
     std::vector<BYTE> currentSid;
     const DWORD sidError = GetBrokerAccountSid(accountName, currentSid);
@@ -66,7 +130,7 @@ DWORD RegistrationService::ResetPassword(
     {
         return sidError;
     }
-    if (EqualSid(enrolledSid.data(), currentSid.data()) == FALSE)
+    if (EqualSid(enrollment.accountSid.data(), currentSid.data()) == FALSE)
     {
         return ERROR_ACCESS_DENIED;
     }
@@ -77,70 +141,49 @@ DWORD RegistrationService::ResetPassword(
         nullptr, name.c_str(), 1003, reinterpret_cast<LPBYTE>(&replacementPassword), nullptr);
 }
 
-DWORD RegistrationService::Unenroll(std::wstring_view accountName)
+DWORD RegistrationService::Forget(std::wstring_view accountName)
 {
     if (!IsValidBrokerAccountName(accountName))
     {
         return ERROR_INVALID_PARAMETER;
     }
-    std::vector<BYTE> enrolledSid;
-    const DWORD enrollmentError = enrollments_.Load(accountName, enrolledSid);
+    const DWORD removeError = enrollments_.Remove(accountName);
+    return removeError == ERROR_FILE_NOT_FOUND ? ERROR_NOT_FOUND : removeError;
+}
+
+DWORD RegistrationService::Delete(std::wstring_view accountName)
+{
+    if (!IsValidBrokerAccountName(accountName))
+    {
+        return ERROR_INVALID_PARAMETER;
+    }
+    EnrollmentRecord enrollment;
+    const DWORD enrollmentError = enrollments_.Load(accountName, enrollment);
     if (enrollmentError != ERROR_SUCCESS)
     {
         return enrollmentError == ERROR_FILE_NOT_FOUND ? ERROR_NOT_FOUND : enrollmentError;
     }
-    const std::wstring name(accountName);
-    LPBYTE rawAccount = nullptr;
-    const NET_API_STATUS readStatus = NetUserGetInfo(nullptr, name.c_str(), 4, &rawAccount);
-    if (readStatus == NERR_UserNotFound)
+    if (!enrollment.brokerManaged)
     {
-        return enrollments_.Remove(accountName);
-    }
-    if (readStatus != NERR_Success || rawAccount == nullptr)
-    {
-        if (rawAccount != nullptr)
-        {
-            NetApiBufferFree(rawAccount);
-        }
-        return readStatus == NERR_Success ? ERROR_INVALID_DATA : readStatus;
+        return ERROR_ACCESS_DENIED;
     }
     std::vector<BYTE> currentSid;
     const DWORD sidError = GetBrokerAccountSid(accountName, currentSid);
-    const auto* account = reinterpret_cast<const USER_INFO_4*>(rawAccount);
-    USER_INFO_1008 flags {};
-    flags.usri1008_flags = account->usri4_flags | UF_ACCOUNTDISABLE;
-    NetApiBufferFree(rawAccount);
+    if (sidError == ERROR_NONE_MAPPED)
+    {
+        return enrollments_.Remove(accountName);
+    }
     if (sidError != ERROR_SUCCESS)
     {
         return sidError;
     }
-    if (EqualSid(enrolledSid.data(), currentSid.data()) == FALSE)
+    if (EqualSid(enrollment.accountSid.data(), currentSid.data()) == FALSE)
     {
         return ERROR_ACCESS_DENIED;
     }
-    const NET_API_STATUS disableStatus =
-        NetUserSetInfo(nullptr, name.c_str(), 1008, reinterpret_cast<LPBYTE>(&flags), nullptr);
-    return disableStatus == NERR_Success ? enrollments_.Remove(accountName) : disableStatus;
-}
-
-DWORD RegistrationService::UnenrollAll()
-{
-    std::vector<std::wstring> accounts;
-    const DWORD listError = enrollments_.List(accounts);
-    if (listError != ERROR_SUCCESS)
-    {
-        return listError;
-    }
-    DWORD firstError = ERROR_SUCCESS;
-    for (const std::wstring& account : accounts)
-    {
-        const DWORD dropError = Unenroll(account);
-        if (dropError != ERROR_SUCCESS && firstError == ERROR_SUCCESS)
-        {
-            firstError = dropError;
-        }
-    }
-    return firstError;
+    const std::wstring name(accountName);
+    const NET_API_STATUS deleteStatus = NetUserDel(nullptr, name.c_str());
+    return deleteStatus == NERR_Success ? enrollments_.Remove(accountName) : deleteStatus;
 }
 
 DWORD RegistrationService::List(std::vector<std::wstring>& accountNames) const
@@ -155,11 +198,12 @@ DWORD RegistrationService::List(std::vector<std::wstring>& accountNames) const
             accountNames.end(),
             [this](const std::wstring& accountName)
             {
-                std::vector<BYTE> enrolledSid;
+                EnrollmentRecord enrollment;
                 std::vector<BYTE> currentSid;
-                return enrollments_.Load(accountName, enrolledSid) != ERROR_SUCCESS ||
+                return enrollments_.Load(accountName, enrollment) != ERROR_SUCCESS ||
+                       !enrollment.brokerManaged ||
                        GetBrokerAccountSid(accountName, currentSid) != ERROR_SUCCESS ||
-                       EqualSid(enrolledSid.data(), currentSid.data()) == FALSE;
+                       EqualSid(enrollment.accountSid.data(), currentSid.data()) == FALSE;
             }),
         accountNames.end());
     return ERROR_SUCCESS;

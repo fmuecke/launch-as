@@ -140,6 +140,25 @@ class TemporaryDirectory final
     return hasFlags;
 }
 
+[[nodiscard]] bool HasManagedComment(const std::wstring& name)
+{
+    LPBYTE buffer = nullptr;
+    const NET_API_STATUS status = NetUserGetInfo(nullptr, name.c_str(), 1, &buffer);
+    if (status != NERR_Success || buffer == nullptr)
+    {
+        if (buffer != nullptr)
+        {
+            NetApiBufferFree(buffer);
+        }
+        return false;
+    }
+    const auto* user = reinterpret_cast<const USER_INFO_1*>(buffer);
+    const bool managed = user->usri1_comment != nullptr &&
+                         std::wstring_view(user->usri1_comment) == L"Managed by launch-as.";
+    NetApiBufferFree(buffer);
+    return managed;
+}
+
 [[nodiscard]] bool IsAccountDisabled(const std::wstring& name)
 {
     LPBYTE buffer = nullptr;
@@ -158,7 +177,7 @@ class TemporaryDirectory final
     return disabled;
 }
 
-[[nodiscard]] bool EnableAccount(const std::wstring& name)
+[[nodiscard]] bool SetAccountDisabled(const std::wstring& name, bool disabled)
 {
     LPBYTE buffer = nullptr;
     const NET_API_STATUS status = NetUserGetInfo(nullptr, name.c_str(), 4, &buffer);
@@ -172,10 +191,21 @@ class TemporaryDirectory final
     }
     const auto* user = reinterpret_cast<const USER_INFO_4*>(buffer);
     USER_INFO_1008 flags {};
-    flags.usri1008_flags = user->usri4_flags & ~UF_ACCOUNTDISABLE;
+    flags.usri1008_flags =
+        disabled ? user->usri4_flags | UF_ACCOUNTDISABLE : user->usri4_flags & ~UF_ACCOUNTDISABLE;
     NetApiBufferFree(buffer);
     return NetUserSetInfo(nullptr, name.c_str(), 1008, reinterpret_cast<LPBYTE>(&flags), nullptr) ==
            NERR_Success;
+}
+
+[[nodiscard]] bool EnableAccount(const std::wstring& name)
+{
+    return SetAccountDisabled(name, false);
+}
+
+[[nodiscard]] bool DisableAccount(const std::wstring& name)
+{
+    return SetAccountDisabled(name, true);
 }
 
 void InitLsaString(LSA_UNICODE_STRING& lsaString, const wchar_t* value)
@@ -232,7 +262,7 @@ int wmain()
 
     launch_as::broker::RegistrationService registration(credentialDirectory.path());
     account.MarkCreated();
-    const DWORD initialRegistrationError = registration.Enroll(account.name());
+    const DWORD initialRegistrationError = registration.Create(account.name());
     if (!Expect(initialRegistrationError == ERROR_SUCCESS,
             L"Could not register the disposable local account."))
     {
@@ -251,10 +281,13 @@ int wmain()
             : resetError;
     password.Clear();
     launch_as::broker::EnrollmentStore enrollments(credentialDirectory.path());
-    std::vector<BYTE> enrolledSid;
+    launch_as::broker::EnrollmentRecord enrollment;
     if (!Expect(HasRequiredFlags(account.name()), L"Disposable account flags are not hardened.") ||
-        !Expect(enrollments.Load(account.name(), enrolledSid) == ERROR_SUCCESS,
-            L"Enrollment did not retain the account identity.") ||
+        !Expect(HasManagedComment(account.name()),
+            L"Created account did not receive the managed-account comment.") ||
+        !Expect(enrollments.Load(account.name(), enrollment) == ERROR_SUCCESS &&
+                    enrollment.brokerManaged,
+            L"Created account enrollment was not marked broker-managed.") ||
         !Expect(brokerTokenError == ERROR_SUCCESS && static_cast<bool>(token),
             L"Active disposable account password did not produce a valid broker token."))
     {
@@ -262,36 +295,52 @@ int wmain()
         return 1;
     }
 
-    if (!Expect(registration.Unenroll(account.name()) == ERROR_SUCCESS,
-            L"Could not unenroll the disposable account.") ||
-        !Expect(enrollments.Load(account.name(), enrolledSid) == ERROR_FILE_NOT_FOUND,
-            L"Unenrollment retained the account enrollment.") ||
-        !Expect(IsAccountDisabled(account.name()), L"Unenrollment did not disable the account."))
+    if (!Expect(
+            DisableAccount(account.name()), L"Could not disable the managed disposable account.") ||
+        !Expect(registration.TakeOver(account.name(), true) == ERROR_SUCCESS,
+            L"Broker could not re-enable its managed account.") ||
+        !Expect(
+            !IsAccountDisabled(account.name()), L"Broker did not re-enable its managed account.") ||
+        !Expect(HasManagedComment(account.name()),
+            L"Managed account refresh did not retain the managed-account comment."))
     {
         return 1;
     }
 
-    if (!Expect(EnableAccount(account.name()),
-            L"Could not re-enable the unregistered disposable account.") ||
-        !Expect(registration.Unenroll(account.name()) == ERROR_NOT_FOUND,
-            L"Broker unenrolled an account without a registration.") ||
-        !Expect(!IsAccountDisabled(account.name()),
-            L"Broker disabled an account without a registration."))
+    if (!Expect(registration.Forget(account.name()) == ERROR_SUCCESS,
+            L"Could not forget the disposable account.") ||
+        !Expect(enrollments.Load(account.name(), enrollment) == ERROR_FILE_NOT_FOUND,
+            L"Forget retained the account registration.") ||
+        !Expect(!IsAccountDisabled(account.name()), L"Forget changed the account state."))
     {
         return 1;
     }
 
-    if (!Expect(registration.Enroll(account.name()) == ERROR_SUCCESS,
-            L"Could not re-enroll the disposable account.") ||
-        !Expect(enrollments.Load(account.name(), enrolledSid) == ERROR_SUCCESS,
-            L"Re-enrollment did not restore the account enrollment.") ||
+    if (!Expect(DisableAccount(account.name()), L"Could not disable the forgotten account.") ||
+        !Expect(registration.TakeOver(account.name(), false) == ERROR_ACCOUNT_DISABLED,
+            L"Broker re-enabled a disabled account without --force.") ||
+        !Expect(IsAccountDisabled(account.name()),
+            L"Failed takeover changed the disabled account state.") ||
+        !Expect(registration.TakeOver(account.name(), true) == ERROR_SUCCESS,
+            L"Forced takeover did not re-enable the disabled account.") ||
+        !Expect(
+            !IsAccountDisabled(account.name()), L"Forced takeover did not re-enable the account."))
+    {
+        return 1;
+    }
+
+    if (!Expect(registration.Create(account.name()) == ERROR_ALREADY_EXISTS,
+            L"Create accepted an existing account.") ||
+        !Expect(enrollments.Load(account.name(), enrollment) == ERROR_SUCCESS &&
+                    enrollment.brokerManaged,
+            L"Forced takeover did not mark the account broker-managed.") ||
         !Expect(account.Remove() == NERR_Success,
             L"Could not externally remove the disposable account.") ||
         !Expect(launch_as::broker::GenerateBrokerPassword(password) == ERROR_SUCCESS,
             L"Could not generate a disposable password for the missing-account check.") ||
         !Expect(registration.ResetPassword(account.name(), password) != ERROR_SUCCESS,
             L"Broker password reset recreated a missing enrolled account.") ||
-        !Expect(launch_as::broker::ProvisionStandardLocalAccount(account.name(), password) ==
+        !Expect(launch_as::broker::CreateBrokerManagedLocalAccount(account.name(), password) ==
                     ERROR_SUCCESS,
             L"Could not recreate the account with its original name."))
     {
@@ -300,16 +349,20 @@ int wmain()
     password.Clear();
     account.MarkCreated();
     std::vector<std::wstring> accounts;
-    if (!Expect(registration.Unenroll(account.name()) == ERROR_ACCESS_DENIED,
-            L"Broker unenrolled a replacement account with a different SID.") ||
+    if (!Expect(registration.Delete(account.name()) == ERROR_ACCESS_DENIED,
+            L"Broker deleted a replacement account with a different SID.") ||
         !Expect(!IsAccountDisabled(account.name()),
             L"Broker disabled a replacement account with a different SID.") ||
         !Expect(registration.List(accounts) == ERROR_SUCCESS && accounts.empty(),
             L"Broker listed an enrollment whose account SID had changed.") ||
-        !Expect(registration.Enroll(account.name()) == ERROR_SUCCESS,
-            L"Could not re-enroll the replacement account.") ||
-        !Expect(registration.Unenroll(account.name()) == ERROR_SUCCESS,
-            L"Could not unenroll the re-enrolled replacement account."))
+        !Expect(registration.TakeOver(account.name(), false) == ERROR_ACCESS_DENIED,
+            L"Broker reclaimed a replacement account without --force.") ||
+        !Expect(registration.TakeOver(account.name(), true) == ERROR_SUCCESS,
+            L"Forced takeover did not claim the replacement account.") ||
+        !Expect(registration.Delete(account.name()) == ERROR_SUCCESS,
+            L"Could not delete the taken-over replacement account.") ||
+        !Expect(
+            AccountDoesNotExist(account.name()), L"Delete did not remove the taken-over account."))
     {
         return 1;
     }
@@ -330,7 +383,7 @@ int wmain()
     launch_as::broker::RegistrationService privilegedRegistration(credentialDirectory.path());
     privilegedAccount.MarkCreated();
     const DWORD privilegedRegistrationError =
-        privilegedRegistration.Enroll(privilegedAccount.name());
+        privilegedRegistration.Create(privilegedAccount.name());
     if (!Expect(privilegedRegistrationError == ERROR_SUCCESS,
             L"Could not register the privileged disposable account."))
     {

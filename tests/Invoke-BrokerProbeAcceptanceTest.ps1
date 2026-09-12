@@ -23,20 +23,27 @@ $requestId = [guid]::NewGuid().ToString()
 $dataPipePrefix = "\\.\pipe\launch-as-probe-$requestId"
 $cmd = (Get-Command cmd.exe -CommandType Application).Source
 
-if ($null -eq ('LaunchAs.BrokerProbePipes' -as [type])) {
+if ($null -eq ('LaunchAs.BrokerProbePipesV2' -as [type])) {
     Add-Type @'
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Threading;
 using Microsoft.Win32.SafeHandles;
 
 namespace LaunchAs
 {
-    public static class BrokerProbePipes
+    public static class BrokerProbePipesV2
     {
         private const uint PipeAccessInbound = 0x00000001;
         private const uint PipeAccessOutbound = 0x00000002;
         private const uint FileFlagFirstPipeInstance = 0x00080000;
+        // This is FILE_GENERIC_READ | FILE_WRITE_DATA. Do not request GENERIC_WRITE:
+        // it also asks for FILE_APPEND_DATA, which the broker deliberately withholds.
+        private const uint ControlPipeClientAccess = 0x0012008B;
+        private const uint OpenExisting = 3;
+        private const int ErrorFileNotFound = 2;
+        private const int ErrorPipeBusy = 231;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct SecurityAttributes
@@ -55,6 +62,11 @@ namespace LaunchAs
             string name, uint openMode, uint pipeMode, uint maximumInstances,
             uint outputBufferSize, uint inputBufferSize, uint defaultTimeout,
             ref SecurityAttributes securityAttributes);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern SafeFileHandle CreateFile(
+            string name, uint desiredAccess, uint shareMode, IntPtr securityAttributes,
+            uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr LocalFree(IntPtr memory);
@@ -87,6 +99,28 @@ namespace LaunchAs
                 LocalFree(descriptor);
             }
         }
+
+        public static SafeFileHandle OpenControlPipe(string name)
+        {
+            DateTime deadline = DateTime.UtcNow.AddSeconds(5);
+            while (true)
+            {
+                SafeFileHandle handle = CreateFile(name, ControlPipeClientAccess, 0, IntPtr.Zero,
+                    OpenExisting, 0, IntPtr.Zero);
+                if (!handle.IsInvalid)
+                {
+                    return handle;
+                }
+                int error = Marshal.GetLastWin32Error();
+                handle.Dispose();
+                if ((error != ErrorFileNotFound && error != ErrorPipeBusy) ||
+                    DateTime.UtcNow >= deadline)
+                {
+                    throw new Win32Exception(error);
+                }
+                Thread.Sleep(25);
+            }
+        }
     }
 }
 '@
@@ -114,14 +148,14 @@ $request = [ordered]@{
     }
 } | ConvertTo-Json -Compress
 
-$pipe = [System.IO.Pipes.NamedPipeClientStream]::new(
-    '.', $PipeName, [System.IO.Pipes.PipeDirection]::InOut, [System.IO.Pipes.PipeOptions]::None)
+$pipe = $null
 $processId = 0
 try {
-    $pipeServers += [LaunchAs.BrokerProbePipes]::Create("$dataPipePrefix-in", $true, $pipeSddl)
-    $pipeServers += [LaunchAs.BrokerProbePipes]::Create("$dataPipePrefix-out", $false, $pipeSddl)
-    $pipeServers += [LaunchAs.BrokerProbePipes]::Create("$dataPipePrefix-resize", $true, $pipeSddl)
-    $pipe.Connect(5000)
+    $pipeServers += [LaunchAs.BrokerProbePipesV2]::Create("$dataPipePrefix-in", $true, $pipeSddl)
+    $pipeServers += [LaunchAs.BrokerProbePipesV2]::Create("$dataPipePrefix-out", $false, $pipeSddl)
+    $pipeServers += [LaunchAs.BrokerProbePipesV2]::Create("$dataPipePrefix-resize", $true, $pipeSddl)
+    $controlPipe = [LaunchAs.BrokerProbePipesV2]::OpenControlPipe("\\.\pipe\$PipeName")
+    $pipe = [System.IO.FileStream]::new($controlPipe, [System.IO.FileAccess]::ReadWrite)
     $payload = [System.Text.Encoding]::UTF8.GetBytes($request)
     $pipe.Write($payload, 0, $payload.Length)
     $pipe.Flush()
@@ -145,7 +179,9 @@ try {
     }
 }
 finally {
-    $pipe.Dispose()
+    if ($null -ne $pipe) {
+        $pipe.Dispose()
+    }
     $pipeServers | ForEach-Object { $_.Dispose() }
 }
 

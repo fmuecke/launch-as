@@ -20,11 +20,12 @@ class RegistrationService final
   public:
     explicit RegistrationService(std::wstring_view enrollmentDirectory);
 
-    [[nodiscard]] DWORD Enroll(std::wstring_view accountName);
+    [[nodiscard]] DWORD Create(std::wstring_view accountName);
+    [[nodiscard]] DWORD TakeOver(std::wstring_view accountName, bool allowEnable);
     [[nodiscard]] DWORD ResetPassword(
         std::wstring_view accountName, const SecurePassword& password) const;
-    [[nodiscard]] DWORD Unenroll(std::wstring_view accountName);
-    [[nodiscard]] DWORD UnenrollAll();
+    [[nodiscard]] DWORD Forget(std::wstring_view accountName);
+    [[nodiscard]] DWORD Delete(std::wstring_view accountName);
     [[nodiscard]] DWORD List(std::vector<std::wstring>& accountNames) const;
 
   private:

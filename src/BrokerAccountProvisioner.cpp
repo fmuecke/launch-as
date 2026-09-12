@@ -17,8 +17,9 @@ namespace
 
 constexpr DWORD RequiredAccountFlags =
     UF_NORMAL_ACCOUNT | UF_DONT_EXPIRE_PASSWD | UF_PASSWD_CANT_CHANGE;
+constexpr wchar_t ManagedAccountComment[] = L"Managed by launch-as.";
 
-[[nodiscard]] NET_API_STATUS ApplyAccountFlags(const std::wstring& accountName)
+[[nodiscard]] NET_API_STATUS EnableAndHardenBrokerManagedAccount(const std::wstring& accountName)
 {
     LPBYTE rawAccount = nullptr;
     const NET_API_STATUS readStatus = NetUserGetInfo(nullptr, accountName.c_str(), 4, &rawAccount);
@@ -36,6 +37,14 @@ constexpr DWORD RequiredAccountFlags =
     NetApiBufferFree(rawAccount);
     return NetUserSetInfo(
         nullptr, accountName.c_str(), 1008, reinterpret_cast<LPBYTE>(&flags), nullptr);
+}
+
+[[nodiscard]] NET_API_STATUS SetManagedAccountComment(const std::wstring& accountName)
+{
+    USER_INFO_1007 comment {};
+    comment.usri1007_comment = const_cast<wchar_t*>(ManagedAccountComment);
+    return NetUserSetInfo(
+        nullptr, accountName.c_str(), 1007, reinterpret_cast<LPBYTE>(&comment), nullptr);
 }
 
 [[nodiscard]] DWORD RejectAdministratorAccount(std::wstring_view accountName)
@@ -116,7 +125,7 @@ DWORD ValidateBrokerAccountForRegistration(std::wstring_view accountName)
                                                  : ERROR_INVALID_PARAMETER;
 }
 
-DWORD ProvisionStandardLocalAccount(std::wstring_view accountName, const SecurePassword& password)
+DWORD CreateBrokerManagedLocalAccount(std::wstring_view accountName, const SecurePassword& password)
 {
     if (password.characters().empty())
     {
@@ -134,18 +143,62 @@ DWORD ProvisionStandardLocalAccount(std::wstring_view accountName, const SecureP
     account.usri1_password = const_cast<wchar_t*>(password.c_str());
     account.usri1_priv = USER_PRIV_USER;
     account.usri1_flags = UF_SCRIPT | RequiredAccountFlags;
+    account.usri1_comment = const_cast<wchar_t*>(ManagedAccountComment);
     DWORD parameterError = 0;
     const NET_API_STATUS createStatus =
         NetUserAdd(nullptr, 1, reinterpret_cast<LPBYTE>(&account), &parameterError);
-    if (createStatus == NERR_Success)
+    return createStatus;
+}
+
+DWORD TakeOverExistingLocalAccount(
+    std::wstring_view accountName, const SecurePassword& password, bool allowEnable)
+{
+    if (password.characters().empty())
     {
-        return ERROR_SUCCESS;
+        return ERROR_INVALID_PARAMETER;
     }
-    if (createStatus != NERR_UserExists)
+    const DWORD accountValidationError = ValidateBrokerAccountForRegistration(accountName);
+    if (accountValidationError != ERROR_SUCCESS)
     {
-        return createStatus;
+        return accountValidationError;
     }
 
+    const std::wstring name(accountName);
+    LPBYTE rawAccount = nullptr;
+    const NET_API_STATUS accountStatus = NetUserGetInfo(nullptr, name.c_str(), 4, &rawAccount);
+    if (accountStatus != NERR_Success || rawAccount == nullptr)
+    {
+        if (rawAccount != nullptr)
+        {
+            NetApiBufferFree(rawAccount);
+        }
+        return accountStatus == NERR_Success ? ERROR_INVALID_DATA : accountStatus;
+    }
+    const auto* existingAccount = reinterpret_cast<const USER_INFO_4*>(rawAccount);
+    const bool accountDisabled = (existingAccount->usri4_flags & UF_ACCOUNTDISABLE) != 0;
+    NetApiBufferFree(rawAccount);
+    if (accountDisabled && !allowEnable)
+    {
+        return ERROR_ACCOUNT_DISABLED;
+    }
+
+    return RefreshBrokerManagedLocalAccount(accountName, password);
+}
+
+DWORD RefreshBrokerManagedLocalAccount(
+    std::wstring_view accountName, const SecurePassword& password)
+{
+    if (password.characters().empty())
+    {
+        return ERROR_INVALID_PARAMETER;
+    }
+    const DWORD accountValidationError = ValidateBrokerAccountForRegistration(accountName);
+    if (accountValidationError != ERROR_SUCCESS)
+    {
+        return accountValidationError;
+    }
+
+    const std::wstring name(accountName);
     USER_INFO_1003 replacementPassword {};
     replacementPassword.usri1003_password = const_cast<wchar_t*>(password.c_str());
     const NET_API_STATUS passwordStatus = NetUserSetInfo(
@@ -154,7 +207,8 @@ DWORD ProvisionStandardLocalAccount(std::wstring_view accountName, const SecureP
     {
         return passwordStatus;
     }
-    return ApplyAccountFlags(name);
+    const NET_API_STATUS hardenStatus = EnableAndHardenBrokerManagedAccount(name);
+    return hardenStatus == NERR_Success ? SetManagedAccountComment(name) : hardenStatus;
 }
 
 } // namespace launch_as::broker

@@ -313,32 +313,27 @@ One non-secret enrollment record per profile pins the local account SID under
 - Passwords never appear in `std::wstring`, exceptions, logs, command lines, environment, registry,
   or IPC.
 
-The account is configured `PasswordNeverExpires` and `UserMayChangePassword=false` so the broker
-fully owns the password.
+Every account created or explicitly taken over by the broker is configured `PasswordNeverExpires`
+and `UserMayChangePassword=false` so the broker fully owns its password.
 
 ---
 
-## 11. Account management operations (enroll, unenroll)
+## 11. Account management operations (create, forget, delete)
 
 A separate **elevated** `launch-as-admin.exe` owns these operations. Normal `launch` requests can
 never reach them. `Setup-LaunchAs.ps1` is an interactive convenience wrapper around that executable;
 it is not part of the service runtime. Run the admin executable during setup and thereafter for
 maintenance.
 
-- **`enroll <profileId>`** (broker-generated password):
-  1. create a missing local standard account, or take over an existing non-administrator local account; existing group membership is left unchanged;
-  2. generate a strong random password (`BCryptGenRandom`, mapped to policy);
-  3. set it on the account (`NetUserSetInfo`, `USER_INFO_1003`);
-  4. write a SID-pinned enrollment record;
-  5. zero the setup password. Operator is never shown it.
-  It also sets `PasswordNeverExpires` and `UserMayChangePassword=false`. Additional account hardening is reserved for a future explicit broker-managed-account mode; it must not silently be applied to an adopted account.
-- **Current `unenroll <profileId>` behavior:** under the launch gate, disables the account and
-  deletes the enrollment record. It never deletes the Windows account. It does not yet consult the
-  session registry or drain active sessions; `--force` supplies destructive-action confirmation,
-  not a distinct service-side draining mode.
-- **Target lifecycle behavior:** normal `unenroll` returns `profile_busy` while that profile has a
-  starting or active session; forced unenrollment drains only that profile. `unenroll-all`, service
-  replacement, and uninstall drain all sessions. This remains implementation work tracked in §22.
+- **`create <account>`** creates a named standard account, writes a managed-account comment,
+  hardens it, and records its SID. The name must not already exist.
+- **`create --takeover <account>`** requires an existing eligible account, resets its
+  password, hardens it, and records it as launch-as-owned. A disabled target requires `--force` to
+  re-enable it. A same-name account with a different recorded SID also requires `--force`.
+- **`forget <account>`** removes only the SID-pinned registration; it does not change the Windows
+  account. **`delete <account>`** verifies the managed SID, refuses while that account has a
+  starting or active broker session, deletes the Windows account, and removes its registration. It
+  does not remove the profile directory or other account-scoped residue.
 
 ---
 
@@ -390,8 +385,8 @@ The installer/setup runs **elevated once** and must:
 - **delegate `SERVICE_START` to the launcher's caller SID (or a dedicated group)** via `sc sdset` / `SetServiceObjectSecurity`, so day-to-day launches start the service with **no UAC prompt**;
 - create `%ProgramData%\launch-as\{,enrollments}` with restrictive ACLs (§4);
 - register the Event Log source;
-- provision/har­den the `LaunchAsUser` account and run `enroll LaunchAsUser` (§11) to create its enrollment record;
-- on update, install the new broker first and then re-enroll the configured default account,
+- create the configured `LaunchAsUser` account and record it as managed (§11);
+- on update, install the new broker first and then take over the configured default account,
   replacing its broker-owned password; report failure if either operation fails;
 - optionally create Firewall rules (separate, out of scope here);
 - deny ordinary users any right to replace/reconfigure the service or its files;
@@ -507,8 +502,10 @@ The §6.1 result does not support a `LocalService` downgrade.
 
 - C++ Windows service, `LocalSystem`, demand-start, `SERVICE_START` delegated to the caller SID;
 - named pipe `\\.\pipe\launch-as-broker.v1`, message mode, SID-DACL, `ImpersonateNamedPipeClient` auth;
-- account name is the Phase-1 profile id; any non-administrator local account may be enrolled;
-- SID-pinned enrollment record per account; `enroll` creates or takes over an account by generating + setting its password, while each launch generates another temporary password;
+- account name is the Phase-1 profile id; `create` makes a named managed account and explicit
+  takeover converts an eligible existing local account into a managed account;
+- SID-pinned authenticated record per managed account; each launch generates another temporary
+  password;
 - `LogonUserW(INTERACTIVE)` + `CreateProcessAsUserW`;
 - **`console` (ConPTY) adapter** as the shippable Phase-1 slice; **`interactive` (GUI) adapter** only in a later selected phase;
 - Job object (kill-on-close for console, detached for GUI);
@@ -574,24 +571,23 @@ installed, cross-session boundary.
 
 ## 22. Open account-lifecycle decisions
 
-The current broker implementation is not the decision record for these points. Resolve them before treating multi-account registration as a stable interface.
+The current implementation has one managed-account lifecycle. `create` creates a dedicated
+account; explicit takeover converts an existing account into a managed account. The SID-pinned,
+HMAC-protected record is the ownership proof. Legacy records remain unclaimed until an explicit
+takeover.
 
 ### Decisions pending
 
 - Separate a broker **profile** (launch policy and authorised callers) from its Windows account. A managed account name may use a recognisable `launch-as-` prefix while the profile has a stable, human-facing name.
-- **Phase-1 decision:** `enroll` creates a missing local account or takes over an existing one by
-  generating and setting a broker-owned password. Attach (operator-supplied password without
-  rotation) is deliberately deferred.
-- Support three explicit enrollment modes rather than overloading `enroll`:
-  - **attach** an existing account after the operator supplies its password; validate it and store it, without changing the account password;
-  - **take over** an existing account by generating and setting a new password; this cannot restore the old password later;
-  - **create** a broker-managed account with a recognisable name, allowing account-specific hardening.
-- Record registration mode and account ownership as protected metadata. A name prefix alone is not proof that the broker owns an account.
-- Define symmetric teardown per mode:
-  - attached accounts: remove broker credential/metadata only;
-  - taken-over accounts: remove broker credential/metadata only unless a separately confirmed destructive action is chosen;
-  - broker-managed accounts: decide whether normal teardown disables or deletes the account, and handle its profile, processes, services, and scheduled tasks.
-- Destructive operations—password rotation/take-over, replacement of a registration, disabling or deleting an account, and bulk teardown—must prompt in the client unless `--force` is supplied. The service must reject a destructive IPC request unless it includes an explicit confirmation/force indication; confirmation is an accidental-action safeguard, not an authorisation boundary.
+- **Phase-1 decision:** `create` fails for an existing account. `create --takeover` is the
+  only operation that claims an existing account. It resets the password and establishes managed
+  ownership; `--force` is required to re-enable a disabled or same-name replacement account.
+- `forget` is the safe handoff: it removes only launch-as metadata. `delete` is the destructive
+  teardown and never removes profile data implicitly.
+- Takeover and delete require client confirmation. Plain create needs no confirmation because it
+  fails rather than modifying an existing account. The service receives confirmation separately
+  from the explicit takeover `force` bit, so a normal confirmation cannot silently authorize a
+  re-enable.
 
 ### Implementation todos after those decisions
 
@@ -599,7 +595,6 @@ The current broker implementation is not the decision record for these points. R
 - Never pass a supplied password on a command line or log it. Define secure interactive input and an explicit automation input path; zero plaintext buffers after validation and storage.
 - Make account changes and enrollment-metadata updates recoverable when one step succeeds and a later step fails.
 - Define per-profile caller authorisation and account-selection semantics. The default execution policy remains general-purpose; add profile-specific restrictions only if a future use case requires them.
-- Specify `unenroll-all` preview, confirmation, partial-failure reporting, and audit records.
 - Complete the selected bounded-session design: account-scoped profile leases, profile-specific and
   global draining for management operations, cross-account acceptance, and stable audit fields for
   session admission and rejection.

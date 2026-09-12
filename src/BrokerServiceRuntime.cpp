@@ -155,6 +155,13 @@ struct BrokerLaunchPolicy
         }
     }
 
+    [[nodiscard]] bool HasActiveSession(std::wstring_view accountName)
+    {
+        std::lock_guard lock(sessionMutex);
+        const auto existing = sessionsByAccount.find(std::wstring(accountName));
+        return existing != sessionsByAccount.end() && existing->second != 0;
+    }
+
   private:
     struct AccountNameLess
     {
@@ -512,17 +519,25 @@ DWORD ConfigureProfile(void* context, const launch_as::broker::BrokerRequest& re
     {
         return complete(ERROR_ELEVATION_REQUIRED);
     }
-    if (request.operation == launch_as::broker::RequestOperation::Enroll)
+    if (request.operation == launch_as::broker::RequestOperation::Create)
     {
-        return complete(policy->registration.Enroll(request.profileId));
+        return complete(policy->registration.Create(request.profileId));
     }
-    if (request.operation == launch_as::broker::RequestOperation::Unenroll)
+    if (request.operation == launch_as::broker::RequestOperation::TakeOver)
     {
-        return complete(policy->registration.Unenroll(request.profileId));
+        return complete(policy->registration.TakeOver(request.profileId, request.force));
     }
-    return complete(request.operation == launch_as::broker::RequestOperation::UnenrollAll
-                        ? policy->registration.UnenrollAll()
-                        : ERROR_INVALID_PARAMETER);
+    if (request.operation == launch_as::broker::RequestOperation::Forget)
+    {
+        return complete(policy->registration.Forget(request.profileId));
+    }
+    if (request.operation == launch_as::broker::RequestOperation::Delete)
+    {
+        return complete(policy->HasActiveSession(request.profileId)
+                            ? ERROR_BUSY
+                            : policy->registration.Delete(request.profileId));
+    }
+    return complete(ERROR_INVALID_PARAMETER);
 }
 
 DWORD LaunchProfile(void* context, const launch_as::broker::BrokerRequest& request,

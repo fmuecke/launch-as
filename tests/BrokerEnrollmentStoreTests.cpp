@@ -6,6 +6,7 @@
 
 #include <Windows.h>
 #include <array>
+#include <bcrypt.h>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -38,6 +39,7 @@ class TemporaryDirectory final
     {
         for (const wchar_t* fileName :
             {L"First.enrollment",
+                L"Legacy.enrollment",
                 L"Second.enrollment",
                 L"Corrupt.enrollment",
                 L"Tampered.enrollment",
@@ -131,6 +133,119 @@ class TemporaryDirectory final
     return wrote;
 }
 
+struct LegacyRecordHeader
+{
+    DWORD magic = 0x4553414C; // LASE
+    DWORD version = 2;
+    DWORD sidBytes = 0;
+};
+
+[[nodiscard]] bool WriteLegacyEnrollmentRecord(
+    std::wstring_view directory, const std::vector<BYTE>& accountSid)
+{
+    std::array<BYTE, 32> machineKey {};
+    HANDLE keyFile = CreateFileW((std::wstring(directory) + L"\\enrollment.key").c_str(),
+        GENERIC_READ,
+        FILE_SHARE_READ,
+        nullptr,
+        OPEN_EXISTING,
+        0,
+        nullptr);
+    if (keyFile == INVALID_HANDLE_VALUE)
+    {
+        return false;
+    }
+    DWORD keyBytes = 0;
+    const bool readKey = ReadFile(keyFile,
+                             machineKey.data(),
+                             static_cast<DWORD>(machineKey.size()),
+                             &keyBytes,
+                             nullptr) != FALSE &&
+                         keyBytes == machineKey.size();
+    CloseHandle(keyFile);
+    if (!readKey)
+    {
+        SecureZeroMemory(machineKey.data(), machineKey.size());
+        return false;
+    }
+
+    const LegacyRecordHeader header {.sidBytes = static_cast<DWORD>(accountSid.size())};
+    std::array<BYTE, 32> tag {};
+    BCRYPT_ALG_HANDLE algorithm = nullptr;
+    BCRYPT_HASH_HANDLE hash = nullptr;
+    NTSTATUS status = BCryptOpenAlgorithmProvider(
+        &algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, BCRYPT_ALG_HANDLE_HMAC_FLAG);
+    if (status >= 0)
+    {
+        status = BCryptCreateHash(algorithm,
+            &hash,
+            nullptr,
+            0,
+            machineKey.data(),
+            static_cast<ULONG>(machineKey.size()),
+            0);
+    }
+    if (status >= 0)
+    {
+        status = BCryptHashData(hash,
+            reinterpret_cast<PUCHAR>(const_cast<LegacyRecordHeader*>(&header)),
+            static_cast<ULONG>(sizeof(header)),
+            0);
+    }
+    if (status >= 0)
+    {
+        status = BCryptHashData(
+            hash, const_cast<PUCHAR>(accountSid.data()), static_cast<ULONG>(accountSid.size()), 0);
+    }
+    if (status >= 0)
+    {
+        status = BCryptFinishHash(hash, tag.data(), static_cast<ULONG>(tag.size()), 0);
+    }
+    if (hash != nullptr)
+    {
+        BCryptDestroyHash(hash);
+    }
+    if (algorithm != nullptr)
+    {
+        BCryptCloseAlgorithmProvider(algorithm, 0);
+    }
+    SecureZeroMemory(machineKey.data(), machineKey.size());
+    if (status < 0)
+    {
+        return false;
+    }
+
+    HANDLE recordFile = CreateFileW((std::wstring(directory) + L"\\Legacy.enrollment").c_str(),
+        GENERIC_WRITE,
+        0,
+        nullptr,
+        CREATE_NEW,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (recordFile == INVALID_HANDLE_VALUE)
+    {
+        return false;
+    }
+    DWORD bytesWritten = 0;
+    const bool wroteHeader =
+        WriteFile(recordFile, &header, sizeof(header), &bytesWritten, nullptr) != FALSE &&
+        bytesWritten == sizeof(header);
+    const bool wroteSid = wroteHeader &&
+                          WriteFile(recordFile,
+                              accountSid.data(),
+                              static_cast<DWORD>(accountSid.size()),
+                              &bytesWritten,
+                              nullptr) != FALSE &&
+                          bytesWritten == accountSid.size();
+    const bool wroteTag =
+        wroteSid &&
+        WriteFile(recordFile, tag.data(), static_cast<DWORD>(tag.size()), &bytesWritten, nullptr) !=
+            FALSE &&
+        bytesWritten == tag.size();
+    CloseHandle(recordFile);
+    return wroteTag;
+}
+
 } // namespace
 
 int wmain()
@@ -145,16 +260,24 @@ int wmain()
 
     launch_as::broker::EnrollmentStore store(directory.path());
     std::vector<BYTE> loadedSid;
+    launch_as::broker::EnrollmentRecord loadedRecord;
     std::vector<std::wstring> accounts;
     if (!Expect(store.Store(L"Second", accountSid) == ERROR_SUCCESS,
             L"Could not store the second enrollment.") ||
         !Expect(store.Store(L"First", accountSid) == ERROR_SUCCESS,
             L"Could not store the first enrollment.") ||
-        !Expect(store.Load(L"First", loadedSid) == ERROR_SUCCESS &&
-                    EqualSid(accountSid.data(), loadedSid.data()) != FALSE,
-            L"Stored enrollment did not retain its SID.") ||
+        !Expect(store.Load(L"First", loadedRecord) == ERROR_SUCCESS &&
+                    !loadedRecord.brokerManaged &&
+                    EqualSid(accountSid.data(), loadedRecord.accountSid.data()) != FALSE,
+            L"Stored external enrollment did not retain its SID and ownership.") ||
+        !Expect(WriteLegacyEnrollmentRecord(directory.path(), accountSid),
+            L"Could not write an authenticated legacy enrollment record.") ||
+        !Expect(store.Load(L"Legacy", loadedRecord) == ERROR_SUCCESS &&
+                    !loadedRecord.brokerManaged &&
+                    EqualSid(accountSid.data(), loadedRecord.accountSid.data()) != FALSE,
+            L"Legacy enrollment was not retained as external.") ||
         !Expect(store.List(accounts) == ERROR_SUCCESS &&
-                    accounts == std::vector<std::wstring> {L"First", L"Second"},
+                    accounts == std::vector<std::wstring> {L"First", L"Legacy", L"Second"},
             L"Enrollment list was not complete and sorted.") ||
         !Expect(store.Store(L"bad/name", accountSid) == ERROR_INVALID_PARAMETER,
             L"Enrollment store accepted an invalid account name.") ||
@@ -162,8 +285,11 @@ int wmain()
             L"Could not create a corrupt enrollment record.") ||
         !Expect(store.Load(L"Corrupt", loadedSid) == ERROR_HANDLE_EOF,
             L"Enrollment store accepted a truncated record.") ||
-        !Expect(store.Store(L"Tampered", accountSid) == ERROR_SUCCESS,
+        !Expect(store.Store(L"Tampered", accountSid, true) == ERROR_SUCCESS,
             L"Could not store the tamper-test enrollment.") ||
+        !Expect(
+            store.Load(L"Tampered", loadedRecord) == ERROR_SUCCESS && loadedRecord.brokerManaged,
+            L"Stored broker-managed enrollment did not retain its ownership.") ||
         !Expect(FlipLastByte(directory.path() + L"\\Tampered.enrollment"),
             L"Could not tamper with the stored enrollment record.") ||
         !Expect(store.Load(L"Tampered", loadedSid) != ERROR_SUCCESS,

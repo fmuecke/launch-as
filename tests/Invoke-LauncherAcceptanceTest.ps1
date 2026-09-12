@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Project: https://github.com/fmuecke/launch-as
 # Runs the installed broker acceptance suite from its authorised non-elevated interactive session.
-# Build and install the broker and enroll the target account before running this script.
+# Build and install the broker and create or take over the target account before running this script.
 
 [CmdletBinding()]
 param(
@@ -28,7 +28,7 @@ if ($caller.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
 
 $localUser = Get-LocalUser -Name $TargetUser -ErrorAction Stop
 if (-not $localUser.Enabled) {
-    throw "Local user '$TargetUser' is disabled. Enroll it before running acceptance tests."
+    throw "Local user '$TargetUser' is disabled. Take it over with --force before running acceptance tests."
 }
 
 $administrators = Get-LocalGroup -SID 'S-1-5-32-544'

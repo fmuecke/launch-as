@@ -23,20 +23,23 @@ if (-not $updateClause.Success) {
 $body = $updateClause.Groups['body'].Value
 $installIndex = $body.IndexOf('& $admin install', [StringComparison]::Ordinal)
 $installFailureIndex = $body.IndexOf('if ($LASTEXITCODE -ne 0)', [StringComparison]::Ordinal)
-$enrollIndex = $body.IndexOf(
-    '& $admin enroll $DefaultAccount --force', [StringComparison]::Ordinal)
+$takeoverIndex = $body.IndexOf(
+    '& $admin create --takeover $DefaultAccount', [StringComparison]::Ordinal)
 
 if ($installIndex -lt 0) {
     throw 'The setup update branch does not install the broker.'
 }
-if ($installFailureIndex -lt $installIndex -or $installFailureIndex -gt $enrollIndex) {
-    throw 'The setup update branch does not stop before enrollment when installation fails.'
+if ($installFailureIndex -lt $installIndex -or $installFailureIndex -gt $takeoverIndex) {
+    throw 'The setup update branch does not stop before takeover when installation fails.'
 }
-if ($enrollIndex -lt $installIndex) {
-    throw 'The setup update branch does not re-enroll the default account after installation.'
+if ($takeoverIndex -lt $installIndex) {
+    throw 'The setup update branch does not retake over the default account after installation.'
 }
-if ($body -notmatch 're-enroll default account ''\$DefaultAccount''') {
-    throw 'The setup update confirmation does not disclose re-enrollment.'
+if ($body -match '& \$admin create --takeover \$DefaultAccount --force') {
+    throw 'The setup update branch must not force-enable a disabled default account.'
+}
+if ($body -notmatch 'take over default account ''\$DefaultAccount''') {
+    throw 'The setup update confirmation does not disclose takeover.'
 }
 if ($body -notmatch 'replacing its broker-owned password') {
     throw 'The setup update confirmation does not disclose password replacement.'

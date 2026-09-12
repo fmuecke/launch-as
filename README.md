@@ -26,8 +26,8 @@ for this preview.
 ## Install the binary package
 
 Extract `launch-as-v1.0.0-preview-win64.zip` and run the bundled setup script from its extracted
-directory. It elevates when needed, installs or updates the demand-start service, and can enroll a
-default account. Updating re-enrolls that account and replaces its broker-owned password. The user
+directory. It elevates when needed, installs or updates the demand-start service, and can create a
+default account. Updating takes over that account and replaces its broker-owned password. The user
 who runs `install` becomes the broker's authorised caller.
 
 ```powershell
@@ -47,21 +47,25 @@ these commands from the extracted package directory (or `out\build\Release` afte
 
 ```powershell
 .\launch-as-admin.exe install
-.\launch-as-admin.exe enroll LaunchAsUser
+.\launch-as-admin.exe create LaunchAsUser
 ```
 
-`install`, `enroll`, `unenroll`, and `uninstall` require elevation. `install` stops active broker
-sessions before updating the service. `enroll` creates a missing non-administrative local account,
-or takes over an existing one by setting a broker-owned password. It prompts before changing an
-account; `--force` is the explicit non-interactive override.
+`install`, `create`, `forget`, `delete`, and `uninstall` require elevation. `install` stops active
+broker sessions before updating the service. `create <account>` creates a dedicated account and
+fails if that name already exists. Use
+`create --takeover <account>` to deliberately reset an existing account's password and
+make it launch-as-owned. Taking over a disabled account requires `--force` to re-enable it; plain
+`create` has no force switch because it never modifies an existing account.
 
 The broker creates a password for each launch, uses it only to log on, then wipes it. An enrolled
-account runs one session at a time; a second launch fails immediately. `unenroll` forgets the
-enrollment and disables the account, but does not delete the Windows account.
+account supports up to two concurrent sessions; a third launch fails immediately. `forget` removes
+only the launch-as registration. `delete` removes a SID-matched owned Windows account after its
+sessions end; neither command deletes its profile directory.
 
 ```powershell
 .\launch-as-admin.exe list
-.\launch-as-admin.exe unenroll LaunchAsUser
+.\launch-as-admin.exe create --takeover LaunchAsUser
+.\launch-as-admin.exe forget LaunchAsUser
 .\launch-as-admin.exe uninstall
 ```
 

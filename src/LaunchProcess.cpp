@@ -201,14 +201,15 @@ ExitCode RunBrokerConsole(const AccountIdentity& account, const Options& options
                << L" (host PID " << processId
                << L"). Output in this pane is controlled by that session until it exits.\n";
     std::wcout.flush();
-    const DWORD waitResult = terminalBridge.WaitForOutput();
+    DWORD waitError = ERROR_SUCCESS;
+    const DWORD waitResult = terminalBridge.WaitForOutput(waitError);
     terminalBridge.Stop();
     if (waitResult != WAIT_OBJECT_0)
     {
         connection.Reset();
-        const DWORD waitError = waitResult == WAIT_FAILED ? GetLastError() : ERROR_GEN_FAILURE;
+        const DWORD reportedError = waitResult == WAIT_FAILED ? waitError : ERROR_GEN_FAILURE;
         std::wcerr << L"Could not wait for the broker terminal output: "
-                   << FormatWindowsError(waitError) << L"\n";
+                   << FormatWindowsError(reportedError) << L"\n";
         return ExitFailure;
     }
     DWORD childExitCode = 0;

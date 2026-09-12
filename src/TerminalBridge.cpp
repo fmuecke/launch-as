@@ -595,10 +595,16 @@ bool TerminalBridge::Start(std::wstring& error)
     return true;
 }
 
-DWORD TerminalBridge::WaitForOutput() const noexcept
+DWORD TerminalBridge::WaitForOutput(DWORD& waitError) const noexcept
 {
-    return outputCompleteEvent_ ? WaitForSingleObject(outputCompleteEvent_.get(), INFINITE)
-                                : WAIT_FAILED;
+    if (!outputCompleteEvent_)
+    {
+        waitError = ERROR_INVALID_HANDLE;
+        return WAIT_FAILED;
+    }
+    const DWORD waitResult = WaitForSingleObject(outputCompleteEvent_.get(), INFINITE);
+    waitError = waitResult == WAIT_FAILED ? GetLastError() : ERROR_SUCCESS;
+    return waitResult;
 }
 
 void TerminalBridge::Stop() noexcept

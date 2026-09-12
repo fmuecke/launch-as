@@ -40,7 +40,7 @@ class TerminalBridge final
     [[nodiscard]] bool CompleteChildProcessCreation(bool processCreated, std::wstring& error);
     [[nodiscard]] bool ConnectBrokerChild(std::wstring& error);
     [[nodiscard]] bool Start(std::wstring& error);
-    [[nodiscard]] DWORD WaitForOutput() const noexcept;
+    [[nodiscard]] DWORD WaitForOutput(DWORD& waitError) const noexcept;
     void Stop() noexcept;
 
     [[nodiscard]] bool SendResize(COORD size) noexcept;

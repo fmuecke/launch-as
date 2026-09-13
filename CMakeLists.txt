@@ -89,11 +89,11 @@ add_executable(launch_as
     src/WindowsCommandLine.h
     "${CMAKE_CURRENT_BINARY_DIR}/LauncherVersion.rc"
 )
-target_include_directories(launch_as PRIVATE
-    "${CMAKE_CURRENT_BINARY_DIR}"
-)
-
 function(configure_launch_as_target target)
+    if(ARGN)
+        target_include_directories(${target} PRIVATE ${ARGN})
+    endif()
+
     target_compile_features(${target} PRIVATE cxx_std_23)
 
     if(MSVC)
@@ -144,7 +144,7 @@ if(MSVC)
     )
 endif()
 
-configure_launch_as_target(launch_as)
+configure_launch_as_target(launch_as "${CMAKE_CURRENT_BINARY_DIR}")
 set_target_properties(launch_as PROPERTIES
     OUTPUT_NAME "launch-as"
 )
@@ -170,10 +170,7 @@ add_executable(launch_as_conhost
 target_link_libraries(launch_as_conhost PRIVATE
     Ole32
 )
-target_include_directories(launch_as_conhost PRIVATE
-    "${CMAKE_CURRENT_BINARY_DIR}"
-)
-configure_launch_as_target(launch_as_conhost)
+configure_launch_as_target(launch_as_conhost "${CMAKE_CURRENT_BINARY_DIR}")
 set_target_properties(launch_as_conhost PROPERTIES
     OUTPUT_NAME "launch-as-conhost"
 )
@@ -223,10 +220,7 @@ target_link_libraries(launch_as_broker PRIVATE
     Shell32
     Userenv
 )
-target_include_directories(launch_as_broker PRIVATE
-    "${CMAKE_CURRENT_BINARY_DIR}"
-)
-configure_launch_as_target(launch_as_broker)
+configure_launch_as_target(launch_as_broker "${CMAKE_CURRENT_BINARY_DIR}")
 set_target_properties(launch_as_broker PROPERTIES
     OUTPUT_NAME "launch-as-broker"
 )
@@ -262,10 +256,7 @@ target_link_libraries(launch_as_admin PRIVATE
     Ole32
     Shell32
 )
-target_include_directories(launch_as_admin PRIVATE
-    "${CMAKE_CURRENT_BINARY_DIR}"
-)
-configure_launch_as_target(launch_as_admin)
+configure_launch_as_target(launch_as_admin "${CMAKE_CURRENT_BINARY_DIR}")
 set_target_properties(launch_as_admin PROPERTIES
     OUTPUT_NAME "launch-as-admin"
 )
@@ -276,10 +267,7 @@ if(BUILD_TESTING)
         src/BrokerProtocol.cpp
         src/BrokerProtocol.h
     )
-    target_include_directories(LauncherBrokerProtocolTests PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    )
-    configure_launch_as_target(LauncherBrokerProtocolTests)
+    configure_launch_as_target(LauncherBrokerProtocolTests "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
     add_test(
         NAME launcher.broker_protocol
@@ -301,14 +289,11 @@ if(BUILD_TESTING)
         src/WindowsCommandLine.cpp
         src/WindowsCommandLine.h
     )
-    target_include_directories(LauncherBrokerPipeTests PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    )
     target_link_libraries(LauncherBrokerPipeTests PRIVATE
         Advapi32
         Userenv
     )
-    configure_launch_as_target(LauncherBrokerPipeTests)
+    configure_launch_as_target(LauncherBrokerPipeTests "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_compile_definitions(LauncherBrokerPipeTests PRIVATE
         LAUNCH_AS_TESTING
     )
@@ -336,14 +321,11 @@ if(BUILD_TESTING)
         src/WindowsCommandLine.cpp
         src/WindowsCommandLine.h
     )
-    target_include_directories(LauncherBrokerCommandTests PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    )
     target_link_libraries(LauncherBrokerCommandTests PRIVATE
         Advapi32
         Userenv
     )
-    configure_launch_as_target(LauncherBrokerCommandTests)
+    configure_launch_as_target(LauncherBrokerCommandTests "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_compile_definitions(LauncherBrokerCommandTests PRIVATE
         LAUNCH_AS_TEST_CONTROL_PIPE
     )
@@ -378,10 +360,7 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
         Ole32
         Shell32
     )
-    target_include_directories(LauncherBrokerAdminTestClient PRIVATE
-        "${CMAKE_CURRENT_BINARY_DIR}"
-    )
-    configure_launch_as_target(LauncherBrokerAdminTestClient)
+    configure_launch_as_target(LauncherBrokerAdminTestClient "${CMAKE_CURRENT_BINARY_DIR}")
     target_compile_definitions(LauncherBrokerAdminTestClient PRIVATE
         LAUNCH_AS_TEST_CONTROL_PIPE
     )
@@ -462,13 +441,10 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
         src/BrokerPassword.cpp
         src/BrokerPassword.h
     )
-    target_include_directories(LauncherBrokerPasswordTests PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    )
     target_link_libraries(LauncherBrokerPasswordTests PRIVATE
         Bcrypt
     )
-    configure_launch_as_target(LauncherBrokerPasswordTests)
+    configure_launch_as_target(LauncherBrokerPasswordTests "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
     add_test(
         NAME launcher.broker_password
@@ -487,14 +463,11 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
         src/BrokerPassword.cpp
         src/BrokerPassword.h
     )
-    target_include_directories(LauncherBrokerEnrollmentStoreTests PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    )
     target_link_libraries(LauncherBrokerEnrollmentStoreTests PRIVATE
         Bcrypt
         Netapi32
     )
-    configure_launch_as_target(LauncherBrokerEnrollmentStoreTests)
+    configure_launch_as_target(LauncherBrokerEnrollmentStoreTests "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
     add_test(
         NAME launcher.broker_enrollment_store
@@ -509,15 +482,12 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
         src/BrokerDataDirectory.cpp
         src/BrokerDataDirectory.h
     )
-    target_include_directories(LauncherBrokerDataDirectoryTests PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    )
     target_link_libraries(LauncherBrokerDataDirectoryTests PRIVATE
         Advapi32
         Ole32
         Shell32
     )
-    configure_launch_as_target(LauncherBrokerDataDirectoryTests)
+    configure_launch_as_target(LauncherBrokerDataDirectoryTests "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
     add_test(
         NAME launcher.broker_data_directory
@@ -532,13 +502,10 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
         src/BrokerCallerPolicy.cpp
         src/BrokerCallerPolicy.h
     )
-    target_include_directories(LauncherBrokerCallerPolicyTests PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    )
     target_link_libraries(LauncherBrokerCallerPolicyTests PRIVATE
         Advapi32
     )
-    configure_launch_as_target(LauncherBrokerCallerPolicyTests)
+    configure_launch_as_target(LauncherBrokerCallerPolicyTests "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
     add_test(
         NAME launcher.broker_caller_policy
@@ -555,14 +522,11 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
         src/WindowsCommandLine.cpp
         src/WindowsCommandLine.h
     )
-    target_include_directories(LauncherBrokerProcessLauncherTests PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    )
     target_link_libraries(LauncherBrokerProcessLauncherTests PRIVATE
         Advapi32
         Userenv
     )
-    configure_launch_as_target(LauncherBrokerProcessLauncherTests)
+    configure_launch_as_target(LauncherBrokerProcessLauncherTests "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_compile_definitions(LauncherBrokerProcessLauncherTests PRIVATE
         LAUNCH_AS_TESTING
     )
@@ -580,13 +544,10 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
         src/BrokerAudit.cpp
         src/BrokerAudit.h
     )
-    target_include_directories(LauncherBrokerAuditTests PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    )
     target_link_libraries(LauncherBrokerAuditTests PRIVATE
         Advapi32
     )
-    configure_launch_as_target(LauncherBrokerAuditTests)
+    configure_launch_as_target(LauncherBrokerAuditTests "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
     add_test(
         NAME launcher.broker_audit
@@ -613,13 +574,10 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
         src/WindowsCommandLine.cpp
         src/WindowsCommandLine.h
     )
-    target_include_directories(LauncherBrokerChildIdentityProbeTests PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    )
     target_link_libraries(LauncherBrokerChildIdentityProbeTests PRIVATE
         Advapi32
     )
-    configure_launch_as_target(LauncherBrokerChildIdentityProbeTests)
+    configure_launch_as_target(LauncherBrokerChildIdentityProbeTests "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
     add_test(
         NAME launcher.broker_child_identity_probe
@@ -644,15 +602,12 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
         src/BrokerRegistration.cpp
         src/BrokerRegistration.h
     )
-    target_include_directories(LauncherBrokerAccountProvisioningTests PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    )
     target_link_libraries(LauncherBrokerAccountProvisioningTests PRIVATE
         Bcrypt
         Netapi32
         Advapi32
     )
-    configure_launch_as_target(LauncherBrokerAccountProvisioningTests)
+    configure_launch_as_target(LauncherBrokerAccountProvisioningTests "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
     add_test(
         NAME launcher.broker_account_provisioning
@@ -673,15 +628,12 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
         src/BrokerServiceInstaller.cpp
         src/BrokerServiceInstaller.h
     )
-    target_include_directories(LauncherBrokerServiceInstallerTests PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    )
     target_link_libraries(LauncherBrokerServiceInstallerTests PRIVATE
         Advapi32
         Ole32
         Shell32
     )
-    configure_launch_as_target(LauncherBrokerServiceInstallerTests)
+    configure_launch_as_target(LauncherBrokerServiceInstallerTests "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
     add_test(
         NAME launcher.broker_install_files
@@ -721,11 +673,10 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
         tests/CommandLineTests.cpp
         src/WindowsCommandLine.cpp
     )
-    target_include_directories(LauncherCommandLineTests PRIVATE
+    configure_launch_as_target(LauncherCommandLineTests
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests"
     )
-    configure_launch_as_target(LauncherCommandLineTests)
 
     add_test(
         NAME launcher.command_line
@@ -774,10 +725,7 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
         src/Win32Support.cpp
         src/WindowsCommandLine.cpp
     )
-    target_include_directories(LauncherPseudoConsoleTests PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    )
-    configure_launch_as_target(LauncherPseudoConsoleTests)
+    configure_launch_as_target(LauncherPseudoConsoleTests "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_link_libraries(LauncherPseudoConsoleTests PRIVATE
         Advapi32
         Ole32
@@ -807,14 +755,11 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
         src/WindowsCommandLine.cpp
         src/WindowsCommandLine.h
     )
-    target_include_directories(LauncherBrokerTerminalBridgeTests PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    )
     target_link_libraries(LauncherBrokerTerminalBridgeTests PRIVATE
         Advapi32
         Ole32
     )
-    configure_launch_as_target(LauncherBrokerTerminalBridgeTests)
+    configure_launch_as_target(LauncherBrokerTerminalBridgeTests "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_compile_definitions(LauncherBrokerTerminalBridgeTests PRIVATE
         LAUNCH_AS_TESTING
     )
@@ -836,10 +781,7 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
         src/Win32Support.cpp
         src/WindowsCommandLine.cpp
     )
-    target_include_directories(LauncherTerminalDisconnectTests PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    )
-    configure_launch_as_target(LauncherTerminalDisconnectTests)
+    configure_launch_as_target(LauncherTerminalDisconnectTests "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_link_libraries(LauncherTerminalDisconnectTests PRIVATE
         Advapi32
         Ole32

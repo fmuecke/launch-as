@@ -3,6 +3,7 @@
 // Project: https://github.com/fmuecke/launch-as
 
 #include "BrokerCallerPolicy.h"
+#include "TestSupport.h"
 
 #include <Windows.h>
 #include <array>
@@ -46,15 +47,6 @@ class TemporaryDirectory final
     std::wstring path_;
     bool created_ = false;
 };
-
-[[nodiscard]] bool Expect(bool condition, const wchar_t* message)
-{
-    if (!condition)
-    {
-        std::wcerr << message << L"\n";
-    }
-    return condition;
-}
 
 [[nodiscard]] DWORD GetCurrentUserSid(std::vector<BYTE>& sid)
 {

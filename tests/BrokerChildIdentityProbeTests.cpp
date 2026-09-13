@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Project: https://github.com/fmuecke/launch-as
 
+#include "TestSupport.h"
 #include "Win32Support.h"
 #include "WindowsCommandLine.h"
 
@@ -28,15 +29,6 @@ class TemporaryReport final
   private:
     std::wstring path_;
 };
-
-[[nodiscard]] bool Expect(bool condition, const wchar_t* message)
-{
-    if (!condition)
-    {
-        std::wcerr << message << L"\n";
-    }
-    return condition;
-}
 
 [[nodiscard]] bool CreateTemporaryReport(TemporaryReport& report)
 {

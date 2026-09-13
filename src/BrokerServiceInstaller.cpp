@@ -7,6 +7,7 @@
 #include "BrokerAudit.h"
 #include "BrokerCallerPolicy.h"
 #include "BrokerDataDirectory.h"
+#include "Win32Support.h"
 
 #include <Aclapi.h>
 #include <ShlObj.h>
@@ -53,41 +54,8 @@ class ServiceHandle final
     SC_HANDLE value_;
 };
 
-class LocalAcl final
-{
-  public:
-    ~LocalAcl()
-    {
-        if (value_ != nullptr)
-        {
-            LocalFree(value_);
-        }
-    }
-
-    [[nodiscard]] PACL* address() noexcept { return &value_; }
-    [[nodiscard]] PACL get() const noexcept { return value_; }
-
-  private:
-    PACL value_ = nullptr;
-};
-
-class LocalSecurityDescriptor final
-{
-  public:
-    ~LocalSecurityDescriptor()
-    {
-        if (value_ != nullptr)
-        {
-            LocalFree(value_);
-        }
-    }
-
-    [[nodiscard]] PSECURITY_DESCRIPTOR* address() noexcept { return &value_; }
-    [[nodiscard]] PSECURITY_DESCRIPTOR get() const noexcept { return value_; }
-
-  private:
-    PSECURITY_DESCRIPTOR value_ = nullptr;
-};
+using LocalAcl = launch_as::LocalAllocation<PACL>;
+using LocalSecurityDescriptor = launch_as::LocalAllocation<PSECURITY_DESCRIPTOR>;
 
 [[nodiscard]] DWORD CreateBrokerInstallSecurityDescriptor(LocalSecurityDescriptor& descriptor)
 {

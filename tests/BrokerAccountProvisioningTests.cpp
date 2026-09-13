@@ -7,6 +7,7 @@
 #include "BrokerLogonToken.h"
 #include "BrokerPassword.h"
 #include "BrokerRegistration.h"
+#include "TestSupport.h"
 #include "Win32Support.h"
 
 #include <Lm.h>
@@ -100,15 +101,6 @@ class TemporaryDirectory final
     std::wstring path_;
     bool created_ = false;
 };
-
-[[nodiscard]] bool Expect(bool condition, const wchar_t* message)
-{
-    if (!condition)
-    {
-        std::wcerr << message << L"\n";
-    }
-    return condition;
-}
 
 [[nodiscard]] bool AccountDoesNotExist(const std::wstring& name)
 {

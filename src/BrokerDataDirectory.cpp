@@ -4,6 +4,8 @@
 
 #include "BrokerDataDirectory.h"
 
+#include "Win32Support.h"
+
 #include <Aclapi.h>
 #include <ShlObj.h>
 #include <array>
@@ -17,46 +19,8 @@ namespace
 
 constexpr wchar_t BrokerServiceAccountName[] = L"NT SERVICE\\launch-as-broker";
 
-class LocalSecurityDescriptor final
-{
-  public:
-    LocalSecurityDescriptor() = default;
-
-    ~LocalSecurityDescriptor()
-    {
-        if (value_ != nullptr)
-        {
-            LocalFree(value_);
-        }
-    }
-
-    LocalSecurityDescriptor(const LocalSecurityDescriptor&) = delete;
-    LocalSecurityDescriptor& operator=(const LocalSecurityDescriptor&) = delete;
-
-    [[nodiscard]] PSECURITY_DESCRIPTOR* address() noexcept { return &value_; }
-    [[nodiscard]] PSECURITY_DESCRIPTOR get() const noexcept { return value_; }
-
-  private:
-    PSECURITY_DESCRIPTOR value_ = nullptr;
-};
-
-class LocalAcl final
-{
-  public:
-    ~LocalAcl()
-    {
-        if (value_ != nullptr)
-        {
-            LocalFree(value_);
-        }
-    }
-
-    [[nodiscard]] PACL* address() noexcept { return &value_; }
-    [[nodiscard]] PACL get() const noexcept { return value_; }
-
-  private:
-    PACL value_ = nullptr;
-};
+using LocalSecurityDescriptor = launch_as::LocalAllocation<PSECURITY_DESCRIPTOR>;
+using LocalAcl = launch_as::LocalAllocation<PACL>;
 
 [[nodiscard]] DWORD LookupBrokerServiceSid(std::vector<BYTE>& sid)
 {

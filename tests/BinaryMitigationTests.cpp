@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Project: https://github.com/fmuecke/launch-as
 
+#include "TestSupport.h"
+
 #include <Windows.h>
 #include <cstddef>
 #include <iostream>
@@ -30,15 +32,6 @@ class Module final
   private:
     HMODULE value_;
 };
-
-[[nodiscard]] bool Expect(bool condition, const wchar_t* message)
-{
-    if (!condition)
-    {
-        std::wcerr << message << L"\n";
-    }
-    return condition;
-}
 
 [[nodiscard]] bool IsRvaInImage(const IMAGE_NT_HEADERS64& headers, DWORD rva, std::size_t size)
 {

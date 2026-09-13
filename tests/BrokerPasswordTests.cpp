@@ -3,6 +3,7 @@
 // Project: https://github.com/fmuecke/launch-as
 
 #include "BrokerPassword.h"
+#include "TestSupport.h"
 
 #include <Windows.h>
 #include <algorithm>
@@ -11,15 +12,6 @@
 
 namespace
 {
-
-[[nodiscard]] bool Expect(bool condition, const wchar_t* message)
-{
-    if (!condition)
-    {
-        std::wcerr << message << L"\n";
-    }
-    return condition;
-}
 
 [[nodiscard]] bool ContainsAny(std::span<const wchar_t> password, std::wstring_view characters)
 {

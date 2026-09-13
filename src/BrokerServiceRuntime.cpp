@@ -68,46 +68,8 @@ DWORD WINAPI ServiceControlHandler(DWORD control, DWORD, void*, void*)
     return NO_ERROR;
 }
 
-class LocalSecurityDescriptor final
-{
-  public:
-    LocalSecurityDescriptor() = default;
-
-    ~LocalSecurityDescriptor()
-    {
-        if (value_ != nullptr)
-        {
-            LocalFree(value_);
-        }
-    }
-
-    LocalSecurityDescriptor(const LocalSecurityDescriptor&) = delete;
-    LocalSecurityDescriptor& operator=(const LocalSecurityDescriptor&) = delete;
-
-    [[nodiscard]] PSECURITY_DESCRIPTOR* address() noexcept { return &value_; }
-    [[nodiscard]] PSECURITY_DESCRIPTOR get() const noexcept { return value_; }
-
-  private:
-    PSECURITY_DESCRIPTOR value_ = nullptr;
-};
-
-class LocalString final
-{
-  public:
-    ~LocalString()
-    {
-        if (value_ != nullptr)
-        {
-            LocalFree(value_);
-        }
-    }
-
-    [[nodiscard]] PWSTR* address() noexcept { return &value_; }
-    [[nodiscard]] PWSTR get() const noexcept { return value_; }
-
-  private:
-    PWSTR value_ = nullptr;
-};
+using LocalSecurityDescriptor = launch_as::LocalAllocation<PSECURITY_DESCRIPTOR>;
+using LocalString = launch_as::LocalAllocation<PWSTR>;
 
 struct BrokerLaunchPolicy
 {

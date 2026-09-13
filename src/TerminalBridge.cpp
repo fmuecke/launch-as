@@ -11,7 +11,6 @@
 #include <cstddef>
 #include <exception>
 #include <iostream>
-#include <memory>
 #include <objbase.h>
 #include <sddl.h>
 #include <string>
@@ -32,18 +31,7 @@ constexpr DWORD BrokerPipeConnectionTimeoutMilliseconds = 5'000;
 #endif
 constexpr auto ResizePollInterval = std::chrono::milliseconds(50);
 
-struct LocalFreeDeleter
-{
-    void operator()(void* value) const noexcept
-    {
-        if (value != nullptr)
-        {
-            LocalFree(value);
-        }
-    }
-};
-
-using UniqueLocalMemory = std::unique_ptr<void, LocalFreeDeleter>;
+using UniqueLocalMemory = LocalAllocation<void*>;
 
 struct PipeSecurityDescriptor final
 {

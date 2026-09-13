@@ -8,31 +8,6 @@
 
 namespace launch_as
 {
-namespace
-{
-
-class LocalBuffer final
-{
-  public:
-    explicit LocalBuffer(void* value) noexcept : value_(value) {}
-
-    ~LocalBuffer()
-    {
-        if (value_ != nullptr)
-        {
-            LocalFree(value_);
-        }
-    }
-
-    LocalBuffer(const LocalBuffer&) = delete;
-    LocalBuffer& operator=(const LocalBuffer&) = delete;
-
-  private:
-    void* value_;
-};
-
-} // namespace
-
 std::wstring FormatWindowsError(DWORD error)
 {
     wchar_t* rawMessage = nullptr;
@@ -44,7 +19,7 @@ std::wstring FormatWindowsError(DWORD error)
         reinterpret_cast<wchar_t*>(&rawMessage),
         0,
         nullptr);
-    LocalBuffer messageBuffer(rawMessage);
+    LocalAllocation<void*> messageBuffer(rawMessage);
 
     if (length == 0 || rawMessage == nullptr)
     {

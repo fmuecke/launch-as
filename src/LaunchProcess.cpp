@@ -18,31 +18,6 @@
 
 namespace launch_as
 {
-namespace
-{
-
-class LocalBuffer final
-{
-  public:
-    explicit LocalBuffer(void* value) noexcept : value_(value) {}
-
-    ~LocalBuffer()
-    {
-        if (value_ != nullptr)
-        {
-            LocalFree(value_);
-        }
-    }
-
-    LocalBuffer(const LocalBuffer&) = delete;
-    LocalBuffer& operator=(const LocalBuffer&) = delete;
-
-  private:
-    void* value_;
-};
-
-} // namespace
-
 std::optional<AccountIdentity> ResolveLocalAccount(const std::wstring& username)
 {
     const std::wstring qualifiedUsername = L".\\" + username;
@@ -101,7 +76,7 @@ std::optional<AccountIdentity> ResolveLocalAccount(const std::wstring& username)
                    << FormatWindowsError(convertError) << L"\n";
         return std::nullopt;
     }
-    LocalBuffer sidBuffer(rawSid);
+    LocalAllocation<void*> sidBuffer(rawSid);
     return AccountIdentity {
         .username = username, .qualifiedUsername = qualifiedUsername, .sid = rawSid
     };

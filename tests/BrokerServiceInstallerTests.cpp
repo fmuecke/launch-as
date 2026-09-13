@@ -3,6 +3,7 @@
 // Project: https://github.com/fmuecke/launch-as
 
 #include "BrokerServiceInstaller.h"
+#include "TestSupport.h"
 #include "Win32Support.h"
 
 #include <Windows.h>
@@ -84,15 +85,6 @@ class TemporaryDirectory final
   private:
     std::filesystem::path path_;
 };
-
-[[nodiscard]] bool Expect(bool condition, const wchar_t* message)
-{
-    if (!condition)
-    {
-        std::wcerr << message << L"\n";
-    }
-    return condition;
-}
 
 [[nodiscard]] bool IsCurrentProcessElevated()
 {

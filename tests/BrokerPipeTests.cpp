@@ -4,6 +4,7 @@
 
 #include "BrokerPipeServer.h"
 #include "BrokerProtocol.h"
+#include "TestSupport.h"
 #include "Win32Support.h"
 
 #include <Windows.h>
@@ -15,8 +16,6 @@
 
 namespace
 {
-
-[[nodiscard]] bool Expect(bool condition, const wchar_t* message);
 
 constexpr DWORD WorkerReleaseTimeoutMilliseconds = 1'000;
 
@@ -178,15 +177,6 @@ class SessionServerThread final
     launch_as::UniqueHandle completed_;
     std::thread thread_;
 };
-
-[[nodiscard]] bool Expect(bool condition, const wchar_t* message)
-{
-    if (!condition)
-    {
-        std::wcerr << message << L"\n";
-    }
-    return condition;
-}
 
 [[nodiscard]] bool TestInteractiveModeRejected()
 {

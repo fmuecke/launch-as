@@ -3,6 +3,7 @@
 // Project: https://github.com/fmuecke/launch-as
 
 #include "BrokerDataDirectory.h"
+#include "TestSupport.h"
 
 #include <Aclapi.h>
 #include <ShlObj.h>
@@ -86,15 +87,6 @@ class ScopedEnvironmentVariable final
     std::wstring originalValue_;
     bool wasPresent_ = false;
 };
-
-[[nodiscard]] bool Expect(bool condition, const wchar_t* message)
-{
-    if (!condition)
-    {
-        std::wcerr << message << L"\n";
-    }
-    return condition;
-}
 
 [[nodiscard]] bool LookupBrokerServiceSid(std::vector<BYTE>& sid, bool& found)
 {

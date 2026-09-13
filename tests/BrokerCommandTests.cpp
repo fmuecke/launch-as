@@ -5,6 +5,7 @@
 #include "BrokerControlPipe.h"
 #include "BrokerPipeServer.h"
 #include "BrokerProtocol.h"
+#include "TestSupport.h"
 #include "Win32Support.h"
 
 #include <Windows.h>
@@ -19,15 +20,6 @@ namespace
 {
 
 constexpr ULONGLONG BusyPipeResponseBoundMilliseconds = 1'000;
-
-[[nodiscard]] bool Expect(bool condition, const wchar_t* message)
-{
-    if (!condition)
-    {
-        std::wcerr << message << L"\n";
-    }
-    return condition;
-}
 
 [[nodiscard]] std::wstring Quote(std::wstring_view value)
 {

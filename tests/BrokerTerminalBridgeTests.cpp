@@ -3,6 +3,7 @@
 // Project: https://github.com/fmuecke/launch-as
 
 #include "TerminalBridge.h"
+#include "TestSupport.h"
 #include "Win32Support.h"
 #include "WindowsCommandLine.h"
 
@@ -19,15 +20,6 @@ namespace
 constexpr int SkipNoConsoleAttached = 77;
 constexpr DWORD StopWithConsoleStdinTimeoutMilliseconds = 2'000;
 constexpr ULONGLONG BrokerConnectionTimeoutBoundMilliseconds = 1'000;
-
-[[nodiscard]] bool Expect(bool condition, const wchar_t* message)
-{
-    if (!condition)
-    {
-        std::wcerr << message << L"\n";
-    }
-    return condition;
-}
 
 [[nodiscard]] bool VerifyHostWaitsForInitialResize(const std::filesystem::path& launcherPath)
 {

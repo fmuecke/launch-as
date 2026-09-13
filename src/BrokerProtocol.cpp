@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cwchar>
 #include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -445,6 +446,76 @@ class JsonReader final
     }
 }
 
+template <typename ParseAdditionalField>
+[[nodiscard]] bool ParseResponse(std::string_view response, std::wstring_view requestId,
+    std::wstring_view expectedStatus, std::wstring_view expectedReason,
+    std::optional<DWORD> expectedWin32Error, DWORD* parsedWin32Error,
+    ParseAdditionalField&& parseAdditionalField)
+{
+    JsonReader reader(response);
+    if (!reader.Consume('{'))
+    {
+        return false;
+    }
+
+    bool version = false;
+    bool responseId = false;
+    bool status = false;
+    bool reason = false;
+    bool error = false;
+    for (;;)
+    {
+        std::wstring name;
+        if (!reader.String(name) || !reader.Consume(':'))
+        {
+            return false;
+        }
+        if (name == L"version" && !version)
+        {
+            DWORD value = 0;
+            version = reader.Unsigned(value) && value == 1;
+        }
+        else if (name == L"requestId" && !responseId)
+        {
+            std::wstring value;
+            responseId = reader.String(value) && value == requestId;
+        }
+        else if (name == L"status" && !status)
+        {
+            std::wstring value;
+            status = reader.String(value) && value == expectedStatus;
+        }
+        else if (name == L"reasonCode" && !reason)
+        {
+            std::wstring value;
+            reason = reader.String(value) &&
+                     (expectedReason.empty() ? !value.empty() : value == expectedReason);
+        }
+        else if (name == L"win32Error" && !error)
+        {
+            DWORD value = 0;
+            error = reader.Unsigned(value) && (!expectedWin32Error || value == *expectedWin32Error);
+            if (error && parsedWin32Error != nullptr)
+            {
+                *parsedWin32Error = value;
+            }
+        }
+        else if (!parseAdditionalField(name, reader))
+        {
+            return false;
+        }
+
+        if (reader.Consume('}'))
+        {
+            return reader.End() && version && responseId && status && reason && error;
+        }
+        if (!reader.Consume(','))
+        {
+            return false;
+        }
+    }
+}
+
 void AppendJsonString(std::string& output, std::wstring_view value)
 {
     output.push_back('"');
@@ -817,67 +888,23 @@ bool ParseListResponse(
     std::string_view response, std::wstring_view requestId, std::vector<std::wstring>& accounts)
 {
     accounts.clear();
-    JsonReader reader(response);
-    if (!reader.Consume('{'))
-    {
-        return false;
-    }
-    bool version = false;
-    bool responseId = false;
-    bool status = false;
     bool listedAccounts = false;
-    bool reason = false;
-    bool error = false;
-    for (;;)
-    {
-        std::wstring name;
-        if (!reader.String(name) || !reader.Consume(':'))
+    const bool parsed = ParseResponse(response,
+        requestId,
+        L"ok",
+        L"listed",
+        ERROR_SUCCESS,
+        nullptr,
+        [&accounts, &listedAccounts](std::wstring_view name, JsonReader& reader)
         {
-            return false;
-        }
-        if (name == L"version" && !version)
-        {
-            DWORD value = 0;
-            version = reader.Unsigned(value) && value == 1;
-        }
-        else if (name == L"requestId" && !responseId)
-        {
-            std::wstring value;
-            responseId = reader.String(value) && value == requestId;
-        }
-        else if (name == L"status" && !status)
-        {
-            std::wstring value;
-            status = reader.String(value) && value == L"ok";
-        }
-        else if (name == L"accounts" && !listedAccounts)
-        {
+            if (name != L"accounts" || listedAccounts)
+            {
+                return false;
+            }
             listedAccounts = ReadAccounts(reader, accounts);
-        }
-        else if (name == L"reasonCode" && !reason)
-        {
-            std::wstring value;
-            reason = reader.String(value) && value == L"listed";
-        }
-        else if (name == L"win32Error" && !error)
-        {
-            DWORD value = 0;
-            error = reader.Unsigned(value) && value == ERROR_SUCCESS;
-        }
-        else
-        {
-            return false;
-        }
-        if (reader.Consume('}'))
-        {
-            break;
-        }
-        if (!reader.Consume(','))
-        {
-            return false;
-        }
-    }
-    if (!reader.End() || !(version && responseId && status && listedAccounts && reason && error))
+            return listedAccounts;
+        });
+    if (!parsed || !listedAccounts)
     {
         accounts.clear();
         return false;
@@ -888,61 +915,13 @@ bool ParseListResponse(
 bool ParseErrorResponse(std::string_view response, std::wstring_view requestId, DWORD& win32Error)
 {
     win32Error = ERROR_INVALID_DATA;
-    JsonReader reader(response);
-    if (!reader.Consume('{'))
-    {
-        return false;
-    }
-    bool version = false;
-    bool responseId = false;
-    bool status = false;
-    bool reason = false;
-    bool error = false;
-    for (;;)
-    {
-        std::wstring name;
-        if (!reader.String(name) || !reader.Consume(':'))
-        {
-            return false;
-        }
-        if (name == L"version" && !version)
-        {
-            DWORD value = 0;
-            version = reader.Unsigned(value) && value == 1;
-        }
-        else if (name == L"requestId" && !responseId)
-        {
-            std::wstring value;
-            responseId = reader.String(value) && value == requestId;
-        }
-        else if (name == L"status" && !status)
-        {
-            std::wstring value;
-            status = reader.String(value) && value == L"error";
-        }
-        else if (name == L"reasonCode" && !reason)
-        {
-            std::wstring ignored;
-            reason = reader.String(ignored) && !ignored.empty();
-        }
-        else if (name == L"win32Error" && !error)
-        {
-            error = reader.Unsigned(win32Error);
-        }
-        else
-        {
-            return false;
-        }
-        if (reader.Consume('}'))
-        {
-            break;
-        }
-        if (!reader.Consume(','))
-        {
-            return false;
-        }
-    }
-    if (!(reader.End() && version && responseId && status && reason && error))
+    if (!ParseResponse(response,
+            requestId,
+            L"error",
+            {},
+            std::nullopt,
+            &win32Error,
+            [](std::wstring_view, JsonReader&) { return false; }))
     {
         win32Error = ERROR_INVALID_DATA;
         return false;
@@ -963,67 +942,23 @@ bool ParseLaunchSuccessResponse(
     std::string_view response, std::wstring_view requestId, DWORD& processId)
 {
     processId = 0;
-    JsonReader reader(response);
-    if (!reader.Consume('{'))
-    {
-        return false;
-    }
-    bool version = false;
-    bool responseId = false;
-    bool status = false;
     bool process = false;
-    bool reason = false;
-    bool error = false;
-    for (;;)
-    {
-        std::wstring name;
-        if (!reader.String(name) || !reader.Consume(':'))
+    const bool parsed = ParseResponse(response,
+        requestId,
+        L"ok",
+        L"launched",
+        ERROR_SUCCESS,
+        nullptr,
+        [&processId, &process](std::wstring_view name, JsonReader& reader)
         {
-            return false;
-        }
-        if (name == L"version" && !version)
-        {
-            DWORD value = 0;
-            version = reader.Unsigned(value) && value == 1;
-        }
-        else if (name == L"requestId" && !responseId)
-        {
-            std::wstring value;
-            responseId = reader.String(value) && value == requestId;
-        }
-        else if (name == L"status" && !status)
-        {
-            std::wstring value;
-            status = reader.String(value) && value == L"ok";
-        }
-        else if (name == L"processId" && !process)
-        {
+            if (name != L"processId" || process)
+            {
+                return false;
+            }
             process = reader.Unsigned(processId) && processId != 0;
-        }
-        else if (name == L"reasonCode" && !reason)
-        {
-            std::wstring value;
-            reason = reader.String(value) && value == L"launched";
-        }
-        else if (name == L"win32Error" && !error)
-        {
-            DWORD value = 0;
-            error = reader.Unsigned(value) && value == ERROR_SUCCESS;
-        }
-        else
-        {
-            return false;
-        }
-        if (reader.Consume('}'))
-        {
-            break;
-        }
-        if (!reader.Consume(','))
-        {
-            return false;
-        }
-    }
-    if (!(reader.End() && version && responseId && status && process && reason && error))
+            return process;
+        });
+    if (!parsed || !process)
     {
         processId = 0;
         return false;
@@ -1044,67 +979,23 @@ bool ParseLaunchExitResponse(
     std::string_view response, std::wstring_view requestId, DWORD& exitCode)
 {
     exitCode = 0;
-    JsonReader reader(response);
-    if (!reader.Consume('{'))
-    {
-        return false;
-    }
-    bool version = false;
-    bool responseId = false;
-    bool status = false;
     bool exit = false;
-    bool reason = false;
-    bool error = false;
-    for (;;)
-    {
-        std::wstring name;
-        if (!reader.String(name) || !reader.Consume(':'))
+    const bool parsed = ParseResponse(response,
+        requestId,
+        L"ok",
+        L"exited",
+        ERROR_SUCCESS,
+        nullptr,
+        [&exitCode, &exit](std::wstring_view name, JsonReader& reader)
         {
-            return false;
-        }
-        if (name == L"version" && !version)
-        {
-            DWORD value = 0;
-            version = reader.Unsigned(value) && value == 1;
-        }
-        else if (name == L"requestId" && !responseId)
-        {
-            std::wstring value;
-            responseId = reader.String(value) && value == requestId;
-        }
-        else if (name == L"status" && !status)
-        {
-            std::wstring value;
-            status = reader.String(value) && value == L"ok";
-        }
-        else if (name == L"exitCode" && !exit)
-        {
+            if (name != L"exitCode" || exit)
+            {
+                return false;
+            }
             exit = reader.Unsigned(exitCode);
-        }
-        else if (name == L"reasonCode" && !reason)
-        {
-            std::wstring value;
-            reason = reader.String(value) && value == L"exited";
-        }
-        else if (name == L"win32Error" && !error)
-        {
-            DWORD value = 0;
-            error = reader.Unsigned(value) && value == ERROR_SUCCESS;
-        }
-        else
-        {
-            return false;
-        }
-        if (reader.Consume('}'))
-        {
-            break;
-        }
-        if (!reader.Consume(','))
-        {
-            return false;
-        }
-    }
-    if (!(reader.End() && version && responseId && status && exit && reason && error))
+            return exit;
+        });
+    if (!parsed || !exit)
     {
         exitCode = 0;
         return false;
@@ -1130,73 +1021,30 @@ bool ParseLaunchHostFailureResponse(std::string_view response, std::wstring_view
 {
     hostExitCode = 0;
     diagnostics.clear();
-    JsonReader reader(response);
-    if (!reader.Consume('{'))
-    {
-        return false;
-    }
-    bool version = false;
-    bool responseId = false;
-    bool status = false;
     bool hostExit = false;
     bool diagnostic = false;
-    bool reason = false;
-    bool error = false;
-    for (;;)
-    {
-        std::wstring name;
-        if (!reader.String(name) || !reader.Consume(':'))
+    const bool parsed = ParseResponse(response,
+        requestId,
+        L"error",
+        L"host_failed",
+        ERROR_GEN_FAILURE,
+        nullptr,
+        [&hostExitCode, &hostExit, &diagnostics, &diagnostic](
+            std::wstring_view name, JsonReader& reader)
         {
+            if (name == L"hostExitCode" && !hostExit)
+            {
+                hostExit = reader.Unsigned(hostExitCode);
+                return hostExit;
+            }
+            if (name == L"diagnostic" && !diagnostic)
+            {
+                diagnostic = reader.String(diagnostics);
+                return diagnostic;
+            }
             return false;
-        }
-        if (name == L"version" && !version)
-        {
-            DWORD value = 0;
-            version = reader.Unsigned(value) && value == 1;
-        }
-        else if (name == L"requestId" && !responseId)
-        {
-            std::wstring value;
-            responseId = reader.String(value) && value == requestId;
-        }
-        else if (name == L"status" && !status)
-        {
-            std::wstring value;
-            status = reader.String(value) && value == L"error";
-        }
-        else if (name == L"hostExitCode" && !hostExit)
-        {
-            hostExit = reader.Unsigned(hostExitCode);
-        }
-        else if (name == L"diagnostic" && !diagnostic)
-        {
-            diagnostic = reader.String(diagnostics);
-        }
-        else if (name == L"reasonCode" && !reason)
-        {
-            std::wstring value;
-            reason = reader.String(value) && value == L"host_failed";
-        }
-        else if (name == L"win32Error" && !error)
-        {
-            DWORD value = 0;
-            error = reader.Unsigned(value) && value == ERROR_GEN_FAILURE;
-        }
-        else
-        {
-            return false;
-        }
-        if (reader.Consume('}'))
-        {
-            break;
-        }
-        if (!reader.Consume(','))
-        {
-            return false;
-        }
-    }
-    if (!(reader.End() && version && responseId && status && hostExit && diagnostic && reason &&
-            error))
+        });
+    if (!parsed || !hostExit || !diagnostic)
     {
         hostExitCode = 0;
         diagnostics.clear();

@@ -53,6 +53,44 @@ class UniqueHandle final
     HANDLE value_ = nullptr;
 };
 
+template <typename T> class LocalAllocation final
+{
+  public:
+    explicit LocalAllocation(T value = nullptr) noexcept : value_(value) {}
+    ~LocalAllocation() { reset(); }
+
+    LocalAllocation(const LocalAllocation&) = delete;
+    LocalAllocation& operator=(const LocalAllocation&) = delete;
+
+    LocalAllocation(LocalAllocation&& other) noexcept : value_(std::exchange(other.value_, nullptr))
+    {
+    }
+
+    LocalAllocation& operator=(LocalAllocation&& other) noexcept
+    {
+        if (this != &other)
+        {
+            reset(std::exchange(other.value_, nullptr));
+        }
+        return *this;
+    }
+
+    [[nodiscard]] T get() const noexcept { return value_; }
+    [[nodiscard]] T* address() noexcept { return &value_; }
+
+    void reset(T value = nullptr) noexcept
+    {
+        if (value_ != nullptr)
+        {
+            LocalFree(value_);
+        }
+        value_ = value;
+    }
+
+  private:
+    T value_ = nullptr;
+};
+
 [[nodiscard]] std::wstring FormatWindowsError(DWORD error);
 
 } // namespace launch_as

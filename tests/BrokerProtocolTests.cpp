@@ -4,6 +4,7 @@
 
 #include "BrokerProtocol.h"
 #include "TestSupport.h"
+#include "Utf8.h"
 
 #include <array>
 #include <iostream>
@@ -163,6 +164,22 @@ int wmain()
                     launch_as::broker::RequestOperationFailureReason(
                         launch_as::broker::RequestOperation::TakeOver) == "takeover_failed",
             L"Management operation reasons are not centralized."))
+    {
+        return 1;
+    }
+
+    std::string encodedString;
+    launch_as::broker::AppendJsonString(
+        encodedString, L"quote \" backslash \\ newline\n café \U0001F680");
+    if (!Expect(encodedString ==
+                    "\"quote \\\" backslash \\\\ newline\\u000A caf\\u00E9 \\uD83D\\uDE80\"",
+            L"JSON string encoding is not stable."))
+    {
+        return 1;
+    }
+    std::string utf8;
+    if (!Expect(!launch_as::WideToUtf8(std::wstring(1, L'\xD800'), utf8),
+            L"UTF-8 conversion accepted an unpaired UTF-16 surrogate."))
     {
         return 1;
     }

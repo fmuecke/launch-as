@@ -4,6 +4,8 @@
 
 #include "BrokerProtocol.h"
 
+#include "Utf8.h"
+
 #include <Lmcons.h>
 #include <Windows.h>
 #include <algorithm>
@@ -58,7 +60,7 @@ class JsonReader final
             const char character = input_[position_++];
             if (character == '"')
             {
-                return Utf8ToWide(utf8, output);
+                return launch_as::Utf8ToWide(utf8, output);
             }
             if (static_cast<unsigned char>(character) < 0x20)
             {
@@ -186,7 +188,7 @@ class JsonReader final
         {
             return false;
         }
-        AppendUtf8(value, output);
+        AppendUtf8CodePoint(value, output);
         return true;
     }
 
@@ -221,7 +223,7 @@ class JsonReader final
         return true;
     }
 
-    static void AppendUtf8(unsigned int codePoint, std::string& output)
+    static void AppendUtf8CodePoint(unsigned int codePoint, std::string& output)
     {
         if (codePoint < 0x80)
         {
@@ -245,31 +247,6 @@ class JsonReader final
             output.push_back(static_cast<char>(0x80 | ((codePoint >> 6) & 0x3F)));
             output.push_back(static_cast<char>(0x80 | (codePoint & 0x3F)));
         }
-    }
-
-    static bool Utf8ToWide(const std::string& input, std::wstring& output)
-    {
-        if (input.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
-        {
-            return false;
-        }
-        const int length = MultiByteToWideChar(CP_UTF8,
-            MB_ERR_INVALID_CHARS,
-            input.data(),
-            static_cast<int>(input.size()),
-            nullptr,
-            0);
-        if (length == 0 && !input.empty())
-        {
-            return false;
-        }
-        output.resize(static_cast<std::size_t>(length));
-        return length == 0 || MultiByteToWideChar(CP_UTF8,
-                                  MB_ERR_INVALID_CHARS,
-                                  input.data(),
-                                  static_cast<int>(input.size()),
-                                  output.data(),
-                                  length) == length;
     }
 
     std::string_view input_;
@@ -516,7 +493,7 @@ template <typename ParseAdditionalField>
     }
 }
 
-void AppendJsonString(std::string& output, std::wstring_view value)
+void AppendJsonStringImpl(std::string& output, std::wstring_view value)
 {
     output.push_back('"');
     for (const wchar_t character : value)
@@ -544,6 +521,11 @@ void AppendJsonString(std::string& output, std::wstring_view value)
 }
 
 } // namespace
+
+void AppendJsonString(std::string& output, std::wstring_view value)
+{
+    AppendJsonStringImpl(output, value);
+}
 
 std::wstring_view RequestOperationName(RequestOperation operation) noexcept
 {

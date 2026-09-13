@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Project: https://github.com/fmuecke/launch-as
 
+#include "Utf8.h"
+
 #include <Windows.h>
 #include <cstdlib>
 #include <cwchar>
@@ -177,29 +179,8 @@ BOOL CALLBACK FindExpectedWindow(HWND window, LPARAM value)
         return createError;
     }
 
-    const int bytes = WideCharToMultiByte(CP_UTF8,
-        WC_ERR_INVALID_CHARS,
-        report.data(),
-        static_cast<int>(report.size()),
-        nullptr,
-        0,
-        nullptr,
-        nullptr);
-    if (bytes <= 0)
-    {
-        const DWORD conversionError = GetLastError();
-        CloseHandle(file);
-        return conversionError;
-    }
-    std::vector<char> utf8(static_cast<std::size_t>(bytes));
-    if (WideCharToMultiByte(CP_UTF8,
-            WC_ERR_INVALID_CHARS,
-            report.data(),
-            static_cast<int>(report.size()),
-            utf8.data(),
-            bytes,
-            nullptr,
-            nullptr) != bytes)
+    std::string utf8;
+    if (!launch_as::WideToUtf8(report, utf8))
     {
         const DWORD conversionError = GetLastError();
         CloseHandle(file);

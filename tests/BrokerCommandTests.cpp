@@ -6,6 +6,7 @@
 #include "BrokerPipeServer.h"
 #include "BrokerProtocol.h"
 #include "TestSupport.h"
+#include "Utf8.h"
 #include "Win32Support.h"
 
 #include <Windows.h>
@@ -141,17 +142,9 @@ struct CommandResult
         result.exitCode = GetLastError();
         return result;
     }
-    const int characters =
-        MultiByteToWideChar(CP_UTF8, 0, output.data(), static_cast<int>(bytesRead), nullptr, 0);
-    if (characters > 0)
+    if (!launch_as::Utf8ToWide(std::string_view(output.data(), bytesRead), result.output))
     {
-        result.output.resize(static_cast<std::size_t>(characters));
-        MultiByteToWideChar(CP_UTF8,
-            0,
-            output.data(),
-            static_cast<int>(bytesRead),
-            result.output.data(),
-            characters);
+        result.exitCode = ERROR_INVALID_DATA;
     }
     return result;
 }

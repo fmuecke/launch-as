@@ -14,40 +14,6 @@
 namespace
 {
 
-class TemporaryDirectory final
-{
-  public:
-    TemporaryDirectory()
-    {
-        std::array<wchar_t, MAX_PATH> temporaryPath {};
-        const DWORD length =
-            GetTempPathW(static_cast<DWORD>(temporaryPath.size()), temporaryPath.data());
-        if (length == 0 || length >= temporaryPath.size())
-        {
-            return;
-        }
-        path_ = std::wstring(temporaryPath.data(), length) + L"launch-as-caller-policy-" +
-                std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount());
-        created_ = CreateDirectoryW(path_.c_str(), nullptr) != FALSE;
-    }
-
-    ~TemporaryDirectory()
-    {
-        if (created_)
-        {
-            DeleteFileW(PolicyPath().c_str());
-            RemoveDirectoryW(path_.c_str());
-        }
-    }
-
-    [[nodiscard]] bool created() const noexcept { return created_; }
-    [[nodiscard]] std::wstring PolicyPath() const { return path_ + L"\\caller.sid"; }
-
-  private:
-    std::wstring path_;
-    bool created_ = false;
-};
-
 [[nodiscard]] DWORD GetCurrentUserSid(std::vector<BYTE>& sid)
 {
     sid.clear();
@@ -94,28 +60,28 @@ class TemporaryDirectory final
 
 int wmain()
 {
-    TemporaryDirectory directory;
+    launch_as::test::TemporaryDirectory directory;
     if (!Expect(directory.created(), L"Could not create the disposable policy directory."))
     {
         return 1;
     }
 
+    const std::wstring policyPath = (directory.path() / L"caller.sid").native();
     std::vector<BYTE> currentUserSid;
     if (!Expect(GetCurrentUserSid(currentUserSid) == ERROR_SUCCESS,
             L"Could not resolve the current user SID."))
     {
         return 1;
     }
-    if (!Expect(launch_as::broker::StoreAuthorizedCallerSid(
-                    directory.PolicyPath(), currentUserSid.data()) == ERROR_SUCCESS,
+    if (!Expect(launch_as::broker::StoreAuthorizedCallerSid(policyPath, currentUserSid.data()) ==
+                    ERROR_SUCCESS,
             L"Could not store the authorised caller SID."))
     {
         return 1;
     }
 
     std::vector<BYTE> storedSid;
-    if (!Expect(launch_as::broker::LoadAuthorizedCallerSid(directory.PolicyPath(), storedSid) ==
-                    ERROR_SUCCESS,
+    if (!Expect(launch_as::broker::LoadAuthorizedCallerSid(policyPath, storedSid) == ERROR_SUCCESS,
             L"Could not load the authorised caller SID."))
     {
         return 1;

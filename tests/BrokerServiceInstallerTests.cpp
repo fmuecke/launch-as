@@ -69,23 +69,6 @@ class TestService final
     std::wstring name_;
 };
 
-class TemporaryDirectory final
-{
-  public:
-    explicit TemporaryDirectory(std::filesystem::path path) : path_(std::move(path)) {}
-
-    ~TemporaryDirectory()
-    {
-        std::error_code error;
-        std::filesystem::remove_all(path_, error);
-    }
-
-    [[nodiscard]] const std::filesystem::path& path() const noexcept { return path_; }
-
-  private:
-    std::filesystem::path path_;
-};
-
 [[nodiscard]] bool IsCurrentProcessElevated()
 {
     HANDLE rawToken = nullptr;
@@ -232,20 +215,12 @@ class TemporaryDirectory final
 
 [[nodiscard]] bool VerifyInstallFilesAreRemoved()
 {
-    std::array<wchar_t, MAX_PATH> temporaryPath {};
-    if (GetTempPathW(static_cast<DWORD>(temporaryPath.size()), temporaryPath.data()) == 0)
-    {
-        std::wcerr << L"Could not find a temporary directory.\n";
-        return false;
-    }
-    std::array<wchar_t, MAX_PATH> uniquePath {};
-    if (GetTempFileNameW(temporaryPath.data(), L"las", 0, uniquePath.data()) == 0 ||
-        !DeleteFileW(uniquePath.data()) || !CreateDirectoryW(uniquePath.data(), nullptr))
+    launch_as::test::TemporaryDirectory directory;
+    if (!directory.created())
     {
         std::wcerr << L"Could not create a temporary install directory.\n";
         return false;
     }
-    const TemporaryDirectory directory(uniquePath.data());
     const std::filesystem::path broker = directory.path() / L"launch-as-broker.exe";
     const std::filesystem::path conhost = directory.path() / L"launch-as-conhost.exe";
     if (!CreateEmptyFile(broker) || !CreateEmptyFile(conhost))

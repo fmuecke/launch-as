@@ -5,6 +5,7 @@
 #include "BrokerProcessLauncher.h"
 
 #include "PseudoConsoleHostReport.h"
+#include "Utf8.h"
 #include "WindowsCommandLine.h"
 
 #include <algorithm>
@@ -430,28 +431,9 @@ bool BrokerChildProcess::ReadPseudoConsoleHostResult(
     }
     if (!diagnosticBytes.empty())
     {
-        const int characters = MultiByteToWideChar(CP_UTF8,
-            MB_ERR_INVALID_CHARS,
-            diagnosticBytes.data(),
-            static_cast<int>(diagnosticBytes.size()),
-            nullptr,
-            0);
-        if (characters <= 0)
+        if (!Utf8ToWide(diagnosticBytes, diagnostics))
         {
             diagnostics = L"The console host emitted invalid UTF-8 diagnostics.";
-        }
-        else
-        {
-            diagnostics.resize(static_cast<std::size_t>(characters));
-            if (MultiByteToWideChar(CP_UTF8,
-                    MB_ERR_INVALID_CHARS,
-                    diagnosticBytes.data(),
-                    static_cast<int>(diagnosticBytes.size()),
-                    diagnostics.data(),
-                    characters) != characters)
-            {
-                diagnostics = L"The console host emitted invalid UTF-8 diagnostics.";
-            }
         }
     }
     if (bytesRead != sizeof(report) || report.magic != PseudoConsoleHostExitReportMagic)

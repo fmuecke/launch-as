@@ -17,41 +17,6 @@
 namespace
 {
 
-class TemporaryDirectory final
-{
-  public:
-    TemporaryDirectory()
-    {
-        std::array<wchar_t, MAX_PATH> temporaryPath {};
-        const DWORD length =
-            GetTempPathW(static_cast<DWORD>(temporaryPath.size()), temporaryPath.data());
-        if (length == 0 || length >= temporaryPath.size())
-        {
-            return;
-        }
-        path_ = std::wstring(temporaryPath.data(), length) + L"launch-as-data-root-" +
-                std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount());
-        created_ = CreateDirectoryW(path_.c_str(), nullptr) != FALSE;
-    }
-
-    ~TemporaryDirectory()
-    {
-        if (created_)
-        {
-            RemoveDirectoryW((path_ + L"\\credentials").c_str());
-            RemoveDirectoryW(path_.c_str());
-        }
-    }
-
-    [[nodiscard]] bool created() const noexcept { return created_; }
-    [[nodiscard]] const std::wstring& path() const noexcept { return path_; }
-    [[nodiscard]] std::wstring CredentialDirectory() const { return path_ + L"\\credentials"; }
-
-  private:
-    std::wstring path_;
-    bool created_ = false;
-};
-
 class ScopedEnvironmentVariable final
 {
   public:
@@ -253,12 +218,12 @@ class ScopedEnvironmentVariable final
 
 int wmain()
 {
-    TemporaryDirectory directory;
+    launch_as::test::TemporaryDirectory directory;
     if (!Expect(directory.created(), L"Could not create the disposable data root."))
     {
         return 1;
     }
-    const std::wstring credentialDirectory = directory.CredentialDirectory();
+    const std::wstring credentialDirectory = (directory.path() / L"credentials").native();
     const bool freshCreationOk =
         Expect(launch_as::broker::CreateSecureDirectory(credentialDirectory) == ERROR_SUCCESS,
             L"Could not create the secure credential directory.") &&
@@ -268,7 +233,7 @@ int wmain()
     // A directory the caller itself already owns (i.e. a standard user pre-created it before the
     // broker ever ran) must never be adopted, even though NTFS ownership would let the owner
     // re-grant themselves access no matter what DACL gets stamped on top of it afterwards.
-    const std::wstring untrustedOwnerDirectory = directory.path() + L"\\untrusted-owner";
+    const std::wstring untrustedOwnerDirectory = (directory.path() / L"untrusted-owner").native();
     const bool untrustedOwnerRejected =
         Expect(CreateDirectoryW(untrustedOwnerDirectory.c_str(), nullptr) != FALSE,
             L"Could not pre-create the untrusted-owner directory fixture.") &&
@@ -278,9 +243,9 @@ int wmain()
 
     // A pre-existing reparse point must be rejected outright: SetFileSecurityW follows reparse
     // points, so adopting one would let an attacker redirect the DACL stamp anywhere.
-    const std::wstring junctionDirectory = directory.path() + L"\\reparse-point";
+    const std::wstring junctionDirectory = (directory.path() / L"reparse-point").native();
     const bool reparsePointRejected =
-        Expect(CreateDirectoryJunction(junctionDirectory, directory.path()),
+        Expect(CreateDirectoryJunction(junctionDirectory, directory.path().native()),
             L"Could not pre-create the reparse-point directory fixture.") &&
         Expect(launch_as::broker::CreateSecureDirectory(junctionDirectory) != ERROR_SUCCESS,
             L"CreateSecureDirectory followed a reparse point instead of rejecting it.");
@@ -293,7 +258,7 @@ int wmain()
         SUCCEEDED(knownFolderResult) ? std::wstring(programData) + L"\\launch-as" : L"";
     CoTaskMemFree(programData);
     ScopedEnvironmentVariable programDataOverride(L"ProgramData");
-    const std::wstring poisonedProgramData = directory.path() + L"\\poisoned-program-data";
+    const std::wstring poisonedProgramData = (directory.path() / L"poisoned-program-data").native();
     const bool environmentOverridden =
         SetEnvironmentVariableW(L"ProgramData", poisonedProgramData.c_str()) != FALSE;
     std::wstring resolvedBrokerDirectory;

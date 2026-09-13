@@ -15,49 +15,6 @@
 namespace
 {
 
-class TemporaryDirectory final
-{
-  public:
-    TemporaryDirectory()
-    {
-        std::array<wchar_t, MAX_PATH> temporaryPath {};
-        const DWORD pathLength =
-            GetTempPathW(static_cast<DWORD>(temporaryPath.size()), temporaryPath.data());
-        if (pathLength == 0 || pathLength >= temporaryPath.size())
-        {
-            return;
-        }
-        std::array<wchar_t, MAX_PATH> uniquePath {};
-        if (GetTempFileNameW(temporaryPath.data(), L"las", 0, uniquePath.data()) == 0 ||
-            !DeleteFileW(uniquePath.data()) || !CreateDirectoryW(uniquePath.data(), nullptr))
-        {
-            return;
-        }
-        path_ = uniquePath.data();
-    }
-
-    ~TemporaryDirectory()
-    {
-        for (const wchar_t* fileName :
-            {L"First.enrollment",
-                L"Legacy.enrollment",
-                L"Second.enrollment",
-                L"Corrupt.enrollment",
-                L"Tampered.enrollment",
-                L"enrollment.key"})
-        {
-            DeleteFileW((path_ + L"\\" + fileName).c_str());
-        }
-        RemoveDirectoryW(path_.c_str());
-    }
-
-    [[nodiscard]] bool created() const noexcept { return !path_.empty(); }
-    [[nodiscard]] const std::wstring& path() const noexcept { return path_; }
-
-  private:
-    std::wstring path_;
-};
-
 [[nodiscard]] bool CreateEmptyFile(std::wstring_view path)
 {
     const std::wstring filePath(path);
@@ -242,7 +199,7 @@ struct LegacyRecordHeader
 
 int wmain()
 {
-    TemporaryDirectory directory;
+    launch_as::test::TemporaryDirectory directory;
     std::vector<BYTE> accountSid;
     if (!Expect(directory.created(), L"Could not create the temporary enrollment directory.") ||
         !Expect(CreateBuiltinUsersSid(accountSid), L"Could not create a test SID."))
@@ -250,7 +207,7 @@ int wmain()
         return 1;
     }
 
-    launch_as::broker::EnrollmentStore store(directory.path());
+    launch_as::broker::EnrollmentStore store(directory.path().native());
     std::vector<BYTE> loadedSid;
     launch_as::broker::EnrollmentRecord loadedRecord;
     std::vector<std::wstring> accounts;
@@ -262,7 +219,7 @@ int wmain()
                     !loadedRecord.brokerManaged &&
                     EqualSid(accountSid.data(), loadedRecord.accountSid.data()) != FALSE,
             L"Stored external enrollment did not retain its SID and ownership.") ||
-        !Expect(WriteLegacyEnrollmentRecord(directory.path(), accountSid),
+        !Expect(WriteLegacyEnrollmentRecord(directory.path().native(), accountSid),
             L"Could not write an authenticated legacy enrollment record.") ||
         !Expect(store.Load(L"Legacy", loadedRecord) == ERROR_SUCCESS &&
                     !loadedRecord.brokerManaged &&
@@ -273,7 +230,7 @@ int wmain()
             L"Enrollment list was not complete and sorted.") ||
         !Expect(store.Store(L"bad/name", accountSid) == ERROR_INVALID_PARAMETER,
             L"Enrollment store accepted an invalid account name.") ||
-        !Expect(CreateEmptyFile(directory.path() + L"\\Corrupt.enrollment"),
+        !Expect(CreateEmptyFile((directory.path() / L"Corrupt.enrollment").native()),
             L"Could not create a corrupt enrollment record.") ||
         !Expect(store.Load(L"Corrupt", loadedSid) == ERROR_HANDLE_EOF,
             L"Enrollment store accepted a truncated record.") ||
@@ -282,7 +239,7 @@ int wmain()
         !Expect(
             store.Load(L"Tampered", loadedRecord) == ERROR_SUCCESS && loadedRecord.brokerManaged,
             L"Stored broker-managed enrollment did not retain its ownership.") ||
-        !Expect(FlipLastByte(directory.path() + L"\\Tampered.enrollment"),
+        !Expect(FlipLastByte((directory.path() / L"Tampered.enrollment").native()),
             L"Could not tamper with the stored enrollment record.") ||
         !Expect(store.Load(L"Tampered", loadedSid) != ERROR_SUCCESS,
             L"Enrollment store accepted a tampered record."))

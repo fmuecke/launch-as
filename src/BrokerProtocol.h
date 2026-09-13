@@ -47,6 +47,7 @@ enum class RequestOperation
 [[nodiscard]] bool IsValidProfileId(std::wstring_view value) noexcept;
 [[nodiscard]] std::string_view RequestOperationSuccessReason(RequestOperation operation) noexcept;
 [[nodiscard]] std::string_view RequestOperationFailureReason(RequestOperation operation) noexcept;
+void AppendJsonString(std::string& output, std::wstring_view value);
 
 struct BrokerRequest
 {

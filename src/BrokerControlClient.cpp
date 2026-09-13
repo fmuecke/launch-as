@@ -6,6 +6,7 @@
 
 #include "BrokerControlPipe.h"
 #include "BrokerProtocol.h"
+#include "Utf8.h"
 
 #include <Windows.h>
 #include <array>
@@ -19,60 +20,14 @@ namespace launch_as
 namespace
 {
 
-[[nodiscard]] bool AppendUtf8(std::wstring_view value, std::string& output)
+[[nodiscard]] bool AppendValidatedJsonString(std::wstring_view value, std::string& output)
 {
-    const int characterCount = WideCharToMultiByte(CP_UTF8,
-        WC_ERR_INVALID_CHARS,
-        value.data(),
-        static_cast<int>(value.size()),
-        nullptr,
-        0,
-        nullptr,
-        nullptr);
-    if (characterCount <= 0)
+    std::string validation;
+    if (!WideToUtf8(value, validation))
     {
         return false;
     }
-    const std::size_t start = output.size();
-    output.resize(start + static_cast<std::size_t>(characterCount));
-    return WideCharToMultiByte(CP_UTF8,
-               WC_ERR_INVALID_CHARS,
-               value.data(),
-               static_cast<int>(value.size()),
-               output.data() + start,
-               characterCount,
-               nullptr,
-               nullptr) == characterCount;
-}
-
-[[nodiscard]] bool AppendJsonString(std::wstring_view value, std::string& output)
-{
-    std::string utf8;
-    if (!AppendUtf8(value, utf8))
-    {
-        return false;
-    }
-    output.push_back('"');
-    for (const unsigned char character : utf8)
-    {
-        if (character == '"' || character == '\\')
-        {
-            output.push_back('\\');
-            output.push_back(static_cast<char>(character));
-        }
-        else if (character < 0x20)
-        {
-            constexpr char hexadecimal[] = "0123456789ABCDEF";
-            output += "\\u00";
-            output.push_back(hexadecimal[(character >> 4) & 0xF]);
-            output.push_back(hexadecimal[character & 0xF]);
-        }
-        else
-        {
-            output.push_back(static_cast<char>(character));
-        }
-    }
-    output.push_back('"');
+    broker::AppendJsonString(output, value);
     return true;
 }
 
@@ -86,12 +41,12 @@ namespace
         return false;
     }
     request = "{\"version\":1,\"requestId\":";
-    if (!AppendJsonString(requestId, request))
+    if (!AppendValidatedJsonString(requestId, request))
     {
         return false;
     }
     request += ",\"operation\":\"launch\",\"profileId\":";
-    if (!AppendJsonString(profileId, request))
+    if (!AppendValidatedJsonString(profileId, request))
     {
         return false;
     }
@@ -102,28 +57,28 @@ namespace
         {
             request.push_back(',');
         }
-        if (!AppendJsonString(arguments[index], request))
+        if (!AppendValidatedJsonString(arguments[index], request))
         {
             return false;
         }
     }
     request += "],\"workingDirectory\":";
-    if (!AppendJsonString(workingDirectory, request))
+    if (!AppendValidatedJsonString(workingDirectory, request))
     {
         return false;
     }
     request += ",\"console\":{\"pipeIn\":";
-    if (!AppendJsonString(pipes.input, request))
+    if (!AppendValidatedJsonString(pipes.input, request))
     {
         return false;
     }
     request += ",\"pipeOut\":";
-    if (!AppendJsonString(pipes.output, request))
+    if (!AppendValidatedJsonString(pipes.output, request))
     {
         return false;
     }
     request += ",\"pipeResize\":";
-    if (!AppendJsonString(pipes.resize, request))
+    if (!AppendValidatedJsonString(pipes.resize, request))
     {
         return false;
     }

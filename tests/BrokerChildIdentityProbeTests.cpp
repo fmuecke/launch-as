@@ -3,6 +3,7 @@
 // Project: https://github.com/fmuecke/launch-as
 
 #include "TestSupport.h"
+#include "Utf8.h"
 #include "Win32Support.h"
 #include "WindowsCommandLine.h"
 
@@ -190,21 +191,10 @@ class TemporaryReport final
         return false;
     }
 
-    const int characters = MultiByteToWideChar(
-        CP_UTF8, MB_ERR_INVALID_CHARS, utf8.data(), static_cast<int>(utf8.size()), nullptr, 0);
-    if (!Expect(characters > 0, L"The identity report is not valid UTF-8."))
+    std::wstring text;
+    if (!Expect(launch_as::Utf8ToWide(std::string_view(utf8.data(), utf8.size()), text),
+            L"The identity report is not valid UTF-8."))
     {
-        return false;
-    }
-    std::wstring text(static_cast<std::size_t>(characters), L'\0');
-    if (MultiByteToWideChar(CP_UTF8,
-            MB_ERR_INVALID_CHARS,
-            utf8.data(),
-            static_cast<int>(utf8.size()),
-            text.data(),
-            characters) != characters)
-    {
-        std::wcerr << L"Could not decode the identity report.\n";
         return false;
     }
 

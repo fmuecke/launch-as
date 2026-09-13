@@ -565,7 +565,7 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
     add_executable(LauncherBrokerChildIdentityProbe
         tests/BrokerChildIdentityProbe.cpp
     )
-    configure_launch_as_target(LauncherBrokerChildIdentityProbe)
+    configure_launch_as_target(LauncherBrokerChildIdentityProbe "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
     add_executable(LauncherBrokerChildIdentityProbeTests
         tests/BrokerChildIdentityProbeTests.cpp

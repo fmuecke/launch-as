@@ -3,6 +3,7 @@
 // Project: https://github.com/fmuecke/launch-as
 
 #include "CommandLineTestArguments.h"
+#include "Win32Support.h"
 #include "WindowsCommandLine.h"
 
 #include <Windows.h>
@@ -18,28 +19,6 @@ namespace
 {
 
 constexpr DWORD ProbeTimeoutMilliseconds = 10'000;
-
-class UniqueHandle
-{
-  public:
-    explicit UniqueHandle(HANDLE value = nullptr) noexcept : value_(value) {}
-
-    ~UniqueHandle()
-    {
-        if (value_ != nullptr && value_ != INVALID_HANDLE_VALUE)
-        {
-            CloseHandle(value_);
-        }
-    }
-
-    UniqueHandle(const UniqueHandle&) = delete;
-    UniqueHandle& operator=(const UniqueHandle&) = delete;
-
-    [[nodiscard]] HANDLE get() const noexcept { return value_; }
-
-  private:
-    HANDLE value_;
-};
 
 [[nodiscard]] bool ExpectEqual(
     std::wstring_view actual, std::wstring_view expected, std::wstring_view name)
@@ -138,8 +117,8 @@ int wmain(int argc, wchar_t* argv[])
         return 1;
     }
 
-    UniqueHandle process(processInfo.hProcess);
-    UniqueHandle thread(processInfo.hThread);
+    launch_as::UniqueHandle process(processInfo.hProcess);
+    launch_as::UniqueHandle thread(processInfo.hThread);
     const DWORD waitResult = WaitForSingleObject(process.get(), ProbeTimeoutMilliseconds);
     if (waitResult == WAIT_TIMEOUT)
     {

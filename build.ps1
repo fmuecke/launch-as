@@ -25,6 +25,9 @@ param(
     [switch] $RunAcceptanceTest,
 
     [Parameter()]
+    [switch] $PackageRelease,
+
+    [Parameter()]
     [string] $TargetUser = "LaunchAsUser"
 )
 
@@ -32,7 +35,51 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = $PSScriptRoot
-$buildDirectory = Join-Path $projectRoot 'out\build'
+$outputDirectory = Join-Path $projectRoot 'out'
+$buildDirectory = Join-Path $outputDirectory 'build'
+$releaseVersion = $null
+$releaseDirectory = $null
+$releaseStagingDirectory = $null
+$releaseArchivePath = $null
+
+function Remove-ManagedOutputDirectory {
+    param([Parameter(Mandatory)][string] $Path)
+
+    $resolvedOutputDirectory = [IO.Path]::GetFullPath($outputDirectory)
+    $resolvedPath = [IO.Path]::GetFullPath($Path)
+    if (-not $resolvedPath.StartsWith($resolvedOutputDirectory + [IO.Path]::DirectorySeparatorChar,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove a directory outside ${resolvedOutputDirectory}: $resolvedPath"
+    }
+    if (Test-Path -LiteralPath $resolvedPath) {
+        Remove-Item -LiteralPath $resolvedPath -Recurse -Force
+    }
+}
+
+function Get-ReleaseVersion {
+    $cmakePath = Join-Path $projectRoot 'CMakeLists.txt'
+    $cmakeText = Get-Content -LiteralPath $cmakePath -Raw
+    $versionMatch = [regex]::Match($cmakeText, '(?ms)project\(.*?VERSION\s+(?<version>\d+\.\d+\.\d+)')
+    if (-not $versionMatch.Success) {
+        throw "Could not determine the project version from $cmakePath."
+    }
+    return "$($versionMatch.Groups['version'].Value)-preview"
+}
+
+if ($PackageRelease) {
+    $releaseVersion = Get-ReleaseVersion
+    $buildDirectory = Join-Path $outputDirectory 'release-build'
+    $releaseDirectory = Join-Path $outputDirectory 'release'
+    $packageName = "launch-as-v$releaseVersion-win64"
+    $releaseStagingDirectory = Join-Path $releaseDirectory $packageName
+    $releaseArchivePath = Join-Path $outputDirectory "$packageName.zip"
+    Remove-ManagedOutputDirectory $buildDirectory
+    Remove-ManagedOutputDirectory $releaseStagingDirectory
+    if (Test-Path -LiteralPath $releaseArchivePath) {
+        Remove-Item -LiteralPath $releaseArchivePath -Force
+    }
+}
+
 $launcherPath = Join-Path `
     $buildDirectory `
     "$Configuration\launch-as.exe"
@@ -231,6 +278,33 @@ if ($RunAcceptanceTest) {
             'tests\Invoke-LauncherAcceptanceTest.ps1') `
         -TargetUser $TargetUser `
         -LauncherPath $launcherPath
+}
+
+if ($PackageRelease) {
+    $null = New-Item -ItemType Directory -Force -Path $releaseStagingDirectory
+    $releaseFiles = @(
+        'launch-as.exe'
+        'launch-as-admin.exe'
+        'launch-as-broker.exe'
+        'launch-as-conhost.exe'
+    )
+    foreach ($releaseFile in $releaseFiles) {
+        $sourcePath = Join-Path $buildDirectory "$Configuration\$releaseFile"
+        if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+            throw "Release build did not produce $sourcePath."
+        }
+        Copy-Item -LiteralPath $sourcePath -Destination $releaseStagingDirectory
+    }
+    foreach ($documentationFile in @('Setup-LaunchAs.ps1', 'README.md', 'CHANGELOG.md', 'LICENSE')) {
+        Copy-Item -LiteralPath (Join-Path $projectRoot $documentationFile) `
+            -Destination $releaseStagingDirectory
+    }
+    $archiveInputs = Get-ChildItem -LiteralPath $releaseStagingDirectory -File |
+    Sort-Object -Property Name |
+    ForEach-Object -MemberName FullName
+    Compress-Archive -Path $archiveInputs -DestinationPath $releaseArchivePath -CompressionLevel Optimal -Force
+    Remove-ManagedOutputDirectory $releaseStagingDirectory
+    Write-Host "Release package ready: $releaseArchivePath"
 }
 
 Write-Host "Launcher ready: $launcherPath"

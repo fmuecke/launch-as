@@ -11,7 +11,7 @@ The current stable version is still v0.3.2. [Browse the stable v0.3.2 version](h
   can obtain `PROCESS_VM_READ` and `PROCESS_TERMINATE`, allowing memory reads and termination.
   Protected processes or processes with custom DACLs may not be accessible.
 
-**1.0.0-preview · Windows x64 · console programs only**
+**1.1.0-preview · Windows x64 · console programs only**
 
 `launch-as` starts a console program as a **launch-as-managed local standard account** through the
 `launch-as-broker` Windows service. The client never accepts, reads, stores, or transmits the
@@ -25,7 +25,7 @@ for this preview.
 
 ## Install the binary package
 
-Extract `launch-as-v1.0.0-preview-win64.zip` and run the bundled setup script from its extracted
+Extract `launch-as-v1.1.0-preview-win64.zip` and run the bundled setup script from its extracted
 directory. It elevates when needed, installs or updates the demand-start service, and can create a
 default account. Updating takes over that account and replaces its broker-owned password. The user
 who runs `install` becomes the broker's authorised caller.
@@ -97,7 +97,11 @@ needed and builds the Ninja Multi-Config Release target by default.
 .\build.ps1 -Configuration Debug
 .\build.ps1 -RunTests
 .\build.ps1 -RunAllTests
+.\build.ps1 -PackageRelease
 ```
+
+`-PackageRelease` performs a clean Release build in `out\release-build` and writes the
+distributable `out\release\launch-as-v<version>-win64.zip` package.
 
 `-RunTests` runs every non-elevated CTest test. `-RunAllTests` adds the tests labelled `elevated`:
 when necessary, it asks for UAC approval and runs only that subset in an elevated child process.
@@ -127,4 +131,4 @@ The `interactive` GUI adapter is deliberately deferred to Phase 2; Phase 1 provi
 ## License
 
 `launch-as` is licensed under the [GNU General Public License version 3 only](LICENSE). Source for
-this preview is available at <https://github.com/fmuecke/launch-as/tree/v1.0.0-preview>.
+this preview is available at <https://github.com/fmuecke/launch-as/tree/v1.1.0-preview>.

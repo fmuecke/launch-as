@@ -436,6 +436,20 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
         LABELS "build;unit"
     )
 
+    add_test(
+        NAME launcher.package_release_contract
+        COMMAND
+            pwsh
+            -NoProfile
+            -File
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Test-PackageReleaseContract.ps1"
+            -Path
+            "${CMAKE_CURRENT_SOURCE_DIR}/build.ps1"
+    )
+    set_tests_properties(launcher.package_release_contract PROPERTIES
+        LABELS "build;unit"
+    )
+
     add_executable(LauncherBrokerPasswordTests
         tests/BrokerPasswordTests.cpp
         src/BrokerPassword.cpp

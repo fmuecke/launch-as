@@ -20,17 +20,6 @@ namespace launch_as
 namespace
 {
 
-[[nodiscard]] bool AppendValidatedJsonString(std::wstring_view value, std::string& output)
-{
-    std::string validation;
-    if (!WideToUtf8(value, validation))
-    {
-        return false;
-    }
-    broker::AppendJsonString(output, value);
-    return true;
-}
-
 [[nodiscard]] bool BuildLaunchRequest(std::wstring_view requestId, std::wstring_view profileId,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
     const TerminalPipeNames& pipes, COORD terminalSize, bool inheritCursor, std::string& request)
@@ -40,16 +29,22 @@ namespace
     {
         return false;
     }
+    if (!IsValidUtf16(requestId) || !IsValidUtf16(profileId) || !IsValidUtf16(workingDirectory) ||
+        !IsValidUtf16(pipes.input) || !IsValidUtf16(pipes.output) || !IsValidUtf16(pipes.resize))
+    {
+        return false;
+    }
+    for (const std::wstring& argument : arguments)
+    {
+        if (!IsValidUtf16(argument))
+        {
+            return false;
+        }
+    }
     request = "{\"version\":1,\"requestId\":";
-    if (!AppendValidatedJsonString(requestId, request))
-    {
-        return false;
-    }
+    broker::AppendJsonString(request, requestId);
     request += ",\"operation\":\"launch\",\"profileId\":";
-    if (!AppendValidatedJsonString(profileId, request))
-    {
-        return false;
-    }
+    broker::AppendJsonString(request, profileId);
     request += ",\"mode\":\"console\",\"arguments\":[";
     for (std::size_t index = 0; index < arguments.size(); ++index)
     {
@@ -57,31 +52,16 @@ namespace
         {
             request.push_back(',');
         }
-        if (!AppendValidatedJsonString(arguments[index], request))
-        {
-            return false;
-        }
+        broker::AppendJsonString(request, arguments[index]);
     }
     request += "],\"workingDirectory\":";
-    if (!AppendValidatedJsonString(workingDirectory, request))
-    {
-        return false;
-    }
+    broker::AppendJsonString(request, workingDirectory);
     request += ",\"console\":{\"pipeIn\":";
-    if (!AppendValidatedJsonString(pipes.input, request))
-    {
-        return false;
-    }
+    broker::AppendJsonString(request, pipes.input);
     request += ",\"pipeOut\":";
-    if (!AppendValidatedJsonString(pipes.output, request))
-    {
-        return false;
-    }
+    broker::AppendJsonString(request, pipes.output);
     request += ",\"pipeResize\":";
-    if (!AppendValidatedJsonString(pipes.resize, request))
-    {
-        return false;
-    }
+    broker::AppendJsonString(request, pipes.resize);
     request += ",\"cols\":" + std::to_string(terminalSize.X) +
                ",\"rows\":" + std::to_string(terminalSize.Y) +
                ",\"inheritCursor\":" + (inheritCursor ? "true" : "false") + "}}";

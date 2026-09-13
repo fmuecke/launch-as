@@ -493,7 +493,9 @@ template <typename ParseAdditionalField>
     }
 }
 
-void AppendJsonStringImpl(std::string& output, std::wstring_view value)
+} // namespace
+
+void AppendJsonString(std::string& output, std::wstring_view value)
 {
     output.push_back('"');
     for (const wchar_t character : value)
@@ -518,13 +520,6 @@ void AppendJsonStringImpl(std::string& output, std::wstring_view value)
         }
     }
     output.push_back('"');
-}
-
-} // namespace
-
-void AppendJsonString(std::string& output, std::wstring_view value)
-{
-    AppendJsonStringImpl(output, value);
 }
 
 std::wstring_view RequestOperationName(RequestOperation operation) noexcept

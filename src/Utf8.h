@@ -12,6 +12,26 @@
 namespace launch_as
 {
 
+[[nodiscard]] inline bool IsValidUtf16(std::wstring_view input)
+{
+    if (input.empty())
+    {
+        return true;
+    }
+    if (input.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+    {
+        return false;
+    }
+    return WideCharToMultiByte(CP_UTF8,
+               WC_ERR_INVALID_CHARS,
+               input.data(),
+               static_cast<int>(input.size()),
+               nullptr,
+               0,
+               nullptr,
+               nullptr) > 0;
+}
+
 [[nodiscard]] inline bool WideToUtf8(std::wstring_view input, std::string& output)
 {
     output.clear();
@@ -19,7 +39,7 @@ namespace launch_as
     {
         return true;
     }
-    if (input.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+    if (!IsValidUtf16(input))
     {
         return false;
     }

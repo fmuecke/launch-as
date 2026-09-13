@@ -177,9 +177,8 @@ int wmain()
     {
         return 1;
     }
-    std::string utf8;
-    if (!Expect(!launch_as::WideToUtf8(std::wstring(1, L'\xD800'), utf8),
-            L"UTF-8 conversion accepted an unpaired UTF-16 surrogate."))
+    if (!Expect(!launch_as::IsValidUtf16(std::wstring(1, L'\xD800')),
+            L"UTF-16 validation accepted an unpaired surrogate."))
     {
         return 1;
     }

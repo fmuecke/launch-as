@@ -349,7 +349,7 @@ int wmain()
         !Expect(launch_as::broker::GenerateBrokerPassword(password) == ERROR_SUCCESS,
             L"Could not generate a disposable password for the missing-account check.") ||
         !Expect(registration.ResetPassword(account.name(), password) != ERROR_SUCCESS,
-            L"Broker password reset recreated a missing enrolled account.") ||
+            L"Broker password reset recreated a missing owned account.") ||
         !Expect(launch_as::broker::CreateBrokerManagedLocalAccount(account.name(), password) ==
                     ERROR_SUCCESS,
             L"Could not recreate the account with its original name."))

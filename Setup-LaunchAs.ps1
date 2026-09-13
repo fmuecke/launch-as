@@ -99,7 +99,7 @@ switch ($choice.ToLowerInvariant()) {
         if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
         }
-        & $admin create --takeover $DefaultAccount
+        & $admin create --takeover $DefaultAccount --force
         exit $LASTEXITCODE
     }
     'uninstall' {

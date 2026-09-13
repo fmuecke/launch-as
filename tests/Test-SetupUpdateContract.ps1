@@ -35,8 +35,8 @@ if ($installFailureIndex -lt $installIndex -or $installFailureIndex -gt $takeove
 if ($takeoverIndex -lt $installIndex) {
     throw 'The setup update branch does not retake over the default account after installation.'
 }
-if ($body -match '& \$admin create --takeover \$DefaultAccount --force') {
-    throw 'The setup update branch must not force-enable a disabled default account.'
+if ($body -notmatch '& \$admin create --takeover \$DefaultAccount --force') {
+    throw 'The setup update branch must force-enable a disabled default account.'
 }
 if ($body -notmatch 'take over default account ''\$DefaultAccount''') {
     throw 'The setup update confirmation does not disclose takeover.'

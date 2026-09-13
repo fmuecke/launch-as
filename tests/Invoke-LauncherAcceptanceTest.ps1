@@ -35,7 +35,7 @@ $administrators = Get-LocalGroup -SID 'S-1-5-32-544'
 $isAdministrator = Get-LocalGroupMember -Group $administrators |
 Where-Object { $_.SID -eq $localUser.SID }
 if ($null -ne $isAdministrator) {
-    throw "Local user '$TargetUser' is an administrator; use an enrolled standard user."
+    throw "Local user '$TargetUser' is an administrator; use a managed standard user."
 }
 
 $resolvedLauncher = Resolve-Path -LiteralPath $LauncherPath
@@ -59,11 +59,11 @@ Write-Host 'Running the installed broker process-access and disconnect checks.'
     -Account $TargetUser `
     -AccessProbePath $accessProbe
 
-Write-Host 'Running two overlapping sessions for the same enrolled account.'
+Write-Host 'Running two overlapping sessions for the same managed account.'
 & $sameAccountConcurrency -Account $TargetUser
 
 Write-Host "`nAcceptance tests passed:"
-Write-Host '  - The broker launched the enrolled standard account through an independent logon session.'
+Write-Host '  - The broker launched the managed standard account through an independent logon session.'
 Write-Host '  - The child token did not contain the interactive user logon SID.'
 Write-Host '  - The child could not enumerate the interactive window or open the caller for VM_READ or TERMINATE.'
 Write-Host '  - The target exit code propagated through the console path.'

@@ -17,7 +17,7 @@ namespace
 
 constexpr wchar_t BrokerServiceDisplayName[] = L"launch-as Broker";
 constexpr wchar_t BrokerServiceDescription[] =
-    L"Launches enrolled accounts in isolated console sessions.";
+    L"Launches managed accounts in isolated console sessions.";
 constexpr std::array<std::wstring_view, 3> BrokerRequiredPrivileges {
     L"SeAssignPrimaryTokenPrivilege",
     L"SeIncreaseQuotaPrivilege",

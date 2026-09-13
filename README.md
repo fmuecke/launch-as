@@ -13,13 +13,13 @@ The current stable version is still v0.3.2. [Browse the stable v0.3.2 version](h
 
 **1.0.0-preview · Windows x64 · console programs only**
 
-`launch-as` starts a console program as an **enrolled local standard account** through the
+`launch-as` starts a console program as a **launch-as-managed local standard account** through the
 `launch-as-broker` Windows service. The client never accepts, reads, stores, or transmits the
 account password. The broker creates an independent logon session, so the child does not inherit
 the caller's logon SID or its default access to the caller's processes.
 
-This is a general-purpose alternate-account launcher: its authorised caller can choose an enrolled
-account and any absolute executable. It is blast-radius reduction, not a sandbox: it does not
+This is a general-purpose alternate-account launcher: its authorised caller can choose a configured
+launch-as-managed account and any absolute executable. It is blast-radius reduction, not a sandbox: it does not
 protect against a local administrator or kernel-level attacker. GUI applications are out of scope
 for this preview.
 
@@ -57,9 +57,10 @@ fails if that name already exists. Use
 make it launch-as-owned. Taking over a disabled account requires `--force` to re-enable it; plain
 `create` has no force switch because it never modifies an existing account.
 
-The broker creates a password for each launch, uses it only to log on, then wipes it. An enrolled
-account supports up to two concurrent sessions; the broker supports four sessions globally.
-Further launches fail immediately. `forget` removes only the launch-as registration. `delete`
+The broker creates a password for each launch, uses it to reset and log on to the account, then
+clears its plaintext copy. A managed account supports up to two concurrent sessions; the broker supports four sessions globally.
+Further launches fail immediately. `forget` stops launch-as from managing the account without
+changing the Windows account. `delete`
 removes a SID-matched owned Windows account after its sessions end; neither command deletes its
 profile directory.
 
@@ -72,7 +73,7 @@ profile directory.
 
 ## Launch
 
-From a normal terminal, launch an enrolled account in the current pane:
+From a normal terminal, launch a configured launch-as-managed account in the current pane:
 
 ```powershell
 .\launch-as.exe `
@@ -102,7 +103,7 @@ needed and builds the Ninja Multi-Config Release target by default.
 when necessary, it asks for UAC approval and runs only that subset in an elevated child process.
 That child window stays open after the elevated tests complete so their output can be inspected.
 The installed-service acceptance checks remain explicit because they require an installed broker,
-an enrolled account, and the authorised non-elevated interactive session:
+a configured launch-as-managed account, and the authorised non-elevated interactive session:
 
 ```powershell
 .\build.ps1 -RunAcceptanceTest
@@ -111,7 +112,7 @@ an enrolled account, and the authorised non-elevated interactive session:
 ```
 
 `-RunAcceptanceTest` uses `LaunchAsUser` by default; pass `-TargetUser <account>` to select another
-enrolled account.
+managed account.
 
 The probe confirms a distinct logon SID, no interactive windows, and denied `VM_READ` and
 `TERMINATE` access to the caller's process. These are blast-radius controls, not protection from a

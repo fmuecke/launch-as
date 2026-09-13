@@ -19,7 +19,7 @@ security residual until separately designed and accepted.
 
 The service provides one narrow operation:
 
-> An authorised interactive user asks the broker to start a program of their choice as an enrolled restricted Windows account, in a chosen session mode.
+> An authorised interactive user asks the broker to start a program of their choice as a configured launch-as-managed Windows account, in a chosen session mode.
 
 The caller never receives, reads, or decrypts the restricted account password, and the resulting child process never carries the interactive user's logon SID.
 
@@ -68,12 +68,12 @@ First version does **not** protect against:
 | Restricted account (local) | `LaunchAsUser` (referenced as `.\LaunchAsUser`) |
 | Default profile id | `LaunchAsUser` |
 | Control pipe | `\\.\pipe\launch-as-broker.v1` |
-| Config + enrollment root | `%ProgramData%\launch-as\` |
-| Enrollment store | `%ProgramData%\launch-as\enrollments\` |
+| Config + internal enrollment-data root | `%ProgramData%\launch-as\` |
+| Internal enrollment store | `%ProgramData%\launch-as\enrollments\` |
 | Service binary | `%ProgramFiles%\launch-as\launch-as-broker.exe` |
 | Console host helper | `%ProgramFiles%\launch-as\launch-as-conhost.exe` (console mode only) |
 
-All config/enrollment/binary paths: ACL `SYSTEM:F`, `Administrators:F`, `Users:RX` (enrollment dir: no `Users` access at all).
+All configuration, internal enrollment-data, and binary paths: ACL `SYSTEM:F`, `Administrators:F`, `Users:RX` (the enrollment directory grants no `Users` access).
 
 ---
 
@@ -109,7 +109,7 @@ All config/enrollment/binary paths: ACL `SYSTEM:F`, `Administrators:F`, `Users:R
         console     → noninteractive station + ConPTY
 ```
 
-**Architectural stance:** the broker is a general-purpose alternate-account launcher for enrolled accounts. The client selects an enrolled account and a mode, then supplies the executable, arguments, and working directory. It cannot read or supply the account password. Per-account execution restrictions are optional future hardening, not a current security boundary.
+**Architectural stance:** the broker is a general-purpose alternate-account launcher for configured launch-as-managed accounts. The client selects a managed account and a mode, then supplies the executable, arguments, and working directory. It cannot read or supply the account password. Per-account execution restrictions are optional future hardening, not a current security boundary.
 
 ---
 
@@ -250,16 +250,16 @@ Responses never contain secrets or internal detail beyond a stable reason code +
 
 ## 9. Profiles and launch policy
 
-Phase 1 accepts multiple enrolled local accounts. The account name is the profile id, all accounts
+Phase 1 accepts multiple configured launch-as-managed local accounts. The account name is the profile id, all accounts
 use the `console` adapter, and the installer authorises one caller SID. The current service checks
-that caller identity and the SID-pinned enrollment record; the client also requires an existing
+that caller identity and the SID-pinned internal configuration record; the client also requires an existing
 absolute executable and working directory. It deliberately accepts the caller's command, arguments,
 and working directory as a general-purpose alternate-account launch.
 
-An enrolled account may have more than one live console session. Sessions for the same account
+A managed account may have more than one live console session. Sessions for the same account
 share its account SID, `%USERPROFILE%`, HKCU hive, caches, and any other account-scoped resources;
 they are cooperating siblings, **not** a security boundary from one another. Sessions for different
-enrolled accounts use different account SIDs, profiles, HKCU hives, and logon sessions. Every launch,
+managed accounts use different account SIDs, profiles, HKCU hives, and logon sessions. Every launch,
 including a sibling launch for the same account, still receives a fresh logon token and logon SID.
 
 A richer profile record that separates launch policy from the Windows account remains a later
@@ -295,7 +295,7 @@ When that profile policy is implemented, it must validate, default-deny:
 
 ## 10. Password model (per launch)
 
-One non-secret enrollment record per profile pins the local account SID under
+One non-secret internal configuration record per profile pins the local account SID under
 `%ProgramData%\launch-as\enrollments\<profileId>.enrollment`. It contains no account password.
 
 - For each launch the service generates a password, sets it with `NetUserSetInfo`, obtains a logon
@@ -330,9 +330,9 @@ maintenance.
 - **`create --takeover <account>`** requires an existing eligible account, resets its
   password, hardens it, and records it as launch-as-owned. A disabled target requires `--force` to
   re-enable it. A same-name account with a different recorded SID also requires `--force`.
-- **`forget <account>`** removes only the SID-pinned registration; it does not change the Windows
+- **`forget <account>`** removes only the SID-pinned account configuration; it does not change the Windows
   account. **`delete <account>`** verifies the managed SID, refuses while that account has a
-  starting or active broker session, deletes the Windows account, and removes its registration. It
+  starting or active broker session, deletes the Windows account, and removes its configuration. It
   does not remove the profile directory or other account-scoped residue.
 
 ---
@@ -340,7 +340,7 @@ maintenance.
 ## 12. Process-creation flow (per accepted launch)
 
 1. authorise (§8, §9), reserve a global and per-account session slot, and count it as `starting`.
-2. under the launch gate, generate and set a fresh password for the enrolled account.
+2. under the launch gate, generate and set a fresh password for the managed account.
 3. `LogonUserW(accountName, ".", pw, LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT, &token)`.
 4. zero the password buffer immediately. The launch gate covers reset through logon and the
    process-wide privilege changes used for process creation.
@@ -405,14 +405,14 @@ operations. Each event includes: requestId, operation, account/profile id, calle
 session id, allow/deny result, resulting PID when applicable, and Win32 error. The Event Log
 adds the timestamp and source identity.
 
-Never log: passwords, enrollment records, full sensitive command lines, secret-bearing env vars, raw tokens. Use the Event Log, not a user-writable text file.
+Never log: passwords, internal account-configuration records, full sensitive command lines, secret-bearing env vars, raw tokens. Use the Event Log, not a user-writable text file.
 
 ---
 
 ## 16. Failure behaviour (fail closed)
 
 Phase 1 fails closed when caller identity cannot be captured or authorised, the request is malformed or
-uses an unsupported mode, the enrollment record does not match, password reset or `LogonUser` fails,
+uses an unsupported mode, the account configuration does not match, password reset or `LogonUser` fails,
 the resulting token is administrative or has the wrong account SID, child logon-SID validation fails,
 or the terminal/job setup fails. Responses return a stable reason code and Win32 error without
 sensitive internals.
@@ -427,11 +427,11 @@ all future handle-validation checks.
 
 1. The child token is created by an **independent `LogonUser`** and never carries the interactive user's logon SID.
 2. Passwords never cross the client↔broker boundary.
-3. The caller chooses an enrolled **profile + console command**, never a password. Phase 1 is
+3. The caller chooses a configured **managed account + console command**, never a password. Phase 1 is
    intentionally a general-purpose launcher; executable allow-listing is not an implemented
    security boundary.
 4. Authorisation is based on the **actual caller token**, not a claimed name.
-5. Config/enrollment changes require a distinct elevated path.
+5. Managed-account configuration changes require a distinct elevated path.
 6. The client validates absolute executable and working-directory paths; the deprivileged console
    host revalidates them before launch. The broker validates only the working directory exists.
    Any future executable or directory restriction must use canonical paths + ACL inspection,
@@ -449,13 +449,13 @@ Credential / authorization:
 
 - an authorised caller can launch the profile; an unauthorised caller cannot connect or launch;
 - neither an interactive-user process nor an agent process can read the active password via any supported interface;
-- authorised callers may launch arbitrary executables through an enrolled account; this is intentional general-purpose behaviour, not an executable-policy bypass;
+- authorised callers may launch arbitrary executables through a managed account; this is intentional general-purpose behaviour, not an executable-policy bypass;
 - passwords never appear in logs, command lines, environment, or IPC captures;
 - killing one client exposes no broker resources and terminates only its session; failed
   impersonation → immediate rejection;
 - two overlapping launches for the same account both succeed, have distinct logon SIDs, and share
   the documented account/profile state; disconnecting either leaves the other running;
-- overlapping launches for different enrolled accounts both succeed and retain distinct account
+- overlapping launches for different managed accounts both succeed and retain distinct account
   SIDs, profiles, HKCU hives, logon SIDs, control connections, and Jobs;
 - the third starting/active launch for one account and the fifth globally fail immediately with
   `session_limit_reached` / `ERROR_BUSY`, without disturbing admitted sessions;
@@ -481,7 +481,7 @@ Credential / authorization:
 ## 19. Phases and implementation order
 
 **Phase 1 — shippable broker + boundary, `console` (ConPTY) mode only:**
-service scaffold (SCM, demand-start, `sc sdset` delegation), bounded multi-session named-pipe IPC with impersonation-based auth, multiple enrolled accounts, SID-pinned enrollment records and per-launch passwords, `LogonUser` + `CreateProcessAsUserW`, Job object, Event Log audit. Ship the **`console` (ConPTY) adapter** on the default noninteractive station, reusing the existing `TerminalBridge`/`PseudoConsoleHost` with the child-creation call moved behind the broker (client owns the terminal and the SID-DACL'd data pipes). This is the daily-driver path for console agents and closes **both** surfaces. It is complete only when the §18 console acceptance checks, including the real installed-console run, pass. Run the §6.1 token-graft probe; its current result retains the `LocalSystem` + `CreateProcessAsUserW` baseline. Client: remove all credential/`CreateProcessWithLogonW` logic; relocate the two token-validation checks into the broker.
+service scaffold (SCM, demand-start, `sc sdset` delegation), bounded multi-session named-pipe IPC with impersonation-based auth, multiple managed accounts, SID-pinned internal configuration records and per-launch passwords, `LogonUser` + `CreateProcessAsUserW`, Job object, Event Log audit. Ship the **`console` (ConPTY) adapter** on the default noninteractive station, reusing the existing `TerminalBridge`/`PseudoConsoleHost` with the child-creation call moved behind the broker (client owns the terminal and the SID-DACL'd data pipes). This is the daily-driver path for console agents and closes **both** surfaces. It is complete only when the §18 console acceptance checks, including the real installed-console run, pass. Run the §6.1 token-graft probe; its current result retains the `LocalSystem` + `CreateProcessAsUserW` baseline. Client: remove all credential/`CreateProcessWithLogonW` logic; relocate the two token-validation checks into the broker.
 
 **Phase n — `interactive` GUI adapter + optional hardened policy:** when GUI support is selected,
 implement the adapter (§7.2): derive and validate the caller's session from the authenticated pipe
@@ -525,7 +525,7 @@ This section is the current contract. It preserves the applicable behavior of th
 pre-broker launcher design; Credential Manager, `register`, `--credential-mode`, direct
 `CreateProcessWithLogonW`, and `--terminal` are not broker interfaces.
 
-- `launch-as.exe [run] --user <enrolled-local-user> [--working-directory <directory>] --
+- `launch-as.exe [run] --user <managed-local-user> [--working-directory <directory>] --
   <absolute-executable> [arguments...]` is the console-launch CLI. `run` is optional. The
   client requires an existing absolute executable and, when supplied, an existing absolute
   working directory; otherwise it uses its current directory. It intentionally exposes no mode
@@ -539,7 +539,7 @@ pre-broker launcher design; Credential Manager, `register`, `--credential-mode`,
   rejected with `mode_not_supported` / `ERROR_NOT_SUPPORTED` (50); missing or unknown modes are
   invalid requests. No Phase-1 process is placed on `WinSta0\\Default` or given access to the
   caller's interactive window station or desktop.
-- The `LocalSystem` service resets a broker-generated password for the SID-pinned enrolled local
+- The `LocalSystem` service resets a broker-generated password for the SID-pinned managed local
   account, calls `LogonUserW(LOGON32_LOGON_INTERACTIVE)`, clears the password buffer, loads the
   user profile/environment, and creates the console host suspended with `CreateProcessAsUserW`.
   Password reset through logon and the process-wide privilege changes used by process creation are

@@ -54,7 +54,7 @@ Set-Acl -LiteralPath $reportDirectory -AclObject $reportDirectoryAcl
 $reportPath = Join-Path $reportDirectory 'probe.txt'
 
 try {
-    Write-Host "Launching the identity probe as enrolled account $Account. It must report a different logon SID and not access this interactive process or enumerate its window."
+    Write-Host "Launching the identity probe as managed account $Account. It must report a different logon SID and not access this interactive process or enumerate its window."
     $output = & $launcher.Path --user $Account --working-directory $workingDirectory -- `
         $probe.Path --window $windowHandle --process $PID --exit-code $ExpectedExitCode `
         --interactive-logon-sid $interactiveLogonSid --output $reportPath

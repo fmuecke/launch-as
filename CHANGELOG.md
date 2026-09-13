@@ -2,17 +2,18 @@
 
 ## [1.0.0-preview] - 2026-08-09
 
-- Added: Passwordless, same-pane console launches as an enrolled local standard account.
+- Added: Passwordless, same-pane console launches as a launch-as-managed local standard account.
 - Added: Separate logon sessions and a noninteractive desktop for launched console tools; they
   cannot read or terminate the caller's processes or inspect the caller's windows.
-- Added: `launch-as-admin` to enroll, list, and unenroll multiple local accounts.
-- Changed: An enrolled account supports up to two concurrent sessions; the broker supports four
-  globally. Its password is generated for each launch, used only to log on, then discarded;
+- Added: `launch-as-admin` to create, take over, list, forget, and delete managed local accounts.
+- Changed: A managed account supports up to two concurrent sessions; the broker supports four
+  globally. Its password is generated for each launch, used to reset and log on to the account,
+  then cleared from the broker's memory;
   further launches are rejected with `session_limit_reached` / `ERROR_BUSY`.
 - Added: `Setup-LaunchAs.ps1` for interactive install, update, uninstall, and optional default
-  account enrollment.
+  account creation or takeover.
 - Changed: Existing Credential Manager registrations and credential-mode options no longer work;
-  enroll accounts through `launch-as-admin` instead.
+  configure managed accounts through `launch-as-admin` instead.
 
 ## [0.3.2] - 2026-07-30
 

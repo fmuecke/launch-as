@@ -1,5 +1,8 @@
 # Task Scheduler as Broker Replacement — Console-Only Spike
 
+> **Archived design investigation.** The project retains the broker; this document records a
+> rejected alternative and must not be treated as an implementation plan.
+
 ## Context
 
 `launch-as` currently has a working broker service that launches agent processes under the restricted `AgentSandbox` account.

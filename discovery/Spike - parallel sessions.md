@@ -1,5 +1,8 @@
 # Spike: parallel sessions
 
+> **Superseded.** The implemented broker rotates the account password for every launch; this
+> document's enrollment-time password model is retained only as historical design context.
+
 ## Decision
 
 Parallel sessions are keyed by the selected target account/profile:
@@ -12,9 +15,8 @@ Authorising a caller for one profile must not authorise it for every enrolled pr
 
 ## Password model
 
-Per-launch password rotation is not required for parallelism. Generate the account password at enrollment,
-store it in a service-only secret store, and use it for subsequent broker `LogonUserW` calls. A later explicit
-`reset` operation may rotate it.
+Superseded by the implemented per-launch password rotation. Do not use an enrollment-time stored
+password model.
 
 Create a fresh logon token for every session rather than asking a running host to clone itself. This avoids the
 password-reset race and gives each session a distinct logon SID. A duplicated token is possible, but would share

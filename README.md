@@ -4,7 +4,7 @@
 
 Launch-as is currently used in [agent-win-sandbox](https://github.com/fmuecke/agent-win-sandbox) to create a least-privilege session for a coding agent like Claude Code or GitHub Copilot CLI.
 
-The current stable version is still v3.2.0. [Browse the stable v3.2.0 version](https://github.com/fmuecke/launch-as/tree/v0.3.2). It creates the session via `CreateProcessWithLogonW` from the current user. However, this has some security implications due to derived logon session tokens:
+The current stable version is still v0.3.2. [Browse the stable v0.3.2 version](https://github.com/fmuecke/launch-as/tree/v0.3.2). It creates the session via `CreateProcessWithLogonW` from the current user. However, this has some security implications due to derived logon session tokens:
 
 - Session user will be able to see and interact with the regular user's desktop.
 - For regular-user processes that retain the normal logon-SID default-DACL ACE, the session user
@@ -58,9 +58,10 @@ make it launch-as-owned. Taking over a disabled account requires `--force` to re
 `create` has no force switch because it never modifies an existing account.
 
 The broker creates a password for each launch, uses it only to log on, then wipes it. An enrolled
-account supports up to two concurrent sessions; a third launch fails immediately. `forget` removes
-only the launch-as registration. `delete` removes a SID-matched owned Windows account after its
-sessions end; neither command deletes its profile directory.
+account supports up to two concurrent sessions; the broker supports four sessions globally.
+Further launches fail immediately. `forget` removes only the launch-as registration. `delete`
+removes a SID-matched owned Windows account after its sessions end; neither command deletes its
+profile directory.
 
 ```powershell
 .\launch-as-admin.exe list

@@ -6,8 +6,9 @@
 - Added: Separate logon sessions and a noninteractive desktop for launched console tools; they
   cannot read or terminate the caller's processes or inspect the caller's windows.
 - Added: `launch-as-admin` to enroll, list, and unenroll multiple local accounts.
-- Changed: An enrolled account runs one session at a time. Its password is generated for each
-  launch, used only to log on, then discarded; a second launch fails immediately.
+- Changed: An enrolled account supports up to two concurrent sessions; the broker supports four
+  globally. Its password is generated for each launch, used only to log on, then discarded;
+  further launches are rejected with `session_limit_reached` / `ERROR_BUSY`.
 - Added: `Setup-LaunchAs.ps1` for interactive install, update, uninstall, and optional default
   account enrollment.
 - Changed: Existing Credential Manager registrations and credential-mode options no longer work;

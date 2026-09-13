@@ -19,7 +19,7 @@ namespace
 void PrintUsage()
 {
     std::wcerr << LR"usage(Usage:
-  launch-as.exe [run] --user <enrolled-local-user>
+  launch-as.exe [run] --user <launch-as-user>
                       [--working-directory <directory>]
                       -- <absolute-executable> [arguments...]
 

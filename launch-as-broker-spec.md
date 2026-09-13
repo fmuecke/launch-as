@@ -432,9 +432,10 @@ all future handle-validation checks.
    security boundary.
 4. Authorisation is based on the **actual caller token**, not a claimed name.
 5. Config/enrollment changes require a distinct elevated path.
-6. Phase 1 validates existing absolute executable and working-directory paths. Any future
-   executable or directory restriction must use canonical paths + ACL inspection, never
-   string-prefix checks.
+6. The client validates absolute executable and working-directory paths; the deprivileged console
+   host revalidates them before launch. The broker validates only the working directory exists.
+   Any future executable or directory restriction must use canonical paths + ACL inspection,
+   never string-prefix checks.
 7. No client-supplied handle is trusted without validation; no broker handle is inheritable by default.
 8. Interactive-mode desktop ACEs are granted to the child **logon SID** (not account SID) and removed on teardown.
 9. Every failure path zeroes secrets and closes handles.

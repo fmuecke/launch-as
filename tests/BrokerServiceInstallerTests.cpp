@@ -19,10 +19,12 @@ namespace
 constexpr wchar_t BrokerServiceDisplayName[] = L"launch-as Broker";
 constexpr wchar_t BrokerServiceDescription[] =
     L"Launches managed accounts in isolated console sessions.";
-constexpr std::array<std::wstring_view, 3> BrokerRequiredPrivileges {
+constexpr std::array<std::wstring_view, 5> BrokerRequiredPrivileges {
     L"SeAssignPrimaryTokenPrivilege",
     L"SeIncreaseQuotaPrivilege",
     L"SeImpersonatePrivilege",
+    L"SeBackupPrivilege",
+    L"SeRestorePrivilege",
 };
 
 class ServiceHandle final
@@ -155,7 +157,7 @@ class TestService final
             reinterpret_cast<BYTE*>(&serviceSidInfo),
             sizeof(serviceSidInfo),
             &bytesWritten) ||
-        serviceSidInfo.dwServiceSidType != SERVICE_SID_TYPE_RESTRICTED)
+        serviceSidInfo.dwServiceSidType != SERVICE_SID_TYPE_UNRESTRICTED)
     {
         return false;
     }

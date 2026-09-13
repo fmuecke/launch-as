@@ -29,7 +29,8 @@ constexpr wchar_t BrokerServiceDescription[] =
     L"Launches managed accounts in isolated console sessions.";
 constexpr wchar_t BrokerInstallDacl[] = L"D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200A9;;;BU)";
 constexpr wchar_t BrokerRequiredPrivileges[] =
-    L"SeAssignPrimaryTokenPrivilege\0SeIncreaseQuotaPrivilege\0SeImpersonatePrivilege\0\0";
+    L"SeAssignPrimaryTokenPrivilege\0SeIncreaseQuotaPrivilege\0SeImpersonatePrivilege\0"
+    L"SeBackupPrivilege\0SeRestorePrivilege\0\0";
 constexpr DWORD ServiceStopTimeoutMilliseconds = 10'000;
 
 class ServiceHandle final
@@ -365,6 +366,12 @@ DWORD InstallBrokerService()
     {
         return dataDirectoryError;
     }
+    std::wstring enrollmentDirectory;
+    const DWORD enrollmentDirectoryError = GetBrokerEnrollmentDirectory(enrollmentDirectory);
+    if (enrollmentDirectoryError != ERROR_SUCCESS)
+    {
+        return enrollmentDirectoryError;
+    }
     return StoreAuthorizedCallerSid(GetAuthorizedCallerPolicyPath(dataDirectory), callerSid.data());
 }
 
@@ -489,7 +496,7 @@ DWORD InstallDemandStartBrokerService(
         return configurationError;
     }
     SERVICE_SID_INFO serviceSidInfo {};
-    serviceSidInfo.dwServiceSidType = SERVICE_SID_TYPE_RESTRICTED;
+    serviceSidInfo.dwServiceSidType = SERVICE_SID_TYPE_UNRESTRICTED;
     if (!ChangeServiceConfig2W(service.get(), SERVICE_CONFIG_SERVICE_SID_INFO, &serviceSidInfo))
     {
         const DWORD serviceSidError = GetLastError();

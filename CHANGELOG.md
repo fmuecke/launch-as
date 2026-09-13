@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.1.0-preview] - 2026-09-13
 
 - Added: `launch-as-admin create`, explicit `create --takeover`, `list`, `forget`, and `delete`
   for launch-as-managed accounts. Ownership is SID-pinned; `delete` affects only accounts owned by
@@ -20,8 +20,9 @@
 - Security: Setup self-elevation validates the default account name, preserves paths with spaces,
   and launches PowerShell from `PSHOME` rather than a user-controlled `PATH` lookup.
 - Security: Hardened terminal and service boundaries with programmatic pipe ACLs, bounded control
-  connections and resize handling, audit-field validation, a restricted service SID, least service
-  privileges, and native binary mitigations.
+  connections and resize handling, audit-field validation, a dedicated service SID, the service
+  privileges required for profile loading, and native binary mitigations.
+- Fixed: Setup repairs the enrollment directory before broker startup.
 - Fixed: Preserved target exit codes in broker mode; redirected stdin EOF no longer cancels the
   target; terminal shutdown no longer waits indefinitely for console input.
 - Fixed: Drains job trees before profile cleanup, bounds failed-session teardown, and always
@@ -68,6 +69,7 @@
 - Changed: Direct invocation is supported alongside the explicit `run` subcommand.
 
 [1.0.0-preview]: https://github.com/fmuecke/launch-as/releases/tag/v1.0.0-preview
+[1.1.0-preview]: https://github.com/fmuecke/launch-as/releases/tag/v1.1.0-preview
 [0.3.2]: https://github.com/fmuecke/launch-as/releases/tag/v0.3.2
 [0.3.1]: https://github.com/fmuecke/launch-as/releases/tag/v0.3.1
 [0.3.0]: https://github.com/fmuecke/launch-as/releases/tag/v0.3.0

@@ -58,6 +58,18 @@ class EnabledProcessPrivileges final
             const DWORD tokenError = GetLastError();
             return tokenError;
         }
+        // LoadUserProfileW requires backup and restore rights; CreateProcessAsUserW requires the
+        // token-assignment and quota rights below. Enable them only for this launch operation.
+        const DWORD backupError = Enable(SE_BACKUP_NAME);
+        if (backupError != ERROR_SUCCESS)
+        {
+            return backupError;
+        }
+        const DWORD restoreError = Enable(SE_RESTORE_NAME);
+        if (restoreError != ERROR_SUCCESS)
+        {
+            return restoreError;
+        }
         const DWORD assignTokenError = Enable(SE_ASSIGNPRIMARYTOKEN_NAME);
         if (assignTokenError != ERROR_SUCCESS)
         {
@@ -100,7 +112,7 @@ class EnabledProcessPrivileges final
     }
 
     HANDLE token_ = nullptr;
-    std::array<TOKEN_PRIVILEGES, 2> previous_ {};
+    std::array<TOKEN_PRIVILEGES, 4> previous_ {};
     DWORD enabledCount_ = 0;
 };
 

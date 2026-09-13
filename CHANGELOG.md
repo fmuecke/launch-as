@@ -1,19 +1,49 @@
 # Changelog
 
+## [Unreleased]
+
+- Added: `launch-as-admin create`, explicit `create --takeover`, `list`, `forget`, and `delete`
+  for launch-as-managed accounts. Ownership is SID-pinned; `delete` affects only accounts owned by
+  launch-as, while `forget` leaves the Windows account unchanged.
+- Changed: Managed accounts support up to two concurrent sessions each and the broker supports
+  four globally. Further launches fail with `session_limit_reached` / `ERROR_BUSY`.
+- Changed: The broker rotates each managed-account password per launch, uses it to reset and log
+  on to the account, then clears its plaintext copy from memory.
+- Changed: `Setup-LaunchAs.ps1` creates or explicitly takes over its default managed account only
+  after a successful install or update; takeover replaces the broker-owned password.
+- Security: Hardened broker startup and storage against control-pipe squatting, untrusted
+  `%ProgramData%` ownership, reparse points, environment-derived data paths, and tampered account
+  configuration records.
+- Security: Rejects managed accounts with administrative or non-standard privileges, uses a
+  privilege-restricted Medium-integrity logon token, validates local working directories before
+  launch, and clears generated password buffers.
+- Security: Setup self-elevation validates the default account name, preserves paths with spaces,
+  and launches PowerShell from `PSHOME` rather than a user-controlled `PATH` lookup.
+- Security: Hardened terminal and service boundaries with programmatic pipe ACLs, bounded control
+  connections and resize handling, audit-field validation, a restricted service SID, least service
+  privileges, and native binary mitigations.
+- Fixed: Preserved target exit codes in broker mode; redirected stdin EOF no longer cancels the
+  target; terminal shutdown no longer waits indefinitely for console input.
+- Fixed: Drains job trees before profile cleanup, bounds failed-session teardown, and always
+  releases session and worker capacity.
+- Fixed: Correct Windows command-line quoting, immediate Win32 error capture, fail-fast handling
+  of failed impersonation reverts, and strict null-terminated Win32 path boundaries.
+- Changed: Removed obsolete Credential Manager implementation code. `build.ps1 -RunAllTests` now
+  runs elevated CTest coverage through UAC, and the broker-command test no longer needs an
+  installed service.
+
 ## [1.0.0-preview] - 2026-08-09
 
-- Added: Passwordless, same-pane console launches as a launch-as-managed local standard account.
+- Added: Passwordless, same-pane console launches as an enrolled local standard account.
 - Added: Separate logon sessions and a noninteractive desktop for launched console tools; they
   cannot read or terminate the caller's processes or inspect the caller's windows.
-- Added: `launch-as-admin` to create, take over, list, forget, and delete managed local accounts.
-- Changed: A managed account supports up to two concurrent sessions; the broker supports four
-  globally. Its password is generated for each launch, used to reset and log on to the account,
-  then cleared from the broker's memory;
-  further launches are rejected with `session_limit_reached` / `ERROR_BUSY`.
+- Added: `launch-as-admin` to enroll, list, and unenroll multiple local accounts.
+- Changed: An enrolled account runs one session at a time. Its password is generated for each
+  launch, used only to log on, then discarded; a second launch fails immediately.
 - Added: `Setup-LaunchAs.ps1` for interactive install, update, uninstall, and optional default
-  account creation or takeover.
+  account enrollment.
 - Changed: Existing Credential Manager registrations and credential-mode options no longer work;
-  configure managed accounts through `launch-as-admin` instead.
+  enroll accounts through `launch-as-admin` instead.
 
 ## [0.3.2] - 2026-07-30
 

@@ -191,6 +191,113 @@ constexpr std::array<LPCWSTR, 5> AllowedTokenPrivilegeNames {
     return ERROR_SUCCESS;
 }
 
+[[nodiscard]] DWORD ValidateMediumIntegrityLevel(HANDLE token)
+{
+    DWORD integrityBytes = 0;
+    GetTokenInformation(token, TokenIntegrityLevel, nullptr, 0, &integrityBytes);
+    const DWORD integritySizeError = GetLastError();
+    if (integritySizeError != ERROR_INSUFFICIENT_BUFFER || integrityBytes == 0)
+    {
+        return integritySizeError;
+    }
+    std::vector<BYTE> integrityBuffer(integrityBytes);
+    if (!GetTokenInformation(
+            token, TokenIntegrityLevel, integrityBuffer.data(), integrityBytes, &integrityBytes))
+    {
+        const DWORD integrityError = GetLastError();
+        return integrityError;
+    }
+    const auto* integrity = reinterpret_cast<const TOKEN_MANDATORY_LABEL*>(integrityBuffer.data());
+    if (!IsValidSid(integrity->Label.Sid))
+    {
+        return ERROR_INVALID_SID;
+    }
+    const PUCHAR subAuthorityCount = GetSidSubAuthorityCount(integrity->Label.Sid);
+    if (subAuthorityCount == nullptr || *subAuthorityCount == 0)
+    {
+        return ERROR_INVALID_SID;
+    }
+    const PDWORD integrityRid =
+        GetSidSubAuthority(integrity->Label.Sid, static_cast<DWORD>(*subAuthorityCount - 1));
+    if (integrityRid == nullptr || *integrityRid != SECURITY_MANDATORY_MEDIUM_RID)
+    {
+        return ERROR_ACCESS_DENIED;
+    }
+    return ERROR_SUCCESS;
+}
+
+[[nodiscard]] DWORD ValidateRestrictedTokenPrivileges(HANDLE token)
+{
+    LUID changeNotifyPrivilege {};
+    if (!LookupPrivilegeValueW(nullptr, SE_CHANGE_NOTIFY_NAME, &changeNotifyPrivilege))
+    {
+        const DWORD lookupError = GetLastError();
+        return lookupError;
+    }
+    DWORD tokenPrivilegesBytes = 0;
+    GetTokenInformation(token, TokenPrivileges, nullptr, 0, &tokenPrivilegesBytes);
+    const DWORD sizeError = GetLastError();
+    if (sizeError != ERROR_INSUFFICIENT_BUFFER || tokenPrivilegesBytes == 0)
+    {
+        return sizeError;
+    }
+    std::vector<BYTE> tokenPrivilegesBuffer(tokenPrivilegesBytes);
+    if (!GetTokenInformation(token,
+            TokenPrivileges,
+            tokenPrivilegesBuffer.data(),
+            tokenPrivilegesBytes,
+            &tokenPrivilegesBytes))
+    {
+        const DWORD tokenPrivilegesError = GetLastError();
+        return tokenPrivilegesError;
+    }
+    const auto* tokenPrivileges =
+        reinterpret_cast<const TOKEN_PRIVILEGES*>(tokenPrivilegesBuffer.data());
+    for (DWORD index = 0; index < tokenPrivileges->PrivilegeCount; ++index)
+    {
+        const LUID_AND_ATTRIBUTES& privilege = tokenPrivileges->Privileges[index];
+        if ((privilege.Attributes & SE_PRIVILEGE_ENABLED) != 0 &&
+            !LuidEqual(privilege.Luid, changeNotifyPrivilege))
+        {
+            return ERROR_ACCESS_DENIED;
+        }
+    }
+    return ERROR_SUCCESS;
+}
+
+[[nodiscard]] DWORD RestrictToken(HANDLE sourceToken, HANDLE& restrictedToken)
+{
+    restrictedToken = nullptr;
+    if (!CreateRestrictedToken(sourceToken,
+            DISABLE_MAX_PRIVILEGE,
+            0,
+            nullptr,
+            0,
+            nullptr,
+            0,
+            nullptr,
+            &restrictedToken))
+    {
+        const DWORD restrictionError = GetLastError();
+        return restrictionError;
+    }
+    const DWORD integrityError = ValidateMediumIntegrityLevel(restrictedToken);
+    if (integrityError != ERROR_SUCCESS)
+    {
+        CloseHandle(restrictedToken);
+        restrictedToken = nullptr;
+        return integrityError;
+    }
+    const DWORD privilegesError = ValidateRestrictedTokenPrivileges(restrictedToken);
+    if (privilegesError != ERROR_SUCCESS)
+    {
+        CloseHandle(restrictedToken);
+        restrictedToken = nullptr;
+        return privilegesError;
+    }
+    return ERROR_SUCCESS;
+}
+
 [[nodiscard]] DWORD ValidateAccountPrivilegeAllowList(PSID accountSid)
 {
     LSA_OBJECT_ATTRIBUTES attributes {};
@@ -312,6 +419,28 @@ DWORD LogOnBrokerAccount(
     {
         token.Reset();
         return tokenPrivilegeError;
+    }
+
+    HANDLE restrictedToken = nullptr;
+    const DWORD restrictionError = RestrictToken(token.get(), restrictedToken);
+    if (restrictionError != ERROR_SUCCESS)
+    {
+        token.Reset();
+        return restrictionError;
+    }
+    token.Reset(restrictedToken);
+
+    const DWORD restrictedTokenUserError = ValidateTokenUser(token.get(), expectedSid);
+    if (restrictedTokenUserError != ERROR_SUCCESS)
+    {
+        token.Reset();
+        return restrictedTokenUserError;
+    }
+    const DWORD restrictedTokenGroupsError = ValidateNonAdministrativeToken(token.get());
+    if (restrictedTokenGroupsError != ERROR_SUCCESS)
+    {
+        token.Reset();
+        return restrictedTokenGroupsError;
     }
     return ERROR_SUCCESS;
 }

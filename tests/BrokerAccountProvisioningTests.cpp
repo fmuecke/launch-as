@@ -237,6 +237,68 @@ void InitLsaString(LSA_UNICODE_STRING& lsaString, const wchar_t* value)
     return status == 0;
 }
 
+[[nodiscard]] bool IsMediumIntegrityToken(HANDLE token)
+{
+    DWORD integrityBytes = 0;
+    GetTokenInformation(token, TokenIntegrityLevel, nullptr, 0, &integrityBytes);
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || integrityBytes == 0)
+    {
+        return false;
+    }
+    std::vector<BYTE> integrityBuffer(integrityBytes);
+    if (!GetTokenInformation(
+            token, TokenIntegrityLevel, integrityBuffer.data(), integrityBytes, &integrityBytes))
+    {
+        return false;
+    }
+    const auto* integrity = reinterpret_cast<const TOKEN_MANDATORY_LABEL*>(integrityBuffer.data());
+    if (!IsValidSid(integrity->Label.Sid))
+    {
+        return false;
+    }
+    const PUCHAR subAuthorityCount = GetSidSubAuthorityCount(integrity->Label.Sid);
+    if (subAuthorityCount == nullptr || *subAuthorityCount == 0)
+    {
+        return false;
+    }
+    const PDWORD integrityRid =
+        GetSidSubAuthority(integrity->Label.Sid, static_cast<DWORD>(*subAuthorityCount - 1));
+    return integrityRid != nullptr && *integrityRid == SECURITY_MANDATORY_MEDIUM_RID;
+}
+
+[[nodiscard]] bool HasNoUnexpectedEnabledPrivileges(HANDLE token)
+{
+    LUID changeNotifyPrivilege {};
+    if (!LookupPrivilegeValueW(nullptr, SE_CHANGE_NOTIFY_NAME, &changeNotifyPrivilege))
+    {
+        return false;
+    }
+    DWORD privilegesBytes = 0;
+    GetTokenInformation(token, TokenPrivileges, nullptr, 0, &privilegesBytes);
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || privilegesBytes == 0)
+    {
+        return false;
+    }
+    std::vector<BYTE> privilegesBuffer(privilegesBytes);
+    if (!GetTokenInformation(
+            token, TokenPrivileges, privilegesBuffer.data(), privilegesBytes, &privilegesBytes))
+    {
+        return false;
+    }
+    const auto* privileges = reinterpret_cast<const TOKEN_PRIVILEGES*>(privilegesBuffer.data());
+    for (DWORD index = 0; index < privileges->PrivilegeCount; ++index)
+    {
+        const LUID_AND_ATTRIBUTES& privilege = privileges->Privileges[index];
+        const bool isChangeNotify = privilege.Luid.LowPart == changeNotifyPrivilege.LowPart &&
+                                    privilege.Luid.HighPart == changeNotifyPrivilege.HighPart;
+        if ((privilege.Attributes & SE_PRIVILEGE_ENABLED) != 0 && !isChangeNotify)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 int wmain()
@@ -289,7 +351,10 @@ int wmain()
                     enrollment.brokerManaged,
             L"Created account enrollment was not marked broker-managed.") ||
         !Expect(brokerTokenError == ERROR_SUCCESS && static_cast<bool>(token),
-            L"Active disposable account password did not produce a valid broker token."))
+            L"Active disposable account password did not produce a valid broker token.") ||
+        !Expect(IsMediumIntegrityToken(token.get()), L"Broker token is not at Medium integrity.") ||
+        !Expect(HasNoUnexpectedEnabledPrivileges(token.get()),
+            L"Broker token retained an unexpected enabled privilege."))
     {
         std::wcerr << L"Broker token status: " << brokerTokenError << L"\n";
         return 1;

@@ -345,7 +345,8 @@ maintenance.
 4. zero the password buffer immediately. The launch gate covers reset through logon and the
    process-wide privilege changes used for process creation.
 5. validate token: `TokenUser` SID == pinned `accountSid`; `TokenGroups` must **not** contain the local Administrators SID (reuse the client's existing `ProcessHasAccountSid` / `ValidateNonAdministrativeToken` checks, relocated here).
-6. optional `CreateRestrictedToken` (disable non-essential privileges; **keep Medium integrity** — Low IL breaks the MSVC toolchain).
+6. call `CreateRestrictedToken(DISABLE_MAX_PRIVILEGE)` and require the replacement token to retain
+   **Medium integrity** — Low IL breaks the MSVC toolchain.
 7. apply the **session adapter** (§7): `console` → noninteractive + ConPTY host; `interactive` → session hop + desktop-DACL grant.
 8. if `profileLoad`: acquire the account's profile lease, loading the profile on its first session,
    and create an environment block. Release the lease and unload only after the account's last

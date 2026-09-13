@@ -522,8 +522,6 @@ std::string_view RequestOperationSuccessReason(RequestOperation operation) noexc
         return "forgotten";
     case RequestOperation::Delete:
         return "deleted";
-    case RequestOperation::ConsoleLaunch:
-        return "launched";
     }
     return "unknown";
 }
@@ -542,8 +540,6 @@ std::string_view RequestOperationFailureReason(RequestOperation operation) noexc
         return "forget_failed";
     case RequestOperation::Delete:
         return "delete_failed";
-    case RequestOperation::ConsoleLaunch:
-        return "launch_failed";
     }
     return "invalid_request";
 }
@@ -583,7 +579,7 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
     JsonReader reader(message);
     if (!reader.Consume('{'))
     {
-        return ParseResult::InvalidJson;
+        return ParseResult::InvalidRequest;
     }
 
     bool version = false;
@@ -618,7 +614,7 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
         std::wstring name;
         if (!reader.String(name) || !reader.Consume(':'))
         {
-            return ParseResult::InvalidJson;
+            return ParseResult::InvalidRequest;
         }
         if (name == L"version" && !versionSeen)
         {
@@ -702,12 +698,12 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
         }
         if (!reader.Consume(','))
         {
-            return ParseResult::InvalidJson;
+            return ParseResult::InvalidRequest;
         }
     }
     if (!reader.End())
     {
-        return ParseResult::InvalidJson;
+        return ParseResult::InvalidRequest;
     }
     if (!version || !requestId || !operation || !IsRequestId(request.requestId))
     {

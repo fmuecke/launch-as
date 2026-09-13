@@ -18,7 +18,6 @@ struct BrokerCallerIdentity
     std::vector<BYTE> userSid;
     std::vector<BYTE> logonSid;
     DWORD sessionId = 0;
-    DWORD integrityLevel = 0;
     bool isElevated = false;
 };
 using ConfigurationRequestHandler = DWORD (*)(void* context, const BrokerRequest& request,

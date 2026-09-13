@@ -5,7 +5,6 @@
 #include "LaunchProcess.h"
 #include "LauncherOptions.h"
 #include "LicenseHeader.h"
-#include "PseudoConsoleHost.h"
 
 #include <cstddef>
 #include <span>
@@ -23,11 +22,6 @@ int wmain(int argc, wchar_t* argv[])
         PrintLicenseHeader();
         return static_cast<int>(ExitSuccess);
     }
-    if (IsPseudoConsoleHostInvocation(arguments))
-    {
-        return static_cast<int>(RunPseudoConsoleHost(arguments));
-    }
-
     const auto options = ParseOptions(arguments);
     if (!options)
     {

@@ -63,7 +63,6 @@ struct BrokerRequest
 enum class ParseResult
 {
     Success,
-    InvalidJson,
     InvalidRequest,
     ModeNotSupported
 };

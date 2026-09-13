@@ -207,6 +207,11 @@ Invoke-Launcher `
     -ExpectedExitCodes 87 `
     -ExpectedOutput 'Usage:'
 Invoke-Launcher `
+    -Name 'Internal pseudoconsole host switch is rejected' `
+    -Arguments @('--internal-pseudoconsole-host', '--size', '120', '30') `
+    -ExpectedExitCodes 87 `
+    -ExpectedOutput 'Usage:'
+Invoke-Launcher `
     -Name 'Missing account is rejected' `
     -Arguments @('--', 'C:\Windows\System32\cmd.exe') `
     -ExpectedExitCodes 87 `

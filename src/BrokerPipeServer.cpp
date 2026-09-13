@@ -221,36 +221,6 @@ void WaitForControlConnectionClose(HANDLE pipe, HANDLE stopEvent)
     {
         return false;
     }
-    DWORD integrityBytes = 0;
-    GetTokenInformation(token.get(), TokenIntegrityLevel, nullptr, 0, &integrityBytes);
-    const DWORD integritySizeError = GetLastError();
-    if (integritySizeError != ERROR_INSUFFICIENT_BUFFER || integrityBytes == 0)
-    {
-        return false;
-    }
-    std::vector<BYTE> integrity(integrityBytes);
-    if (!GetTokenInformation(
-            token.get(), TokenIntegrityLevel, integrity.data(), integrityBytes, &integrityBytes))
-    {
-        return false;
-    }
-    const auto* integrityLabel = reinterpret_cast<const TOKEN_MANDATORY_LABEL*>(integrity.data());
-    if (!IsValidSid(integrityLabel->Label.Sid))
-    {
-        return false;
-    }
-    const UCHAR* subAuthorityCount = GetSidSubAuthorityCount(integrityLabel->Label.Sid);
-    if (subAuthorityCount == nullptr || *subAuthorityCount == 0)
-    {
-        return false;
-    }
-    const DWORD* integritySubAuthority =
-        GetSidSubAuthority(integrityLabel->Label.Sid, *subAuthorityCount - 1);
-    if (integritySubAuthority == nullptr)
-    {
-        return false;
-    }
-    identity.integrityLevel = *integritySubAuthority;
     TOKEN_ELEVATION elevation {};
     if (!GetTokenInformation(
             token.get(), TokenElevation, &elevation, sizeof(elevation), &returnedBytes) ||
@@ -364,7 +334,7 @@ void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
             }
         }
     }
-    else if (request.operation == RequestOperation::ConsoleLaunch)
+    else
     {
         if (launchRequestHandler == nullptr)
         {
@@ -385,10 +355,6 @@ void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
                     launchError == ERROR_SUCCESS ? ERROR_INVALID_DATA : launchError);
             }
         }
-    }
-    else
-    {
-        response = BuildErrorResponse(request.requestId, "invalid_request", ERROR_INVALID_DATA);
     }
     bool waitForControlClose = false;
     if (WriteResponse(pipe, stopEvent, response) && child)

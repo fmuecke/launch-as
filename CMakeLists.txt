@@ -75,11 +75,6 @@ add_executable(launch_as
     src/launch_as.cpp
     src/LauncherOptions.cpp
     src/LauncherOptions.h
-    src/PseudoConsoleHost.cpp
-    src/PseudoConsoleHost.h
-    src/PseudoConsoleHostReport.h
-    src/PseudoConsoleSession.cpp
-    src/PseudoConsoleSession.h
     src/LaunchProcess.cpp
     src/LaunchProcess.h
     src/LicenseHeader.cpp
@@ -826,7 +821,7 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
 
     add_test(
         NAME launcher.broker_terminal_bridge
-        COMMAND "$<TARGET_FILE:LauncherBrokerTerminalBridgeTests>" "$<TARGET_FILE:launch_as>"
+        COMMAND "$<TARGET_FILE:LauncherBrokerTerminalBridgeTests>" "$<TARGET_FILE:launch_as_conhost>"
     )
     set_tests_properties(launcher.broker_terminal_bridge PROPERTIES
         LABELS "broker;integration"
@@ -854,7 +849,7 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
         NAME launcher.terminal_disconnect
         COMMAND
             "$<TARGET_FILE:LauncherTerminalDisconnectTests>"
-            "$<TARGET_FILE:launch_as>"
+            "$<TARGET_FILE:launch_as_conhost>"
             "$<TARGET_FILE:LauncherExitCodeProbe>"
     )
     set_tests_properties(launcher.terminal_disconnect PROPERTIES

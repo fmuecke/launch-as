@@ -391,45 +391,4 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
     return childExitCode;
 }
 
-std::filesystem::path GetLauncherExecutablePath(std::wstring& error)
-{
-    std::vector<wchar_t> path(512);
-    for (;;)
-    {
-        const DWORD characters =
-            GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
-        if (characters == 0)
-        {
-            const DWORD pathError = GetLastError();
-            error = L"Could not resolve the launcher path: " + FormatWindowsError(pathError);
-            return {};
-        }
-        if (characters < path.size())
-        {
-            return std::filesystem::path(std::wstring(path.data(), characters));
-        }
-        path.resize(path.size() * 2);
-    }
-}
-
-std::vector<std::wstring> BuildPseudoConsoleHostArguments(
-    const Options& options, COORD terminalSize, bool inheritCursor)
-{
-    std::vector<std::wstring> arguments;
-    arguments.reserve(options.processArguments.size() + 7);
-    arguments.emplace_back(HostArgument);
-    arguments.emplace_back(SizeArgument);
-    arguments.emplace_back(std::to_wstring(terminalSize.X));
-    arguments.emplace_back(std::to_wstring(terminalSize.Y));
-    if (inheritCursor)
-    {
-        arguments.emplace_back(InheritCursorArgument);
-    }
-    arguments.emplace_back(L"--");
-    arguments.emplace_back(options.executablePath.native());
-    arguments.insert(
-        arguments.end(), options.processArguments.begin(), options.processArguments.end());
-    return arguments;
-}
-
 } // namespace launch_as

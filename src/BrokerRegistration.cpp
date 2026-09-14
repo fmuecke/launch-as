@@ -75,11 +75,12 @@ DWORD RegistrationService::TakeOver(std::wstring_view accountName, bool allowEna
     {
         std::vector<BYTE> currentSid;
         const DWORD sidError = GetBrokerAccountSid(accountName, currentSid);
-        if (sidError != ERROR_SUCCESS)
+        if (sidError != ERROR_SUCCESS && (sidError != NERR_UserNotFound || !allowEnable))
         {
             return sidError;
         }
-        if (EqualSid(existingEnrollment.accountSid.data(), currentSid.data()) == FALSE &&
+        if (sidError == ERROR_SUCCESS &&
+            EqualSid(existingEnrollment.accountSid.data(), currentSid.data()) == FALSE &&
             !allowEnable)
         {
             return ERROR_ACCESS_DENIED;
@@ -92,7 +93,15 @@ DWORD RegistrationService::TakeOver(std::wstring_view accountName, bool allowEna
     {
         return passwordError;
     }
-    const DWORD accountError = TakeOverExistingLocalAccount(accountName, password, allowEnable);
+    DWORD accountError = TakeOverExistingLocalAccount(accountName, password, allowEnable);
+    if (accountError == NERR_UserNotFound && allowEnable)
+    {
+        accountError = CreateBrokerManagedLocalAccount(accountName, password);
+        if (accountError == NERR_UserExists)
+        {
+            accountError = TakeOverExistingLocalAccount(accountName, password, true);
+        }
+    }
     password.Clear();
     if (accountError != ERROR_SUCCESS)
     {

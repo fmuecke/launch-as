@@ -350,9 +350,17 @@ int wmain()
             L"Could not generate a disposable password for the missing-account check.") ||
         !Expect(registration.ResetPassword(account.name(), password) != ERROR_SUCCESS,
             L"Broker password reset recreated a missing owned account.") ||
+        !Expect(registration.TakeOver(account.name(), false) == NERR_UserNotFound,
+            L"Unforced takeover created a missing account.") ||
+        !Expect(registration.TakeOver(account.name(), true) == ERROR_SUCCESS,
+            L"Forced takeover did not create the missing account.") ||
+        !Expect(HasRequiredFlags(account.name()) && HasManagedComment(account.name()),
+            L"Forced takeover did not create a hardened managed account.") ||
+        !Expect(account.Remove() == NERR_Success,
+            L"Could not remove the force-created account before replacement testing.") ||
         !Expect(launch_as::broker::CreateBrokerManagedLocalAccount(account.name(), password) ==
                     ERROR_SUCCESS,
-            L"Could not recreate the account with its original name."))
+            L"Could not create a replacement account with the original name."))
     {
         return 1;
     }

@@ -327,9 +327,10 @@ maintenance.
 
 - **`create <account>`** creates a named standard account, writes a managed-account comment,
   hardens it, and records its SID. The name must not already exist.
-- **`create --takeover <account>`** requires an existing eligible account, resets its
-  password, hardens it, and records it as launch-as-owned. A disabled target requires `--force` to
-  re-enable it. A same-name account with a different recorded SID also requires `--force`.
+- **`create <account> --takeover`** resets an existing eligible account's password, hardens it,
+  and records it as launch-as-owned. A disabled target requires `--force` to re-enable it. A
+  same-name account with a different recorded SID also requires `--force`. With `--force`, a
+  missing account is created, hardened, and recorded; without it, a missing account fails.
 - **`forget <account>`** removes only the SID-pinned account configuration; it does not change the Windows
   account. **`delete <account>`** verifies the managed SID, refuses while that account has a
   starting or active broker session, deletes the Windows account, and removes its configuration. It
@@ -581,9 +582,10 @@ takeover.
 ### Decisions pending
 
 - Separate a broker **profile** (launch policy and authorised callers) from its Windows account. A managed account name may use a recognisable `launch-as-` prefix while the profile has a stable, human-facing name.
-- **Phase-1 decision:** `create` fails for an existing account. `create --takeover` is the
-  only operation that claims an existing account. It resets the password and establishes managed
-  ownership; `--force` is required to re-enable a disabled or same-name replacement account.
+- **Phase-1 decision:** `create` fails for an existing account. `create <account> --takeover`
+  is the only operation that claims an existing account. It resets the password and establishes
+  managed ownership; `--force` is required to re-enable a disabled or same-name replacement
+  account, and creates the account when it is missing.
 - `forget` is the safe handoff: it removes only launch-as metadata. `delete` is the destructive
   teardown and never removes profile data implicitly.
 - Takeover and delete require client confirmation. Plain create needs no confirmation because it

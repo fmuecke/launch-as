@@ -229,7 +229,7 @@ int wmain(int argumentCount, wchar_t* arguments[])
         return 1;
     }
     const CommandResult unconfirmedTakeover =
-        RunCommandAndCapture(adminPath, L"create --takeover arbitrary-profile");
+        RunCommandAndCapture(adminPath, L"create arbitrary-profile --takeover");
     const CommandResult unconfirmedForget =
         RunCommandAndCapture(adminPath, L"forget arbitrary-profile");
     if (!Expect(unconfirmedTakeover.exitCode == ERROR_CANCELLED &&

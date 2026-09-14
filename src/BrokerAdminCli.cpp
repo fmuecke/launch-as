@@ -121,13 +121,13 @@ void PrintUsage()
     install                         Stop active sessions, then create or update the broker service.
     uninstall [--force]             Stop and remove the service; accounts are retained.
     create <account>                Create a new account owned by launch-as; it fails if the name exists.
-    create --takeover <account>  [--force]    Take over an existing account and make it launch-as-owned.
+    create <account> --takeover [--force]    Take over an account and make it launch-as-owned.
     list                            Show owned accounts.
     forget <account> [--force]      Deregister it; leave the Windows account unchanged.
     delete <account> [--force]      Delete an owned account after its sessions end.
 
 install, uninstall, create, forget, and delete require elevation.
-uninstall, create --takeover, forget, and delete require consent; --force skips the prompt.
+uninstall, create <account> --takeover, forget, and delete require consent; --force skips the prompt.
 
 )usage";
 }
@@ -207,13 +207,11 @@ int RunConfigurationCommand(int argumentCount, wchar_t* arguments[])
             {
                 forced = true;
             }
-            else if (argument == L"--takeover" && !takeOverExisting && accountName.empty() &&
-                     index + 1 < argumentCount)
+            else if (argument == L"--takeover" && !takeOverExisting)
             {
                 takeOverExisting = true;
-                accountName = arguments[++index];
             }
-            else if (!takeOverExisting && accountName.empty() && !argument.starts_with(L"--"))
+            else if (accountName.empty() && !argument.starts_with(L"--"))
             {
                 accountName = argument;
             }

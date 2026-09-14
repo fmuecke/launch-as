@@ -1,9 +1,10 @@
 # Changelog
 
-## [1.1.0-preview] - 2026-09-13
+## [1.1.1-preview] - 2026-09-13
 
-- Added: `launch-as-admin create`, explicit `create --takeover`, `list`, `forget`, and `delete`
-  for launch-as-managed accounts. Ownership is SID-pinned; `delete` affects only accounts owned by
+- Added: `launch-as-admin create`, explicit `create <account> --takeover`, `list`, `forget`, and
+  `delete` for launch-as-managed accounts. Ownership is SID-pinned; forced takeover creates a
+  missing account, while unforced takeover rejects it. `delete` affects only accounts owned by
   launch-as, while `forget` leaves the Windows account unchanged.
 - Changed: Managed accounts support up to two concurrent sessions each and the broker supports
   four globally. Further launches fail with `session_limit_reached` / `ERROR_BUSY`.
@@ -68,8 +69,8 @@
 - Added: `--terminal` for Windows Terminal and VS Code panes.
 - Changed: Direct invocation is supported alongside the explicit `run` subcommand.
 
+[1.1.1-preview]: https://github.com/fmuecke/launch-as/releases/tag/v1.1.1-preview
 [1.0.0-preview]: https://github.com/fmuecke/launch-as/releases/tag/v1.0.0-preview
-[1.1.0-preview]: https://github.com/fmuecke/launch-as/releases/tag/v1.1.0-preview
 [0.3.2]: https://github.com/fmuecke/launch-as/releases/tag/v0.3.2
 [0.3.1]: https://github.com/fmuecke/launch-as/releases/tag/v0.3.1
 [0.3.0]: https://github.com/fmuecke/launch-as/releases/tag/v0.3.0

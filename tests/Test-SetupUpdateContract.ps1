@@ -24,7 +24,7 @@ $body = $updateClause.Groups['body'].Value
 $installIndex = $body.IndexOf('& $admin install', [StringComparison]::Ordinal)
 $installFailureIndex = $body.IndexOf('if ($LASTEXITCODE -ne 0)', [StringComparison]::Ordinal)
 $takeoverIndex = $body.IndexOf(
-    '& $admin create --takeover $DefaultAccount', [StringComparison]::Ordinal)
+    '& $admin create $DefaultAccount --takeover', [StringComparison]::Ordinal)
 
 if ($installIndex -lt 0) {
     throw 'The setup update branch does not install the broker.'
@@ -35,7 +35,7 @@ if ($installFailureIndex -lt $installIndex -or $installFailureIndex -gt $takeove
 if ($takeoverIndex -lt $installIndex) {
     throw 'The setup update branch does not retake over the default account after installation.'
 }
-if ($body -notmatch '& \$admin create --takeover \$DefaultAccount --force') {
+if ($body -notmatch '& \$admin create \$DefaultAccount --takeover --force') {
     throw 'The setup update branch must force-enable a disabled default account.'
 }
 if ($body -notmatch 'take over default account ''\$DefaultAccount''') {

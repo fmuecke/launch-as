@@ -11,7 +11,7 @@ The current stable version is still v0.3.2. [Browse the stable v0.3.2 version](h
   can obtain `PROCESS_VM_READ` and `PROCESS_TERMINATE`, allowing memory reads and termination.
   Protected processes or processes with custom DACLs may not be accessible.
 
-**1.1.0-preview · Windows x64 · console programs only**
+**1.1.1-preview · Windows x64 · console programs only**
 
 `launch-as` starts a console program as a **launch-as-managed local standard account** through the
 `launch-as-broker` Windows service. The client never accepts, reads, stores, or transmits the
@@ -25,7 +25,7 @@ for this preview.
 
 ## Install the binary package
 
-Extract `launch-as-v1.1.0-preview-win64.zip` and run the bundled setup script from its extracted
+Extract `launch-as-v1.1.1-preview-win64.zip` and run the bundled setup script from its extracted
 directory. It elevates when needed, installs or updates the demand-start service, and can create a
 default account. Updating takes over that account and replaces its broker-owned password. The user
 who runs `install` becomes the broker's authorised caller.
@@ -53,9 +53,9 @@ these commands from the extracted package directory (or `out\build\Release` afte
 `install`, `create`, `forget`, `delete`, and `uninstall` require elevation. `install` stops active
 broker sessions before updating the service. `create <account>` creates a dedicated account and
 fails if that name already exists. Use
-`create --takeover <account>` to deliberately reset an existing account's password and
-make it launch-as-owned. Taking over a disabled account requires `--force` to re-enable it; plain
-`create` has no force switch because it never modifies an existing account.
+`create <account> --takeover` to deliberately reset an existing account's password and make it
+launch-as-owned. Taking over a disabled account requires `--force` to re-enable it. A forced
+takeover also creates the account when it is missing; without `--force`, a missing account fails.
 
 The broker creates a password for each launch, uses it to reset and log on to the account, then
 clears its plaintext copy. A managed account supports up to two concurrent sessions; the broker supports four sessions globally.
@@ -66,7 +66,7 @@ profile directory.
 
 ```powershell
 .\launch-as-admin.exe list
-.\launch-as-admin.exe create --takeover LaunchAsUser
+.\launch-as-admin.exe create LaunchAsUser --takeover
 .\launch-as-admin.exe forget LaunchAsUser
 .\launch-as-admin.exe uninstall
 ```
@@ -131,4 +131,4 @@ The `interactive` GUI adapter is deliberately deferred to Phase 2; Phase 1 provi
 ## License
 
 `launch-as` is licensed under the [GNU General Public License version 3 only](LICENSE). Source for
-this preview is available at <https://github.com/fmuecke/launch-as/tree/v1.1.0-preview>.
+this preview is available at <https://github.com/fmuecke/launch-as/tree/v1.1.1-preview>.

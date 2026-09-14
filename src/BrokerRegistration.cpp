@@ -75,7 +75,8 @@ DWORD RegistrationService::TakeOver(std::wstring_view accountName, bool allowEna
     {
         std::vector<BYTE> currentSid;
         const DWORD sidError = GetBrokerAccountSid(accountName, currentSid);
-        if (sidError != ERROR_SUCCESS && (sidError != NERR_UserNotFound || !allowEnable))
+        if (sidError != ERROR_SUCCESS &&
+            ((sidError != NERR_UserNotFound && sidError != ERROR_NONE_MAPPED) || !allowEnable))
         {
             return sidError;
         }

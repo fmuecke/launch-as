@@ -350,9 +350,18 @@ int wmain()
             L"Could not generate a disposable password for the missing-account check.") ||
         !Expect(registration.ResetPassword(account.name(), password) != ERROR_SUCCESS,
             L"Broker password reset recreated a missing owned account.") ||
-        !Expect(registration.TakeOver(account.name(), false) == NERR_UserNotFound,
-            L"Unforced takeover created a missing account.") ||
-        !Expect(registration.TakeOver(account.name(), true) == ERROR_SUCCESS,
+        !Expect(registration.TakeOver(account.name(), false) != ERROR_SUCCESS &&
+                    AccountDoesNotExist(account.name()),
+            L"Unforced takeover created a missing account."))
+    {
+        return 1;
+    }
+    const DWORD forcedTakeoverError = registration.TakeOver(account.name(), true);
+    if (forcedTakeoverError == ERROR_SUCCESS)
+    {
+        account.MarkCreated();
+    }
+    if (!Expect(forcedTakeoverError == ERROR_SUCCESS,
             L"Forced takeover did not create the missing account.") ||
         !Expect(HasRequiredFlags(account.name()) && HasManagedComment(account.name()),
             L"Forced takeover did not create a hardened managed account.") ||

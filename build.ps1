@@ -63,7 +63,7 @@ function Get-ReleaseVersion {
     if (-not $versionMatch.Success) {
         throw "Could not determine the project version from $cmakePath."
     }
-    return "$($versionMatch.Groups['version'].Value)-preview"
+    return "$($versionMatch.Groups['version'].Value)" # add "-preview" for preview releases
 }
 
 if ($PackageRelease) {

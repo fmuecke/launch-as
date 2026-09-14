@@ -6,11 +6,12 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
     launch_as
-    VERSION 1.1.1
+    VERSION 1.1.0
     LANGUAGES CXX RC
 )
 
-set(LAUNCH_AS_VERSION "${PROJECT_VERSION}-preview")
+set(LAUNCH_AS_VERSION "${PROJECT_VERSION}")
+#set(LAUNCH_AS_VERSION "${PROJECT_VERSION}-preview")
 set(LAUNCH_AS_VERSION_TWEAK 0)
 
 if(NOT WIN32)

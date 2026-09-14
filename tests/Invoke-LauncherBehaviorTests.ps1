@@ -22,7 +22,8 @@ param(
 
     [Parameter()]
     [ValidateNotNullOrEmpty()]
-    [string] $ExpectedVersion = '1.0.0-preview'
+    [string] $ExpectedVersion = '1.1.0'
+    #[string] $ExpectedVersion = '1.0.0-preview'
 )
 
 Set-StrictMode -Version Latest

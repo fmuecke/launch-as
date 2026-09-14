@@ -11,7 +11,7 @@ The current stable version is still v0.3.2. [Browse the stable v0.3.2 version](h
   can obtain `PROCESS_VM_READ` and `PROCESS_TERMINATE`, allowing memory reads and termination.
   Protected processes or processes with custom DACLs may not be accessible.
 
-**1.1.1-preview · Windows x64 · console programs only**
+**1.1.0 · Windows x64 · console programs only**
 
 `launch-as` starts a console program as a **launch-as-managed local standard account** through the
 `launch-as-broker` Windows service. The client never accepts, reads, stores, or transmits the
@@ -21,11 +21,11 @@ the caller's logon SID or its default access to the caller's processes.
 This is a general-purpose alternate-account launcher: its authorised caller can choose a configured
 launch-as-managed account and any absolute executable. It is blast-radius reduction, not a sandbox: it does not
 protect against a local administrator or kernel-level attacker. GUI applications are out of scope
-for this preview.
+for this version.
 
 ## Install the binary package
 
-Extract `launch-as-v1.1.1-preview-win64.zip` and run the bundled setup script from its extracted
+Extract `launch-as-v1.1.0-win64.zip` and run the bundled setup script from its extracted
 directory. It elevates when needed, installs or updates the demand-start service, and can create a
 default account. Updating takes over that account and replaces its broker-owned password. The user
 who runs `install` becomes the broker's authorised caller.
@@ -131,4 +131,4 @@ The `interactive` GUI adapter is deliberately deferred to Phase 2; Phase 1 provi
 ## License
 
 `launch-as` is licensed under the [GNU General Public License version 3 only](LICENSE). Source for
-this preview is available at <https://github.com/fmuecke/launch-as/tree/v1.1.1-preview>.
+this version is available at <https://github.com/fmuecke/launch-as/tree/v1.1.0>.

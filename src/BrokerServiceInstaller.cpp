@@ -22,6 +22,8 @@ namespace
 {
 
 constexpr wchar_t BrokerInstallDirectoryName[] = L"launch-as";
+constexpr wchar_t LauncherExecutableName[] = L"launch-as.exe";
+constexpr wchar_t BrokerAdminExecutableName[] = L"launch-as-admin.exe";
 constexpr wchar_t BrokerExecutableName[] = L"launch-as-broker.exe";
 constexpr wchar_t BrokerConhostExecutableName[] = L"launch-as-conhost.exe";
 constexpr wchar_t BrokerServiceDisplayName[] = L"launch-as Broker";
@@ -290,10 +292,35 @@ using LocalSecurityDescriptor = launch_as::LocalAllocation<PSECURITY_DESCRIPTOR>
     }
 }
 
+[[nodiscard]] DWORD BrokerServiceExists(bool& exists)
+{
+    exists = false;
+    ServiceHandle manager(OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT));
+    if (!manager)
+    {
+        const DWORD managerError = GetLastError();
+        return managerError;
+    }
+    ServiceHandle service(OpenServiceW(manager.get(), L"launch-as-broker", SERVICE_QUERY_STATUS));
+    if (service)
+    {
+        exists = true;
+        return ERROR_SUCCESS;
+    }
+    const DWORD serviceError = GetLastError();
+    return serviceError == ERROR_SERVICE_DOES_NOT_EXIST ? ERROR_SUCCESS : serviceError;
+}
+
 } // namespace
 
 DWORD InstallBrokerService()
 {
+    bool existingService = false;
+    const DWORD existingServiceError = BrokerServiceExists(existingService);
+    if (existingServiceError != ERROR_SUCCESS)
+    {
+        return existingServiceError;
+    }
     const DWORD stopError = StopBrokerService();
     if (stopError != ERROR_SUCCESS)
     {
@@ -317,6 +344,13 @@ DWORD InstallBrokerService()
     if (sourceBrokerError != ERROR_SUCCESS)
     {
         return sourceBrokerError;
+    }
+    std::wstring sourceLauncherPath;
+    const DWORD sourceLauncherError =
+        GetSiblingExecutablePath(adminPath, LauncherExecutableName, sourceLauncherPath);
+    if (sourceLauncherError != ERROR_SUCCESS)
+    {
+        return sourceLauncherError;
     }
     std::wstring sourceConhostPath;
     const DWORD sourceConhostError =
@@ -350,6 +384,19 @@ DWORD InstallBrokerService()
     {
         return conhostCopyError;
     }
+    const std::wstring installedLauncherPath = installDirectory + L"\\" + LauncherExecutableName;
+    const DWORD launcherCopyError =
+        CopyAndSecureInstallFile(sourceLauncherPath, installedLauncherPath);
+    if (launcherCopyError != ERROR_SUCCESS)
+    {
+        return launcherCopyError;
+    }
+    const std::wstring installedAdminPath = installDirectory + L"\\" + BrokerAdminExecutableName;
+    const DWORD adminCopyError = CopyAndSecureInstallFile(adminPath, installedAdminPath);
+    if (adminCopyError != ERROR_SUCCESS)
+    {
+        return adminCopyError;
+    }
     const DWORD serviceError = InstallDemandStartBrokerService(L"launch-as-broker", installedPath);
     if (serviceError != ERROR_SUCCESS)
     {
@@ -372,7 +419,10 @@ DWORD InstallBrokerService()
     {
         return enrollmentDirectoryError;
     }
-    return StoreAuthorizedCallerSid(GetAuthorizedCallerPolicyPath(dataDirectory), callerSid.data());
+    return UpdateAuthorizedCallerPolicy(GetAuthorizedCallerPolicyPath(dataDirectory),
+        callerSid.data(),
+        existingService ? AuthorizedCallerPolicyUpdate::Preserve
+                        : AuthorizedCallerPolicyUpdate::Replace);
 }
 
 DWORD InstallDemandStartBrokerService(
@@ -601,7 +651,11 @@ DWORD RemoveBrokerInstallFiles(std::wstring_view installDirectory)
         return ERROR_DIRECTORY;
     }
 
-    for (const wchar_t* fileName : {BrokerExecutableName, BrokerConhostExecutableName})
+    for (const wchar_t* fileName :
+        {LauncherExecutableName,
+            BrokerAdminExecutableName,
+            BrokerExecutableName,
+            BrokerConhostExecutableName})
     {
         const std::wstring path = directory + L"\\" + fileName;
         if (!DeleteFileW(path.c_str()))

@@ -223,9 +223,12 @@ class TestService final
         std::wcerr << L"Could not create a temporary install directory.\n";
         return false;
     }
+    const std::filesystem::path launcher = directory.path() / L"launch-as.exe";
+    const std::filesystem::path admin = directory.path() / L"launch-as-admin.exe";
     const std::filesystem::path broker = directory.path() / L"launch-as-broker.exe";
     const std::filesystem::path conhost = directory.path() / L"launch-as-conhost.exe";
-    if (!CreateEmptyFile(broker) || !CreateEmptyFile(conhost))
+    if (!CreateEmptyFile(launcher) || !CreateEmptyFile(admin) || !CreateEmptyFile(broker) ||
+        !CreateEmptyFile(conhost))
     {
         std::wcerr << L"Could not create temporary broker files.\n";
         return false;
@@ -234,6 +237,8 @@ class TestService final
     const DWORD removalError =
         launch_as::broker::RemoveBrokerInstallFiles(directory.path().native());
     if (!Expect(removalError == ERROR_SUCCESS, L"Could not remove the installed broker files.") ||
+        !Expect(!FileExists(launcher), L"Uninstall retained launch-as.exe.") ||
+        !Expect(!FileExists(admin), L"Uninstall retained launch-as-admin.exe.") ||
         !Expect(!FileExists(broker), L"Uninstall retained launch-as-broker.exe.") ||
         !Expect(!FileExists(conhost), L"Uninstall retained launch-as-conhost.exe.") ||
         !Expect(!FileExists(directory.path()), L"Uninstall retained the empty install directory."))
@@ -247,7 +252,8 @@ class TestService final
         return false;
     }
     const std::filesystem::path unrelated = directory.path() / L"unrelated.txt";
-    if (!CreateEmptyFile(broker) || !CreateEmptyFile(conhost) || !CreateEmptyFile(unrelated))
+    if (!CreateEmptyFile(launcher) || !CreateEmptyFile(admin) || !CreateEmptyFile(broker) ||
+        !CreateEmptyFile(conhost) || !CreateEmptyFile(unrelated))
     {
         std::wcerr << L"Could not create the second temporary broker file set.\n";
         return false;
@@ -255,6 +261,10 @@ class TestService final
     return Expect(launch_as::broker::RemoveBrokerInstallFiles(directory.path().native()) ==
                       ERROR_SUCCESS,
                L"Could not remove the broker files from a nonempty directory.") &&
+           Expect(!FileExists(launcher),
+               L"Uninstall retained launch-as.exe in a nonempty directory.") &&
+           Expect(!FileExists(admin),
+               L"Uninstall retained launch-as-admin.exe in a nonempty directory.") &&
            Expect(!FileExists(broker),
                L"Uninstall retained launch-as-broker.exe in a nonempty directory.") &&
            Expect(!FileExists(conhost),

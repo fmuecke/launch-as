@@ -14,8 +14,16 @@ namespace launch_as::broker
 
 inline constexpr std::wstring_view AuthorizedCallerPolicyFileName = L"authorized-caller.sid";
 
+enum class AuthorizedCallerPolicyUpdate
+{
+    Replace,
+    Preserve,
+};
+
 [[nodiscard]] DWORD StoreAuthorizedCallerSid(std::wstring_view path, PSID callerSid);
 [[nodiscard]] DWORD LoadAuthorizedCallerSid(std::wstring_view path, std::vector<BYTE>& callerSid);
+[[nodiscard]] DWORD UpdateAuthorizedCallerPolicy(
+    std::wstring_view path, PSID callerSid, AuthorizedCallerPolicyUpdate update);
 [[nodiscard]] bool IsAuthorizedCaller(
     const std::vector<BYTE>& authorizedCallerSid, const std::vector<BYTE>& callerSid);
 [[nodiscard]] std::wstring GetAuthorizedCallerPolicyPath(std::wstring_view dataDirectory);

@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.2.0-preview] - 2026-09-15
+
+- Changed: Setup installs, updates, and uninstalls `launch-as.exe` and `launch-as-admin.exe`
+  alongside the broker and console host in `%ProgramFiles%\launch-as`.
+- Added: `Setup-LaunchAs.ps1 -Command Install|Update|Uninstall` supports explicit automation;
+  `-Force` accepts the corresponding confirmation.
+- Security: Setup compares the source and installed `launch-as.exe` product versions as SemVer and
+  refuses a downgrade.
+- Fixed: A service update preserves an existing authorised caller policy instead of silently
+  transferring launch authority to the account that ran the update.
+
 ## [1.1.0] - 2026-09-14
 
 - Added: `launch-as-admin create`, explicit `create <account> --takeover`, `list`, `forget`, and
@@ -69,6 +80,7 @@
 - Added: `--terminal` for Windows Terminal and VS Code panes.
 - Changed: Direct invocation is supported alongside the explicit `run` subcommand.
 
+[1.2.0-preview]: https://github.com/fmuecke/launch-as/releases/tag/v1.2.0-preview
 [1.1.0]: https://github.com/fmuecke/launch-as/releases/tag/v1.1.0
 [1.1.0-preview]: https://github.com/fmuecke/launch-as/releases/tag/v1.1.0-preview
 [1.0.0-preview]: https://github.com/fmuecke/launch-as/releases/tag/v1.0.0-preview

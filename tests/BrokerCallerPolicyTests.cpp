@@ -94,13 +94,62 @@ int wmain()
     {
         return 1;
     }
+    if (!Expect(launch_as::broker::IsAuthorizedCaller(storedSid, currentUserSid) &&
+                    !launch_as::broker::IsAuthorizedCaller(storedSid,
+                        std::vector<BYTE>(systemSid.begin(), systemSid.begin() + systemSidBytes)),
+            L"The stored caller SID did not retain its original authorization boundary."))
+    {
+        return 1;
+    }
 
-    return Expect(launch_as::broker::IsAuthorizedCaller(storedSid, currentUserSid),
-               L"The stored caller SID did not authorize its owner.") &&
-                   Expect(!launch_as::broker::IsAuthorizedCaller(storedSid,
-                              std::vector<BYTE>(
-                                  systemSid.begin(), systemSid.begin() + systemSidBytes)),
-                       L"The stored caller SID authorized a different user.")
-               ? 0
-               : 1;
+    std::array<BYTE, SECURITY_MAX_SID_SIZE> administratorsSid {};
+    DWORD administratorsSidBytes = static_cast<DWORD>(administratorsSid.size());
+    if (!Expect(CreateWellKnownSid(WinBuiltinAdministratorsSid,
+                    nullptr,
+                    administratorsSid.data(),
+                    &administratorsSidBytes),
+            L"Could not construct the Administrators SID."))
+    {
+        return 1;
+    }
+
+    if (!Expect(launch_as::broker::StoreAuthorizedCallerSid(policyPath, systemSid.data()) ==
+                    ERROR_SUCCESS,
+            L"Could not replace the authorised caller SID for the update-policy test."))
+    {
+        return 1;
+    }
+    if (!Expect(launch_as::broker::UpdateAuthorizedCallerPolicy(policyPath,
+                    administratorsSid.data(),
+                    launch_as::broker::AuthorizedCallerPolicyUpdate::Preserve) == ERROR_SUCCESS,
+            L"Could not preserve an existing authorised caller policy."))
+    {
+        return 1;
+    }
+    if (!Expect(
+            launch_as::broker::LoadAuthorizedCallerSid(policyPath, storedSid) == ERROR_SUCCESS &&
+                launch_as::broker::IsAuthorizedCaller(storedSid,
+                    std::vector<BYTE>(systemSid.begin(), systemSid.begin() + systemSidBytes)),
+            L"An update replaced the existing authorised caller policy."))
+    {
+        return 1;
+    }
+    if (!Expect(launch_as::broker::UpdateAuthorizedCallerPolicy(policyPath,
+                    administratorsSid.data(),
+                    launch_as::broker::AuthorizedCallerPolicyUpdate::Replace) == ERROR_SUCCESS,
+            L"Could not initialize the authorised caller policy for a fresh install."))
+    {
+        return 1;
+    }
+    if (!Expect(
+            launch_as::broker::LoadAuthorizedCallerSid(policyPath, storedSid) == ERROR_SUCCESS &&
+                launch_as::broker::IsAuthorizedCaller(storedSid,
+                    std::vector<BYTE>(administratorsSid.begin(),
+                        administratorsSid.begin() + administratorsSidBytes)),
+            L"A fresh install did not replace the retained authorised caller policy."))
+    {
+        return 1;
+    }
+
+    return 0;
 }

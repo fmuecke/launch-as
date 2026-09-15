@@ -11,7 +11,7 @@ The current stable version is still v0.3.2. [Browse the stable v0.3.2 version](h
   can obtain `PROCESS_VM_READ` and `PROCESS_TERMINATE`, allowing memory reads and termination.
   Protected processes or processes with custom DACLs may not be accessible.
 
-**1.1.0 · Windows x64 · console programs only**
+**1.2.0-preview · Windows x64 · console programs only**
 
 `launch-as` starts a console program as a **launch-as-managed local standard account** through the
 `launch-as-broker` Windows service. The client never accepts, reads, stores, or transmits the
@@ -25,20 +25,33 @@ for this version.
 
 ## Install the binary package
 
-Extract `launch-as-v1.1.0-win64.zip` and run the bundled setup script from its extracted
-directory. It elevates when needed, installs or updates the demand-start service, and can create a
-default account. Updating takes over that account and replaces its broker-owned password. The user
-who runs `install` becomes the broker's authorised caller.
+Extract `launch-as-v1.2.0-preview-win64.zip` and run the bundled setup script from its extracted
+directory. It elevates when needed, installs or updates the demand-start service and all four
+executables into `%ProgramFiles%\launch-as`, and can create a default account. Updating takes over
+that account and replaces its broker-owned password. The user who runs a fresh `install` becomes the
+broker's authorised caller, including after a prior uninstall; updates preserve that caller policy.
+Setup rejects a candidate whose
+`launch-as.exe` SemVer is lower than the installed client version; an equal version is a repair
+reinstall.
 
 ```powershell
 .\Setup-LaunchAs.ps1
 ```
 
 The package contains `launch-as.exe`, `launch-as-admin.exe`, `launch-as-broker.exe`,
-`launch-as-conhost.exe`, this README, the setup script, and the license. Keep
-`launch-as-admin.exe`, `launch-as-broker.exe`, and `launch-as-conhost.exe` together while
-installing; setup copies the broker and console host to
-`%ProgramFiles%\launch-as` with protected permissions.
+`launch-as-conhost.exe`, this README, the setup script, and the license. Keep all four executables
+together while installing; setup copies them to `%ProgramFiles%\launch-as` with protected
+permissions. That directory is deliberately not added to `PATH`; invoke the installed client by
+its full path or add it to your own user `PATH` if desired.
+
+For non-interactive automation, select an action explicitly and use `-Force` to accept the
+documented account/password-reset or uninstall operation:
+
+```powershell
+.\Setup-LaunchAs.ps1 -Command Install -Force
+.\Setup-LaunchAs.ps1 -Command Update -Force
+.\Setup-LaunchAs.ps1 -Command Uninstall -Force
+```
 
 ## Setup
 
@@ -51,7 +64,9 @@ these commands from the extracted package directory (or `out\build\Release` afte
 ```
 
 `install`, `create`, `forget`, `delete`, and `uninstall` require elevation. `install` stops active
-broker sessions before updating the service. `create <account>` creates a dedicated account and
+broker sessions before updating the service and copies all launch-as executables. `uninstall`
+removes the service and every launch-as executable from `%ProgramFiles%\launch-as`; it retains
+registered Windows accounts and `%ProgramData%\launch-as` enrollment data. `create <account>` creates a dedicated account and
 fails if that name already exists. Use
 `create <account> --takeover` to deliberately reset an existing account's password and make it
 launch-as-owned. Taking over a disabled account requires `--force` to re-enable it. A forced
@@ -131,4 +146,4 @@ The `interactive` GUI adapter is deliberately deferred to Phase 2; Phase 1 provi
 ## License
 
 `launch-as` is licensed under the [GNU General Public License version 3 only](LICENSE). Source for
-this version is available at <https://github.com/fmuecke/launch-as/tree/v1.1.0>.
+this preview is available at <https://github.com/fmuecke/launch-as/tree/v1.2.0-preview>.

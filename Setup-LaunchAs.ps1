@@ -5,6 +5,10 @@
 [CmdletBinding()]
 param(
     [Parameter()]
+    [ValidateSet('Interactive', 'Install', 'Update', 'Uninstall')]
+    [string] $Command = 'Interactive',
+
+    [Parameter()]
     # This value is embedded in the elevated relaunch command line; reject quoting/control
     # characters and keep it aligned with the broker's local-account-name grammar.
     [ValidatePattern('^[^\\/\[\]:;|=,+*?<>"\x00-\x1F]{1,20}$')]
@@ -33,9 +37,64 @@ function Confirm-Action {
     return (Read-Host "$Prompt [y/N]") -match '^(?i)y(?:es)?$'
 }
 
+function Get-LaunchAsExecutable {
+    $packageLauncher = Join-Path $PSScriptRoot 'launch-as.exe'
+    $buildLauncher = Join-Path $PSScriptRoot 'out\build\Release\launch-as.exe'
+    if (Test-Path -LiteralPath $packageLauncher -PathType Leaf) {
+        return $packageLauncher
+    }
+    if (Test-Path -LiteralPath $buildLauncher -PathType Leaf) {
+        return $buildLauncher
+    }
+    throw "launch-as.exe was not found beside the script or at $buildLauncher. Extract the binary package or run .\build.ps1 first."
+}
+
+function Get-InstalledLaunchAsExecutable {
+    $programFiles = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)
+    return Join-Path $programFiles 'launch-as\launch-as.exe'
+}
+
+function Get-SemanticVersion {
+    param(
+        [Parameter(Mandatory)]
+        [string] $Path
+    )
+
+    $version = [Diagnostics.FileVersionInfo]::GetVersionInfo($Path).ProductVersion
+    if ([string]::IsNullOrWhiteSpace($version)) {
+        throw "Could not read a product version from $Path."
+    }
+    try {
+        return [System.Management.Automation.SemanticVersion]::Parse($version)
+    }
+    catch {
+        throw "Product version '$version' in $Path is not valid SemVer."
+    }
+}
+
+function Assert-NotDowngrade {
+    $installedLauncher = Get-InstalledLaunchAsExecutable
+    if (-not (Test-Path -LiteralPath $installedLauncher -PathType Leaf)) {
+        return
+    }
+
+    $candidateLauncher = Get-LaunchAsExecutable
+    $installedVersion = Get-SemanticVersion -Path $installedLauncher
+    $candidateVersion = Get-SemanticVersion -Path $candidateLauncher
+    if ($candidateVersion.CompareTo($installedVersion) -lt 0) {
+        throw "Refusing to downgrade launch-as from $installedVersion to $candidateVersion."
+    }
+    if ($candidateVersion.CompareTo($installedVersion) -eq 0) {
+        Write-Host "Reinstalling launch-as $candidateVersion."
+    }
+    else {
+        Write-Host "Updating launch-as from $installedVersion to $candidateVersion."
+    }
+}
+
 if (-not (Test-Administrator)) {
     $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" " +
-    "-DefaultAccount `"$DefaultAccount`""
+    "-Command `"$Command`" -DefaultAccount `"$DefaultAccount`""
     if ($Force) {
         $arguments += ' -Force'
     }
@@ -71,27 +130,42 @@ else {
 }
 
 $service = Get-Service -Name 'launch-as-broker' -ErrorAction SilentlyContinue
-if ($null -eq $service) {
-    if (-not (Confirm-Action 'Install launch-as-broker')) {
-        exit $exitCancelled
+if ($Command -eq 'Interactive') {
+    if ($null -eq $service) {
+        $Command = 'Install'
     }
-    & $admin install
-    if ($LASTEXITCODE -ne 0) {
-        exit $LASTEXITCODE
+    else {
+        Write-Host "Existing launch-as-broker service detected ($($service.Status))."
+        $Command = if ($Force) { 'Update' } else { Read-Host 'Choose update, uninstall, or cancel' }
     }
-    if (Confirm-Action "Create default launch-as account '$DefaultAccount'") {
-        & $admin create $DefaultAccount
-        exit $LASTEXITCODE
-    }
-    Write-Host 'Broker installation completed, but account creation was cancelled.' -ForegroundColor Yellow
-    exit $exitCancelled
 }
 
-Write-Host "Existing launch-as-broker service detected ($($service.Status))."
-$choice = if ($Force) { 'update' } else { Read-Host 'Choose update, uninstall, or cancel' }
-switch ($choice.ToLowerInvariant()) {
+switch ($Command.ToLowerInvariant()) {
+    'install' {
+        if ($null -ne $service) {
+            throw 'launch-as-broker is already installed. Use -Command Update or -Command Uninstall.'
+        }
+        Assert-NotDowngrade
+        if (-not (Confirm-Action 'Install launch-as-broker and the launch-as command-line tools; authorize the current user to launch managed accounts')) {
+            exit $exitCancelled
+        }
+        & $admin install
+        if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+        }
+        if (Confirm-Action "Create default launch-as account '$DefaultAccount'") {
+            & $admin create $DefaultAccount
+            exit $LASTEXITCODE
+        }
+        Write-Host 'Broker installation completed, but account creation was cancelled.' -ForegroundColor Yellow
+        exit $exitCancelled
+    }
     'update' {
-        $updatePrompt = "Update the broker, stop any active broker sessions, and take over default account '$DefaultAccount' (replacing its broker-owned password)"
+        if ($null -eq $service) {
+            throw 'launch-as-broker is not installed. Use -Command Install.'
+        }
+        Assert-NotDowngrade
+        $updatePrompt = "Update the broker and command-line tools, stop any active broker sessions, and take over default account '$DefaultAccount' (replacing its broker-owned password)"
         if (-not (Confirm-Action $updatePrompt)) {
             exit $exitCancelled
         }
@@ -103,7 +177,11 @@ switch ($choice.ToLowerInvariant()) {
         exit $LASTEXITCODE
     }
     'uninstall' {
-        if (-not (Confirm-Action 'Uninstall the broker service and its installed binaries')) {
+        if ($null -eq $service) {
+            Write-Host 'launch-as-broker is not installed; removing any residual launch-as artifacts.' `
+                -ForegroundColor Yellow
+        }
+        if (-not (Confirm-Action 'Uninstall the broker service and all installed launch-as executables')) {
             exit $exitCancelled
         }
         & $admin uninstall --force

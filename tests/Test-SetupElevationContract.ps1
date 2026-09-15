@@ -22,8 +22,9 @@ if ($scriptText -match '\$arguments\s*=\s*@\(' -or
     throw 'The setup relaunch must not use an unquoted argument array or resolve pwsh through PATH.'
 }
 if ($scriptText -notmatch '-File `"\$PSCommandPath`"' -or
+    $scriptText -notmatch '-Command `"\$Command`"' -or
     $scriptText -notmatch '-DefaultAccount `"\$DefaultAccount`"') {
-    throw 'The setup relaunch must quote both the script path and default account.'
+    throw 'The setup relaunch must quote the script path, command, and default account.'
 }
 
 & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -File $Path -DefaultAccount 'invalid/account'

@@ -95,6 +95,25 @@ DWORD LoadAuthorizedCallerSid(std::wstring_view path, std::vector<BYTE>& callerS
     return ERROR_SUCCESS;
 }
 
+DWORD UpdateAuthorizedCallerPolicy(
+    std::wstring_view path, PSID callerSid, AuthorizedCallerPolicyUpdate update)
+{
+    if (update == AuthorizedCallerPolicyUpdate::Preserve)
+    {
+        std::vector<BYTE> existingCallerSid;
+        const DWORD loadError = LoadAuthorizedCallerSid(path, existingCallerSid);
+        if (loadError == ERROR_SUCCESS)
+        {
+            return ERROR_SUCCESS;
+        }
+        if (loadError != ERROR_FILE_NOT_FOUND && loadError != ERROR_PATH_NOT_FOUND)
+        {
+            return loadError;
+        }
+    }
+    return StoreAuthorizedCallerSid(path, callerSid);
+}
+
 bool IsAuthorizedCaller(
     const std::vector<BYTE>& authorizedCallerSid, const std::vector<BYTE>& callerSid)
 {

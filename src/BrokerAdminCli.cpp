@@ -119,7 +119,7 @@ void PrintUsage()
 
   Commands are:
     install                         Stop active sessions, then create or update the broker service.
-    uninstall [--force]             Stop and remove the service; accounts are retained.
+    uninstall [--force]             Stop and remove the service and installed executables; accounts are retained.
     create <account>                Create a new account owned by launch-as; it fails if the name exists.
     create <account> --takeover [--force]    Take over an account and make it launch-as-owned.
     list                            Show owned accounts.
@@ -159,8 +159,8 @@ int RunConfigurationCommand(int argumentCount, wchar_t* arguments[])
         const DWORD uninstallError = launch_as::broker::UninstallBrokerService();
         if (uninstallError == ERROR_SUCCESS)
         {
-            std::wcout << L"Uninstalled the launch-as-broker service. Registered accounts were "
-                          L"retained.\n";
+            std::wcout << L"Uninstalled the launch-as-broker service and installed executables. "
+                          L"Registered accounts were retained.\n";
         }
         else
         {

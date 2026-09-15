@@ -21,6 +21,7 @@ if (-not $updateClause.Success) {
 }
 
 $body = $updateClause.Groups['body'].Value
+$versionCheckIndex = $body.IndexOf('Assert-NotDowngrade', [StringComparison]::Ordinal)
 $installIndex = $body.IndexOf('& $admin install', [StringComparison]::Ordinal)
 $installFailureIndex = $body.IndexOf('if ($LASTEXITCODE -ne 0)', [StringComparison]::Ordinal)
 $takeoverIndex = $body.IndexOf(
@@ -28,6 +29,9 @@ $takeoverIndex = $body.IndexOf(
 
 if ($installIndex -lt 0) {
     throw 'The setup update branch does not install the broker.'
+}
+if ($versionCheckIndex -lt 0 -or $versionCheckIndex -gt $installIndex) {
+    throw 'The setup update branch must reject a downgrade before installation.'
 }
 if ($installFailureIndex -lt $installIndex -or $installFailureIndex -gt $takeoverIndex) {
     throw 'The setup update branch does not stop before takeover when installation fails.'
@@ -43,4 +47,13 @@ if ($body -notmatch 'take over default account ''\$DefaultAccount''') {
 }
 if ($body -notmatch 'replacing its broker-owned password') {
     throw 'The setup update confirmation does not disclose password replacement.'
+}
+if ($scriptText -notmatch "\[ValidateSet\('Interactive', 'Install', 'Update', 'Uninstall'\)\]") {
+    throw 'The setup script must expose explicit command-line actions.'
+}
+if ($scriptText -notmatch '\[System\.Management\.Automation\.SemanticVersion\]::Parse') {
+    throw 'The setup script must compare file versions with a SemVer parser.'
+}
+if ($scriptText -notmatch 'Refusing to downgrade launch-as') {
+    throw 'The setup script must reject downgrade attempts.'
 }

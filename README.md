@@ -111,6 +111,7 @@ needed and builds the Ninja Multi-Config Release target by default.
 .\build.ps1
 .\build.ps1 -Configuration Debug
 .\build.ps1 -RunTests
+.\build.ps1 -RunSandboxTests
 .\build.ps1 -RunAllTests
 .\build.ps1 -PackageRelease
 ```
@@ -118,11 +119,14 @@ needed and builds the Ninja Multi-Config Release target by default.
 `-PackageRelease` performs a clean Release build in `out\release-build` and writes the
 distributable `out\release\launch-as-v<version>-win64.zip` package.
 
-`-RunTests` runs every non-elevated CTest test. `-RunAllTests` adds the tests labelled `elevated`:
-when necessary, it asks for UAC approval and runs only that subset in an elevated child process.
-That child window stays open after the elevated tests complete so their output can be inspected.
+`-RunTests` runs every non-elevated, noninteractive CTest test. `-RunSandboxTests` runs the three
+privileged integration tests as SYSTEM inside a fresh Windows Sandbox without elevating or changing
+the host. It downloads a pinned revision of the Windows Sandbox test helper and verifies its
+SHA-256 before import. `-RunAllTests` runs both sets. Windows Sandbox must be installed and
+`wsb.exe` must be available.
+
 The installed-service acceptance checks remain explicit because they require an installed broker,
-a configured launch-as-managed account, and the authorised non-elevated interactive session:
+a configured launch-as-managed account, a TTY, and the authorised non-elevated interactive session:
 
 ```powershell
 .\build.ps1 -RunAcceptanceTest

@@ -4,6 +4,7 @@
 
 #include "PseudoConsoleHost.h"
 
+#include "PseudoConsoleHostInvocation.h"
 #include "PseudoConsoleHostReport.h"
 #include "PseudoConsoleSession.h"
 #include "TerminalIO.h"
@@ -14,12 +15,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdio>
-#include <cwchar>
 #include <fcntl.h>
 #include <filesystem>
 #include <io.h>
 #include <iostream>
-#include <limits>
 #include <span>
 #include <string>
 #include <string_view>
@@ -30,24 +29,7 @@ namespace launch_as
 namespace
 {
 
-constexpr std::wstring_view HostArgument = L"--internal-pseudoconsole-host";
-constexpr std::wstring_view SizeArgument = L"--size";
-constexpr std::wstring_view InheritCursorArgument = L"--inherit-cursor";
-constexpr std::wstring_view PipeInArgument = L"--pipe-in";
-constexpr std::wstring_view PipeOutArgument = L"--pipe-out";
-constexpr std::wstring_view PipeResizeArgument = L"--pipe-resize";
 constexpr DWORD ProcessTerminationTimeoutMilliseconds = 5'000;
-
-struct HostInvocation
-{
-    COORD terminalSize {};
-    bool inheritCursor = false;
-    std::filesystem::path executable;
-    std::vector<std::wstring> processArguments;
-    std::wstring pipeIn;
-    std::wstring pipeOut;
-    std::wstring pipeResize;
-};
 
 [[nodiscard]] bool PrepareResizeInput(HANDLE source, HANDLE output, bool redirectDiagnostics,
     UniqueHandle& resizeInput, std::wstring& error)
@@ -100,83 +82,6 @@ struct HostInvocation
     return true;
 }
 
-[[nodiscard]] bool ParseDimension(const wchar_t* text, SHORT& value) noexcept
-{
-    wchar_t* end = nullptr;
-    const long parsed = std::wcstol(text, &end, 10);
-    if (end == text || *end != L'\0' || parsed <= 0 || parsed > std::numeric_limits<SHORT>::max())
-    {
-        return false;
-    }
-    value = static_cast<SHORT>(parsed);
-    return true;
-}
-
-[[nodiscard]] bool ParseHostArguments(std::span<wchar_t*> arguments, HostInvocation& invocation)
-{
-    if (arguments.size() < 7 || std::wstring_view(arguments[1]) != HostArgument ||
-        std::wstring_view(arguments[2]) != SizeArgument ||
-        !ParseDimension(arguments[3], invocation.terminalSize.X) ||
-        !ParseDimension(arguments[4], invocation.terminalSize.Y))
-    {
-        return false;
-    }
-
-    std::size_t separatorIndex = 5;
-    invocation.inheritCursor =
-        std::wstring_view(arguments[separatorIndex]) == InheritCursorArgument;
-    if (invocation.inheritCursor)
-    {
-        ++separatorIndex;
-    }
-    for (;
-        separatorIndex < arguments.size() && std::wstring_view(arguments[separatorIndex]) != L"--";
-        separatorIndex += 2)
-    {
-        if (separatorIndex + 1 >= arguments.size())
-        {
-            return false;
-        }
-        const std::wstring_view name(arguments[separatorIndex]);
-        const std::wstring_view value(arguments[separatorIndex + 1]);
-        if (value.empty())
-        {
-            return false;
-        }
-        if (name == PipeInArgument && invocation.pipeIn.empty())
-        {
-            invocation.pipeIn = value;
-        }
-        else if (name == PipeOutArgument && invocation.pipeOut.empty())
-        {
-            invocation.pipeOut = value;
-        }
-        else if (name == PipeResizeArgument && invocation.pipeResize.empty())
-        {
-            invocation.pipeResize = value;
-        }
-        else
-        {
-            return false;
-        }
-    }
-    if (arguments.size() <= separatorIndex + 1 ||
-        std::wstring_view(arguments[separatorIndex]) != L"--")
-    {
-        return false;
-    }
-
-    invocation.executable = arguments[separatorIndex + 1];
-    for (std::size_t index = separatorIndex + 2; index < arguments.size(); ++index)
-    {
-        invocation.processArguments.emplace_back(arguments[index]);
-    }
-    return (invocation.pipeIn.empty() && invocation.pipeOut.empty() &&
-               invocation.pipeResize.empty()) ||
-           (!invocation.pipeIn.empty() && !invocation.pipeOut.empty() &&
-               !invocation.pipeResize.empty());
-}
-
 [[nodiscard]] bool OpenPipeClient(
     std::wstring_view pipeName, DWORD access, UniqueHandle& pipe, std::wstring& error)
 {
@@ -200,15 +105,10 @@ struct HostInvocation
 
 } // namespace
 
-bool IsPseudoConsoleHostInvocation(std::span<wchar_t*> arguments) noexcept
-{
-    return arguments.size() >= 2 && std::wstring_view(arguments[1]) == HostArgument;
-}
-
 ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
 {
-    HostInvocation invocation;
-    if (!ParseHostArguments(arguments, invocation))
+    PseudoConsoleHostInvocation invocation;
+    if (!ParsePseudoConsoleHostInvocation(arguments, invocation))
     {
         std::wcerr << L"Invalid internal pseudoconsole-host invocation.\n";
         return ExitUsage;

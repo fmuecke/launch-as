@@ -16,6 +16,9 @@ param(
     [switch] $RunAllTests,
 
     [Parameter()]
+    [switch] $RunSandboxTests,
+
+    [Parameter()]
     [switch] $RunElevatedTests,
 
     [Parameter()]
@@ -113,38 +116,10 @@ function Invoke-CtestTests {
     }
 }
 
-function Invoke-ElevatedCtestTests {
-    if (Test-IsAdministrator) {
-        Invoke-CtestTests -Description 'all elevated' -LabelOption '--label-regex' -LabelValue 'elevated'
-        return
-    }
-
-    Write-Host ""
-    Write-Host 'Requesting UAC approval to run elevated CTest tests'
-    $hostExecutable = (Get-Process -Id $PID).Path
-    if ([string]::IsNullOrWhiteSpace($hostExecutable)) {
-        throw 'Could not determine the current PowerShell executable for the elevated test run.'
-    }
-    $elevatedTestOutputPath = Join-Path $buildDirectory "elevated-ctest-$Configuration.log"
-    if (Test-Path -LiteralPath $elevatedTestOutputPath) {
-        Remove-Item -LiteralPath $elevatedTestOutputPath -Force
-    }
-    $elevatedArguments = "-NoProfile -File `"$PSCommandPath`" -Configuration $Configuration -RunElevatedTests -ElevatedTestOutputPath `"$elevatedTestOutputPath`""
-    try {
-        $process = Start-Process -FilePath $hostExecutable -ArgumentList $elevatedArguments -Verb RunAs -Wait -PassThru -WorkingDirectory $projectRoot
-    }
-    catch {
-        throw "Could not start elevated CTest tests: $($_.Exception.Message)"
-    }
-    if (Test-Path -LiteralPath $elevatedTestOutputPath) {
-        Get-Content -LiteralPath $elevatedTestOutputPath
-    }
-    else {
-        Write-Warning "Elevated CTest output was not captured: $elevatedTestOutputPath"
-    }
-    if ($process.ExitCode -ne 0) {
-        throw "Elevated CTest tests failed with exit code $($process.ExitCode)."
-    }
+function Invoke-WindowsSandboxIntegrationTests {
+    & (Join-Path $projectRoot 'tests\Invoke-BrokerIntegrationInWindowsSandbox.ps1') `
+        -BuildDirectory $buildDirectory `
+        -Configuration $Configuration
 }
 
 if ($RunElevatedTests) {
@@ -260,11 +235,13 @@ if ($LASTEXITCODE -ne 0) {
 
 if ($RunTests -or $RunAllTests) {
     Invoke-CtestTests -Description 'all non-elevated' -LabelOption '--label-exclude' -LabelValue 'elevated|interactive'
-    $RunAcceptanceTest = $true;
 }
 
 if ($RunAllTests) {
-    Invoke-ElevatedCtestTests
+    Invoke-WindowsSandboxIntegrationTests
+}
+elseif ($RunSandboxTests) {
+    Invoke-WindowsSandboxIntegrationTests
 }
 
 if ($RunAcceptanceTest) {

@@ -67,33 +67,40 @@ configure_file(
 )
 
 add_executable(launch_as
-    src/BrokerControlPipe.cpp
-    src/BrokerControlPipe.h
-    src/BrokerControlClient.cpp
-    src/BrokerControlClient.h
-    src/BrokerProtocol.cpp
-    src/BrokerProtocol.h
-    src/launch_as.cpp
-    src/LauncherOptions.cpp
-    src/LauncherOptions.h
-    src/LaunchProcess.cpp
-    src/LaunchProcess.h
-    src/LicenseHeader.cpp
-    src/LicenseHeader.h
-    src/TerminalBridge.cpp
-    src/TerminalBridge.h
-    src/TerminalIO.cpp
-    src/TerminalIO.h
-    src/Win32Support.cpp
-    src/Win32Support.h
-    src/WindowsCommandLine.cpp
-    src/WindowsCommandLine.h
+    src/protocol/BrokerControlPipe.cpp
+    src/protocol/BrokerControlPipe.h
+    src/launcher/BrokerControlClient.cpp
+    src/launcher/BrokerControlClient.h
+    src/protocol/BrokerProtocol.cpp
+    src/protocol/BrokerProtocol.h
+    src/launcher/launch_as.cpp
+    src/launcher/LauncherOptions.cpp
+    src/launcher/LauncherOptions.h
+    src/launcher/LaunchProcess.cpp
+    src/launcher/LaunchProcess.h
+    src/common/LicenseHeader.cpp
+    src/common/LicenseHeader.h
+    src/terminal/TerminalBridge.cpp
+    src/terminal/TerminalBridge.h
+    src/terminal/TerminalIO.cpp
+    src/terminal/TerminalIO.h
+    src/common/Win32Support.cpp
+    src/common/Win32Support.h
+    src/common/WindowsCommandLine.cpp
+    src/common/WindowsCommandLine.h
     "${CMAKE_CURRENT_BINARY_DIR}/LauncherVersion.rc"
 )
 function(configure_launch_as_target target)
-    if(ARGN)
-        target_include_directories(${target} PRIVATE ${ARGN})
-    endif()
+    target_include_directories(${target} PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/admin"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/broker"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/common"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/conhost"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/launcher"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/protocol"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/terminal"
+        ${ARGN}
+    )
 
     target_compile_features(${target} PRIVATE cxx_std_23)
 
@@ -151,21 +158,23 @@ set_target_properties(launch_as PROPERTIES
 )
 
 add_executable(launch_as_conhost
-    src/LicenseHeader.cpp
-    src/LicenseHeader.h
-    src/launch_as_conhost.cpp
-    src/LauncherOptions.h
-    src/PseudoConsoleHost.cpp
-    src/PseudoConsoleHost.h
-    src/PseudoConsoleHostReport.h
-    src/PseudoConsoleSession.cpp
-    src/PseudoConsoleSession.h
-    src/TerminalIO.cpp
-    src/TerminalIO.h
-    src/Win32Support.cpp
-    src/Win32Support.h
-    src/WindowsCommandLine.cpp
-    src/WindowsCommandLine.h
+    src/common/LicenseHeader.cpp
+    src/common/LicenseHeader.h
+    src/conhost/launch_as_conhost.cpp
+    src/common/ExitCodes.h
+    src/conhost/PseudoConsoleHost.cpp
+    src/conhost/PseudoConsoleHost.h
+    src/conhost/PseudoConsoleHostInvocation.cpp
+    src/conhost/PseudoConsoleHostInvocation.h
+    src/protocol/PseudoConsoleHostReport.h
+    src/conhost/PseudoConsoleSession.cpp
+    src/conhost/PseudoConsoleSession.h
+    src/terminal/TerminalIO.cpp
+    src/terminal/TerminalIO.h
+    src/common/Win32Support.cpp
+    src/common/Win32Support.h
+    src/common/WindowsCommandLine.cpp
+    src/common/WindowsCommandLine.h
     "${CMAKE_CURRENT_BINARY_DIR}/LauncherConhostVersion.rc"
 )
 target_link_libraries(launch_as_conhost PRIVATE
@@ -177,40 +186,45 @@ set_target_properties(launch_as_conhost PROPERTIES
 )
 
 add_executable(launch_as_broker
-    src/BrokerAccountProvisioner.cpp
-    src/BrokerAccountProvisioner.h
-    src/BrokerAudit.cpp
-    src/BrokerAudit.h
-    src/BrokerCallerPolicy.cpp
-    src/BrokerCallerPolicy.h
-    src/BrokerControlPipe.cpp
-    src/BrokerControlPipe.h
-    src/BrokerDataDirectory.cpp
-    src/BrokerDataDirectory.h
-    src/BrokerEnrollmentStore.cpp
-    src/BrokerEnrollmentStore.h
-    src/BrokerLogonToken.cpp
-    src/BrokerLogonToken.h
-    src/BrokerPassword.cpp
-    src/BrokerPassword.h
-    src/LicenseHeader.cpp
-    src/LicenseHeader.h
-    src/BrokerProcessLauncher.cpp
-    src/BrokerProcessLauncher.h
-    src/PseudoConsoleHostReport.h
-    src/BrokerRegistration.cpp
-    src/BrokerRegistration.h
-    src/BrokerPipeServer.cpp
-    src/BrokerPipeServer.h
-    src/BrokerProtocol.cpp
-    src/BrokerProtocol.h
-    src/BrokerService.cpp
-    src/BrokerServiceRuntime.cpp
-    src/BrokerServiceRuntime.h
-    src/Win32Support.cpp
-    src/Win32Support.h
-    src/WindowsCommandLine.cpp
-    src/WindowsCommandLine.h
+    src/broker/BrokerAccountProvisioner.cpp
+    src/broker/BrokerAccountProvisioner.h
+    src/broker/BrokerApplication.cpp
+    src/broker/BrokerApplication.h
+    src/broker/BrokerAudit.cpp
+    src/broker/BrokerAudit.h
+    src/broker/BrokerCallerIdentity.h
+    src/broker/BrokerCallerPolicy.cpp
+    src/broker/BrokerCallerPolicy.h
+    src/broker/BrokerControlPipeListener.cpp
+    src/broker/BrokerControlPipeListener.h
+    src/protocol/BrokerControlPipe.cpp
+    src/protocol/BrokerControlPipe.h
+    src/broker/BrokerDataDirectory.cpp
+    src/broker/BrokerDataDirectory.h
+    src/broker/BrokerEnrollmentStore.cpp
+    src/broker/BrokerEnrollmentStore.h
+    src/broker/BrokerLogonToken.cpp
+    src/broker/BrokerLogonToken.h
+    src/broker/BrokerPassword.cpp
+    src/broker/BrokerPassword.h
+    src/common/LicenseHeader.cpp
+    src/common/LicenseHeader.h
+    src/broker/BrokerProcessLauncher.cpp
+    src/broker/BrokerProcessLauncher.h
+    src/protocol/PseudoConsoleHostReport.h
+    src/broker/BrokerRegistration.cpp
+    src/broker/BrokerRegistration.h
+    src/broker/BrokerPipeServer.cpp
+    src/broker/BrokerPipeServer.h
+    src/protocol/BrokerProtocol.cpp
+    src/protocol/BrokerProtocol.h
+    src/broker/BrokerService.cpp
+    src/broker/BrokerServiceRuntime.cpp
+    src/broker/BrokerServiceRuntime.h
+    src/common/Win32Support.cpp
+    src/common/Win32Support.h
+    src/common/WindowsCommandLine.cpp
+    src/common/WindowsCommandLine.h
     "${CMAKE_CURRENT_BINARY_DIR}/LauncherBrokerVersion.rc"
 )
 target_link_libraries(launch_as_broker PRIVATE
@@ -227,27 +241,27 @@ set_target_properties(launch_as_broker PROPERTIES
 )
 
 add_executable(launch_as_admin
-    src/BrokerAccountProvisioner.cpp
-    src/BrokerAccountProvisioner.h
-    src/BrokerAdmin.cpp
-    src/BrokerAdminCli.cpp
-    src/BrokerAdminCli.h
-    src/BrokerAudit.cpp
-    src/BrokerAudit.h
-    src/BrokerCallerPolicy.cpp
-    src/BrokerCallerPolicy.h
-    src/BrokerControlPipe.cpp
-    src/BrokerControlPipe.h
-    src/BrokerDataDirectory.cpp
-    src/BrokerDataDirectory.h
-    src/LicenseHeader.cpp
-    src/LicenseHeader.h
-    src/BrokerProtocol.cpp
-    src/BrokerProtocol.h
-    src/BrokerServiceInstaller.cpp
-    src/BrokerServiceInstaller.h
-    src/Win32Support.cpp
-    src/Win32Support.h
+    src/broker/BrokerAccountProvisioner.cpp
+    src/broker/BrokerAccountProvisioner.h
+    src/admin/BrokerAdmin.cpp
+    src/admin/BrokerAdminCli.cpp
+    src/admin/BrokerAdminCli.h
+    src/broker/BrokerAudit.cpp
+    src/broker/BrokerAudit.h
+    src/broker/BrokerCallerPolicy.cpp
+    src/broker/BrokerCallerPolicy.h
+    src/protocol/BrokerControlPipe.cpp
+    src/protocol/BrokerControlPipe.h
+    src/broker/BrokerDataDirectory.cpp
+    src/broker/BrokerDataDirectory.h
+    src/common/LicenseHeader.cpp
+    src/common/LicenseHeader.h
+    src/protocol/BrokerProtocol.cpp
+    src/protocol/BrokerProtocol.h
+    src/admin/BrokerServiceInstaller.cpp
+    src/admin/BrokerServiceInstaller.h
+    src/common/Win32Support.cpp
+    src/common/Win32Support.h
     "${CMAKE_CURRENT_BINARY_DIR}/LauncherAdminVersion.rc"
 )
 target_link_libraries(launch_as_admin PRIVATE
@@ -265,8 +279,8 @@ set_target_properties(launch_as_admin PROPERTIES
 if(BUILD_TESTING)
     add_executable(LauncherBrokerProtocolTests
         tests/BrokerProtocolTests.cpp
-        src/BrokerProtocol.cpp
-        src/BrokerProtocol.h
+        src/protocol/BrokerProtocol.cpp
+        src/protocol/BrokerProtocol.h
     )
     configure_launch_as_target(LauncherBrokerProtocolTests "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
@@ -280,15 +294,15 @@ if(BUILD_TESTING)
 
     add_executable(LauncherBrokerPipeTests
         tests/BrokerPipeTests.cpp
-        src/BrokerProcessLauncher.cpp
-        src/BrokerProcessLauncher.h
-        src/PseudoConsoleHostReport.h
-        src/BrokerPipeServer.cpp
-        src/BrokerPipeServer.h
-        src/BrokerProtocol.cpp
-        src/Win32Support.cpp
-        src/WindowsCommandLine.cpp
-        src/WindowsCommandLine.h
+        src/broker/BrokerProcessLauncher.cpp
+        src/broker/BrokerProcessLauncher.h
+        src/protocol/PseudoConsoleHostReport.h
+        src/broker/BrokerPipeServer.cpp
+        src/broker/BrokerPipeServer.h
+        src/protocol/BrokerProtocol.cpp
+        src/common/Win32Support.cpp
+        src/common/WindowsCommandLine.cpp
+        src/common/WindowsCommandLine.h
     )
     target_link_libraries(LauncherBrokerPipeTests PRIVATE
         Advapi32
@@ -309,18 +323,18 @@ if(BUILD_TESTING)
 
     add_executable(LauncherBrokerCommandTests
         tests/BrokerCommandTests.cpp
-        src/BrokerControlPipe.cpp
-        src/BrokerControlPipe.h
-        src/BrokerProcessLauncher.cpp
-        src/BrokerProcessLauncher.h
-        src/PseudoConsoleHostReport.h
-        src/BrokerPipeServer.cpp
-        src/BrokerPipeServer.h
-        src/BrokerProtocol.cpp
-        src/BrokerProtocol.h
-        src/Win32Support.cpp
-        src/WindowsCommandLine.cpp
-        src/WindowsCommandLine.h
+        src/protocol/BrokerControlPipe.cpp
+        src/protocol/BrokerControlPipe.h
+        src/broker/BrokerProcessLauncher.cpp
+        src/broker/BrokerProcessLauncher.h
+        src/protocol/PseudoConsoleHostReport.h
+        src/broker/BrokerPipeServer.cpp
+        src/broker/BrokerPipeServer.h
+        src/protocol/BrokerProtocol.cpp
+        src/protocol/BrokerProtocol.h
+        src/common/Win32Support.cpp
+        src/common/WindowsCommandLine.cpp
+        src/common/WindowsCommandLine.h
     )
     target_link_libraries(LauncherBrokerCommandTests PRIVATE
         Advapi32
@@ -332,27 +346,27 @@ if(BUILD_TESTING)
     )
 
     add_executable(LauncherBrokerAdminTestClient
-        src/BrokerAccountProvisioner.cpp
-        src/BrokerAccountProvisioner.h
-        src/BrokerAdmin.cpp
-        src/BrokerAdminCli.cpp
-        src/BrokerAdminCli.h
-        src/BrokerAudit.cpp
-        src/BrokerAudit.h
-        src/BrokerCallerPolicy.cpp
-        src/BrokerCallerPolicy.h
-        src/BrokerControlPipe.cpp
-        src/BrokerControlPipe.h
-        src/BrokerDataDirectory.cpp
-        src/BrokerDataDirectory.h
-        src/LicenseHeader.cpp
-        src/LicenseHeader.h
-        src/BrokerProtocol.cpp
-        src/BrokerProtocol.h
-        src/BrokerServiceInstaller.cpp
-        src/BrokerServiceInstaller.h
-        src/Win32Support.cpp
-        src/Win32Support.h
+        src/broker/BrokerAccountProvisioner.cpp
+        src/broker/BrokerAccountProvisioner.h
+        src/admin/BrokerAdmin.cpp
+        src/admin/BrokerAdminCli.cpp
+        src/admin/BrokerAdminCli.h
+        src/broker/BrokerAudit.cpp
+        src/broker/BrokerAudit.h
+        src/broker/BrokerCallerPolicy.cpp
+        src/broker/BrokerCallerPolicy.h
+        src/protocol/BrokerControlPipe.cpp
+        src/protocol/BrokerControlPipe.h
+        src/broker/BrokerDataDirectory.cpp
+        src/broker/BrokerDataDirectory.h
+        src/common/LicenseHeader.cpp
+        src/common/LicenseHeader.h
+        src/protocol/BrokerProtocol.cpp
+        src/protocol/BrokerProtocol.h
+        src/admin/BrokerServiceInstaller.cpp
+        src/admin/BrokerServiceInstaller.h
+        src/common/Win32Support.cpp
+        src/common/Win32Support.h
     )
 target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
     Advapi32
@@ -438,6 +452,20 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
     )
 
     add_test(
+        NAME launcher.sandbox_integration_contract
+        COMMAND
+            pwsh
+            -NoProfile
+            -File
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Test-SandboxIntegrationContract.ps1"
+            -Path
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Invoke-BrokerIntegrationInWindowsSandbox.ps1"
+    )
+    set_tests_properties(launcher.sandbox_integration_contract PROPERTIES
+        LABELS "build;unit"
+    )
+
+    add_test(
         NAME launcher.package_release_contract
         COMMAND
             pwsh
@@ -453,8 +481,8 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
 
     add_executable(LauncherBrokerPasswordTests
         tests/BrokerPasswordTests.cpp
-        src/BrokerPassword.cpp
-        src/BrokerPassword.h
+        src/broker/BrokerPassword.cpp
+        src/broker/BrokerPassword.h
     )
     target_link_libraries(LauncherBrokerPasswordTests PRIVATE
         Bcrypt
@@ -471,12 +499,12 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
 
     add_executable(LauncherBrokerEnrollmentStoreTests
         tests/BrokerEnrollmentStoreTests.cpp
-        src/BrokerAccountProvisioner.cpp
-        src/BrokerAccountProvisioner.h
-        src/BrokerEnrollmentStore.cpp
-        src/BrokerEnrollmentStore.h
-        src/BrokerPassword.cpp
-        src/BrokerPassword.h
+        src/broker/BrokerAccountProvisioner.cpp
+        src/broker/BrokerAccountProvisioner.h
+        src/broker/BrokerEnrollmentStore.cpp
+        src/broker/BrokerEnrollmentStore.h
+        src/broker/BrokerPassword.cpp
+        src/broker/BrokerPassword.h
     )
     target_link_libraries(LauncherBrokerEnrollmentStoreTests PRIVATE
         Bcrypt
@@ -494,8 +522,8 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
 
     add_executable(LauncherBrokerDataDirectoryTests
         tests/BrokerDataDirectoryTests.cpp
-        src/BrokerDataDirectory.cpp
-        src/BrokerDataDirectory.h
+        src/broker/BrokerDataDirectory.cpp
+        src/broker/BrokerDataDirectory.h
     )
     target_link_libraries(LauncherBrokerDataDirectoryTests PRIVATE
         Advapi32
@@ -514,8 +542,8 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
 
     add_executable(LauncherBrokerCallerPolicyTests
         tests/BrokerCallerPolicyTests.cpp
-        src/BrokerCallerPolicy.cpp
-        src/BrokerCallerPolicy.h
+        src/broker/BrokerCallerPolicy.cpp
+        src/broker/BrokerCallerPolicy.h
     )
     target_link_libraries(LauncherBrokerCallerPolicyTests PRIVATE
         Advapi32
@@ -532,10 +560,10 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
 
     add_executable(LauncherBrokerProcessLauncherTests
         tests/BrokerProcessLauncherTests.cpp
-        src/BrokerProcessLauncher.cpp
-        src/BrokerProcessLauncher.h
-        src/WindowsCommandLine.cpp
-        src/WindowsCommandLine.h
+        src/broker/BrokerProcessLauncher.cpp
+        src/broker/BrokerProcessLauncher.h
+        src/common/WindowsCommandLine.cpp
+        src/common/WindowsCommandLine.h
     )
     target_link_libraries(LauncherBrokerProcessLauncherTests PRIVATE
         Advapi32
@@ -556,8 +584,8 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
 
     add_executable(LauncherBrokerAuditTests
         tests/BrokerAuditTests.cpp
-        src/BrokerAudit.cpp
-        src/BrokerAudit.h
+        src/broker/BrokerAudit.cpp
+        src/broker/BrokerAudit.h
     )
     target_link_libraries(LauncherBrokerAuditTests PRIVATE
         Advapi32
@@ -584,10 +612,10 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
 
     add_executable(LauncherBrokerChildIdentityProbeTests
         tests/BrokerChildIdentityProbeTests.cpp
-        src/Win32Support.cpp
-        src/Win32Support.h
-        src/WindowsCommandLine.cpp
-        src/WindowsCommandLine.h
+        src/common/Win32Support.cpp
+        src/common/Win32Support.h
+        src/common/WindowsCommandLine.cpp
+        src/common/WindowsCommandLine.h
     )
     target_link_libraries(LauncherBrokerChildIdentityProbeTests PRIVATE
         Advapi32
@@ -606,16 +634,16 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
 
     add_executable(LauncherBrokerAccountProvisioningTests
         tests/BrokerAccountProvisioningTests.cpp
-        src/BrokerAccountProvisioner.cpp
-        src/BrokerAccountProvisioner.h
-        src/BrokerEnrollmentStore.cpp
-        src/BrokerEnrollmentStore.h
-        src/BrokerLogonToken.cpp
-        src/BrokerLogonToken.h
-        src/BrokerPassword.cpp
-        src/BrokerPassword.h
-        src/BrokerRegistration.cpp
-        src/BrokerRegistration.h
+        src/broker/BrokerAccountProvisioner.cpp
+        src/broker/BrokerAccountProvisioner.h
+        src/broker/BrokerEnrollmentStore.cpp
+        src/broker/BrokerEnrollmentStore.h
+        src/broker/BrokerLogonToken.cpp
+        src/broker/BrokerLogonToken.h
+        src/broker/BrokerPassword.cpp
+        src/broker/BrokerPassword.h
+        src/broker/BrokerRegistration.cpp
+        src/broker/BrokerRegistration.h
     )
     target_link_libraries(LauncherBrokerAccountProvisioningTests PRIVATE
         Bcrypt
@@ -634,14 +662,14 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
 
     add_executable(LauncherBrokerServiceInstallerTests
         tests/BrokerServiceInstallerTests.cpp
-        src/BrokerAudit.cpp
-        src/BrokerAudit.h
-        src/BrokerCallerPolicy.cpp
-        src/BrokerCallerPolicy.h
-        src/BrokerDataDirectory.cpp
-        src/BrokerDataDirectory.h
-        src/BrokerServiceInstaller.cpp
-        src/BrokerServiceInstaller.h
+        src/broker/BrokerAudit.cpp
+        src/broker/BrokerAudit.h
+        src/broker/BrokerCallerPolicy.cpp
+        src/broker/BrokerCallerPolicy.h
+        src/broker/BrokerDataDirectory.cpp
+        src/broker/BrokerDataDirectory.h
+        src/admin/BrokerServiceInstaller.cpp
+        src/admin/BrokerServiceInstaller.h
     )
     target_link_libraries(LauncherBrokerServiceInstallerTests PRIVATE
         Advapi32
@@ -686,7 +714,7 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
 
     add_executable(LauncherCommandLineTests
         tests/CommandLineTests.cpp
-        src/WindowsCommandLine.cpp
+        src/common/WindowsCommandLine.cpp
     )
     configure_launch_as_target(LauncherCommandLineTests
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
@@ -735,10 +763,10 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
 
     add_executable(LauncherPseudoConsoleTests
         tests/PseudoConsoleTests.cpp
-        src/TerminalBridge.cpp
-        src/TerminalIO.cpp
-        src/Win32Support.cpp
-        src/WindowsCommandLine.cpp
+        src/terminal/TerminalBridge.cpp
+        src/terminal/TerminalIO.cpp
+        src/common/Win32Support.cpp
+        src/common/WindowsCommandLine.cpp
     )
     configure_launch_as_target(LauncherPseudoConsoleTests "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_link_libraries(LauncherPseudoConsoleTests PRIVATE
@@ -761,14 +789,14 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
 
     add_executable(LauncherBrokerTerminalBridgeTests
         tests/BrokerTerminalBridgeTests.cpp
-        src/TerminalBridge.cpp
-        src/TerminalBridge.h
-        src/TerminalIO.cpp
-        src/TerminalIO.h
-        src/Win32Support.cpp
-        src/Win32Support.h
-        src/WindowsCommandLine.cpp
-        src/WindowsCommandLine.h
+        src/terminal/TerminalBridge.cpp
+        src/terminal/TerminalBridge.h
+        src/terminal/TerminalIO.cpp
+        src/terminal/TerminalIO.h
+        src/common/Win32Support.cpp
+        src/common/Win32Support.h
+        src/common/WindowsCommandLine.cpp
+        src/common/WindowsCommandLine.h
     )
     target_link_libraries(LauncherBrokerTerminalBridgeTests PRIVATE
         Advapi32
@@ -791,10 +819,10 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
 
     add_executable(LauncherTerminalDisconnectTests
         tests/TerminalDisconnectTests.cpp
-        src/TerminalBridge.cpp
-        src/TerminalIO.cpp
-        src/Win32Support.cpp
-        src/WindowsCommandLine.cpp
+        src/terminal/TerminalBridge.cpp
+        src/terminal/TerminalIO.cpp
+        src/common/Win32Support.cpp
+        src/common/WindowsCommandLine.cpp
     )
     configure_launch_as_target(LauncherTerminalDisconnectTests "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_link_libraries(LauncherTerminalDisconnectTests PRIVATE

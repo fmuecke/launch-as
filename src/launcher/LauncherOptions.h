@@ -4,7 +4,8 @@
 
 #pragma once
 
-#include <cstdint>
+#include "ExitCodes.h"
+
 #include <filesystem>
 #include <optional>
 #include <span>
@@ -13,13 +14,6 @@
 
 namespace launch_as
 {
-
-using ExitCode = std::uint32_t;
-
-inline constexpr ExitCode ExitSuccess = 0;      // ERROR_SUCCESS
-inline constexpr ExitCode ExitFailure = 1;      // ERROR_INVALID_FUNCTION
-inline constexpr ExitCode ExitUsage = 87;       // ERROR_INVALID_PARAMETER
-inline constexpr ExitCode ExitCancelled = 1223; // ERROR_CANCELLED
 
 struct Options
 {

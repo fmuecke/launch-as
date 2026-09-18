@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "TerminalEndpoints.h"
 #include "TerminalIO.h"
 #include "Win32Support.h"
 
@@ -14,13 +15,6 @@
 
 namespace launch_as
 {
-
-struct TerminalPipeNames
-{
-    std::wstring input;
-    std::wstring output;
-    std::wstring resize;
-};
 
 class TerminalBridge final
 {

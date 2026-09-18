@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "TerminalBridge.h"
+#include "TerminalEndpoints.h"
 #include "Win32Support.h"
 
 #include <Windows.h>

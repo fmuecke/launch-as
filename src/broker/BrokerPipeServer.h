@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "BrokerCallerIdentity.h"
 #include "BrokerProcessLauncher.h"
 #include "BrokerProtocol.h"
 
@@ -13,13 +14,6 @@
 namespace launch_as::broker
 {
 
-struct BrokerCallerIdentity
-{
-    std::vector<BYTE> userSid;
-    std::vector<BYTE> logonSid;
-    DWORD sessionId = 0;
-    bool isElevated = false;
-};
 using ConfigurationRequestHandler = DWORD (*)(void* context, const BrokerRequest& request,
     const BrokerCallerIdentity& caller, std::vector<std::wstring>& accounts);
 using LaunchRequestHandler = DWORD (*)(void* context, const BrokerRequest& request,

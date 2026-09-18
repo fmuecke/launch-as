@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Project: https://github.com/fmuecke/launch-as
 
-#include "LauncherOptions.h"
+#include "ExitCodes.h"
 #include "LicenseHeader.h"
 #include "PseudoConsoleHost.h"
 

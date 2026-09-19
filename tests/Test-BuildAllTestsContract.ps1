@@ -34,8 +34,8 @@ if ($scriptText -notmatch '(?s)if\s*\(\$RunSandboxTests\).*?Invoke-WindowsSandbo
 if ($scriptText -match 'Start-Process.*-Verb RunAs') {
     throw 'The test runner must not request host elevation.'
 }
-if ($scriptText -match '\$RunAcceptanceTest\s*=\s*\$true') {
-    throw 'Automated test switches must not implicitly run the installed interactive acceptance suite.'
+if ($scriptText -notmatch '(?s)if\s*\(\s*\$RunAllTests\s*-or\s*\$RunAcceptanceTest\s*\).*?Invoke-LauncherAcceptanceTest\.ps1') {
+    throw '-RunAllTests must run the installed interactive acceptance suite as well as -RunAcceptanceTest.'
 }
 if ($scriptText -match 'Read-Host') {
     throw 'The sandbox test run must not wait for interactive input.'

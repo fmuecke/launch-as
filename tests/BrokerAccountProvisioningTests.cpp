@@ -454,5 +454,6 @@ int wmain()
         return 1;
     }
 
+    std::wcout << L"Broker account-provisioning integration tests passed\n";
     return 0;
 }

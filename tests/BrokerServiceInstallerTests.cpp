@@ -298,12 +298,15 @@ int wmain(int argumentCount, wchar_t* arguments[])
         std::wcerr << L"Installer status: " << installError << L"\n";
         return 1;
     }
-    return Expect(HasExpectedConfiguration(service.name(), arguments[1]),
-               L"Disposable service configuration does not match the broker contract.") &&
-                   Expect(HasExpectedDescription(service.name()),
-                       L"Disposable service description does not match the broker contract.") &&
-                   Expect(HasExpectedHardening(service.name()),
-                       L"Disposable service hardening does not match the broker contract.")
-               ? 0
-               : 1;
+    if (!Expect(HasExpectedConfiguration(service.name(), arguments[1]),
+            L"Disposable service configuration does not match the broker contract.") ||
+        !Expect(HasExpectedDescription(service.name()),
+            L"Disposable service description does not match the broker contract.") ||
+        !Expect(HasExpectedHardening(service.name()),
+            L"Disposable service hardening does not match the broker contract."))
+    {
+        return 1;
+    }
+    std::wcout << L"Broker service-installer integration tests passed\n";
+    return 0;
 }

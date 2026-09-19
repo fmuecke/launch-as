@@ -42,8 +42,8 @@
 - Fixed: Correct Windows command-line quoting, immediate Win32 error capture, fail-fast handling
   of failed impersonation reverts, and strict null-terminated Win32 path boundaries.
 - Changed: Removed obsolete Credential Manager implementation code. `build.ps1 -RunAllTests` now
-  runs elevated CTest coverage through UAC, and the broker-command test no longer needs an
-  installed service.
+  runs non-elevated CTest coverage, elevated integration coverage in Windows Sandbox, and the
+  installed-service acceptance suite; the broker-command test no longer needs an installed service.
 
 ## [1.0.0-preview] - 2026-08-09
 

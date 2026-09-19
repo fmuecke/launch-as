@@ -16,6 +16,13 @@ Keep dependencies directed toward `common`, `protocol`, and `terminal`; entry-po
 modules must not depend on one another. Keep CMake-configured version templates in
 `resources/`, tests in `tests/`, and generated output in uncommitted `out/build/`.
 
+Each source folder owns its production target in `src/<module>/CMakeLists.txt`. Link
+through the `launch_as::<module>` aliases and declare dependencies there. Do not add a
+global `src/` include path or make every target see every module directory; the narrow
+include surfaces are what make cross-module dependencies fail at compile time.
+Tests that intentionally recompile production sources with test-only definitions must
+declare their required folders through `configure_launch_as_test_target()`.
+
 This Windows-only application launches local standard-user processes through Win32.
 Credential handling, token checks, process inheritance, and terminal bridging are
 security-sensitive: preserve zeroing, validation, and least privilege.

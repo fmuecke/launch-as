@@ -32,6 +32,26 @@ if ($scriptText -notmatch 'Get-FileHash.*-Algorithm\s+SHA256') {
 if ($scriptText -notmatch 'Invoke-WindowsSandboxTest') {
     throw 'The integration runner must execute through Invoke-WindowsSandboxTest.'
 }
+if ($scriptText -notmatch 'cmd\.exe /d /s /c') {
+    throw 'The integration runner must execute each test through cmd.exe for file redirection.'
+}
+if ($scriptText -notmatch '>.+2>&1') {
+    throw 'The integration runner must redirect guest stdout and stderr to the shared folder.'
+}
+if ($scriptText -notmatch 'Get-Content[^\r\n]+-Raw') {
+    throw 'The integration runner must replay guest stdout and stderr from its shared result file.'
+}
+if ($scriptText -notmatch '\$execution\.ExitCode\s*-ne\s*0') {
+    throw 'The integration runner must check the guest test command exit code.'
+}
+foreach ($successMarker in @(
+        'Broker audit integration tests passed',
+        'Broker account-provisioning integration tests passed',
+        'Broker service-installer integration tests passed')) {
+    if ($scriptText -notmatch [regex]::Escape($successMarker)) {
+        throw "The integration runner must require the success marker: $successMarker"
+    }
+}
 foreach ($artifact in @(
         'LauncherBrokerAuditTests.exe',
         'LauncherBrokerAccountProvisioningTests.exe',

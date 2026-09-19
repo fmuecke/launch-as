@@ -79,28 +79,59 @@ $sandboxResult = Invoke-WindowsSandboxTest `
         $brokerPath = Join-Path $sandbox.GuestMountPath 'launch-as-broker.exe'
         $testCases = @(
             [PSCustomObject]@{
-                Name = 'Broker audit integration test'
-                Command = $auditTestPath
+                Name       = 'Broker audit integration test'
+                Executable = $auditTestPath
+                Arguments  = @()
+                ResultFile = 'audit-result.txt'
+                Marker     = 'Broker audit integration tests passed'
             }
             [PSCustomObject]@{
-                Name = 'Broker account-provisioning integration test'
-                Command = $accountTestPath
+                Name       = 'Broker account-provisioning integration test'
+                Executable = $accountTestPath
+                Arguments  = @()
+                ResultFile = 'account-provisioning-result.txt'
+                Marker     = 'Broker account-provisioning integration tests passed'
             }
             [PSCustomObject]@{
-                Name = 'Broker service-installer integration test'
-                Command = "`"$installerTestPath`" `"$brokerPath`""
+                Name       = 'Broker service-installer integration test'
+                Executable = $installerTestPath
+                Arguments  = @($brokerPath)
+                ResultFile = 'service-installer-result.txt'
+                Marker     = 'Broker service-installer integration tests passed'
             }
         )
         foreach ($testCase in $testCases) {
-            $commandResult = & $sandbox.InvokeCommand `
-                -Command $testCase.Command `
-                -Phase $testCase.Name
-            if ($commandResult.ExitCode -ne 0) {
-                throw "$($testCase.Name) failed with exit code $($commandResult.ExitCode)."
+            $resultPath = Join-Path $sandbox.HostDirectory $testCase.ResultFile
+            $guestResultPath = Join-Path $sandbox.GuestMountPath $testCase.ResultFile
+            $argumentText = @(
+                foreach ($argument in $testCase.Arguments) {
+                    '"' + $argument.Replace('"', '""') + '"'
+                }
+            )
+            $argumentSuffix = if ($argumentText.Count -eq 0) {
+                ''
             }
-            if (-not [string]::IsNullOrWhiteSpace($commandResult.Output)) {
-                Write-Output $commandResult.Output.TrimEnd()
+            else {
+                ' ' + ($argumentText -join ' ')
             }
+            $testCommand = 'cmd.exe /d /s /c ""{0}"{1} > "{2}" 2>&1"' -f `
+                $testCase.Executable, $argumentSuffix, $guestResultPath
+            $execution = & $sandbox.InvokeCommand `
+                -Command $testCommand `
+                -Phase $testCase.Name `
+                -CaptureFailure
+            if (-not (Test-Path -LiteralPath $resultPath -PathType Leaf)) {
+                throw "$($testCase.Name) did not create $resultPath.`n$($execution.Output)"
+            }
+            $result = Get-Content -LiteralPath $resultPath -Raw
+            if ($execution.ExitCode -ne 0) {
+                throw "$($testCase.Name) failed with exit code $($execution.ExitCode).`n$result"
+            }
+            $markerPattern = '(?m)^{0}\s*$' -f [regex]::Escape($testCase.Marker)
+            if ($result -notmatch $markerPattern) {
+                throw "$($testCase.Name) did not report success.`n$result"
+            }
+            Write-Output $result.TrimEnd()
         }
         Write-Output $successMarker
     }

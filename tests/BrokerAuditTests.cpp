@@ -25,8 +25,11 @@ int wmain()
     };
     const DWORD auditError = launch_as::broker::WriteBrokerAuditEvent(
         EVENTLOG_INFORMATION_TYPE, launch_as::broker::BrokerAuditEvent::LaunchAllowed, fields);
-    return Expect(auditError == ERROR_SUCCESS,
-               L"Could not write the broker audit event to the Windows Application log.")
-               ? 0
-               : 1;
+    if (!Expect(auditError == ERROR_SUCCESS,
+            L"Could not write the broker audit event to the Windows Application log."))
+    {
+        return 1;
+    }
+    std::wcout << L"Broker audit integration tests passed\n";
+    return 0;
 }

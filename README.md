@@ -122,11 +122,11 @@ distributable `out\release\launch-as-v<version>-win64.zip` package.
 `-RunTests` runs every non-elevated, noninteractive CTest test. `-RunSandboxTests` runs the three
 privileged integration tests as SYSTEM inside a fresh Windows Sandbox without elevating or changing
 the host. It downloads a pinned revision of the Windows Sandbox test helper and verifies its
-SHA-256 before import. `-RunAllTests` runs both sets. Windows Sandbox must be installed and
-`wsb.exe` must be available.
+SHA-256 before import. `-RunAllTests` runs both sets and the installed-service acceptance suite.
+It therefore requires Windows Sandbox with `wsb.exe` available, an installed broker, a configured
+launch-as-managed account, a TTY, and the authorised non-elevated interactive session.
 
-The installed-service acceptance checks remain explicit because they require an installed broker,
-a configured launch-as-managed account, a TTY, and the authorised non-elevated interactive session:
+Run the installed-service acceptance suite alone with:
 
 ```powershell
 .\build.ps1 -RunAcceptanceTest
@@ -134,8 +134,8 @@ a configured launch-as-managed account, a TTY, and the authorised non-elevated i
 .\tests\Invoke-BrokerProbeAcceptanceTest.ps1 -Account LaunchAsUser
 ```
 
-`-RunAcceptanceTest` uses `LaunchAsUser` by default; pass `-TargetUser <account>` to select another
-managed account.
+`-RunAllTests` and `-RunAcceptanceTest` use `LaunchAsUser` by default; pass
+`-TargetUser <account>` to select another managed account.
 
 The probe confirms a distinct logon SID, no interactive windows, and denied `VM_READ` and
 `TERMINATE` access to the caller's process. These are blast-radius controls, not protection from a

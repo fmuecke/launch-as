@@ -244,9 +244,9 @@ elseif ($RunSandboxTests) {
     Invoke-WindowsSandboxIntegrationTests
 }
 
-if ($RunAcceptanceTest) {
+if ($RunAllTests -or $RunAcceptanceTest) {
     if ([string]::IsNullOrWhiteSpace($TargetUser)) {
-        throw '-TargetUser is required with -RunAcceptanceTest.'
+        throw '-TargetUser is required with -RunAllTests or -RunAcceptanceTest.'
     }
 
     Write-Host "Running interactive launcher acceptance test as .\$TargetUser"

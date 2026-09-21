@@ -4,7 +4,9 @@
 
 [CmdletBinding()]
 param(
-    [string]$Account = 'LaunchAsUser',
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
+    [string]$Account,
     [ValidateRange(0, [int]::MaxValue)]
     [int]$ExpectedExitCode = 0,
     [string]$LauncherPath = (
@@ -12,7 +14,11 @@ param(
     ),
     [string]$ProbePath = (
         Join-Path $PSScriptRoot '..\out\build\Release\LauncherBrokerChildIdentityProbe.exe'
-    )
+    ),
+    [string]$ReportRoot = (Join-Path $env:PUBLIC 'Documents'),
+    [Parameter(Mandatory)]
+    [ValidateRange(1, [int]::MaxValue)]
+    [int]$CallerWindowProcessId
 )
 
 $caller = [System.Security.Principal.WindowsPrincipal]::new(
@@ -28,17 +34,18 @@ if (-not (Test-Path -LiteralPath $workingDirectory -PathType Container)) {
     $workingDirectory = $env:PUBLIC
 }
 
-${interactiveWindow} = Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } |
-Select-Object -First 1
-if ($null -eq $interactiveWindow) {
-    throw 'Open a normal desktop window, then run this test from the authorised non-elevated session.'
+${interactiveWindow} = Get-Process -Id $CallerWindowProcessId -ErrorAction Stop
+if ($interactiveWindow.MainWindowHandle -eq 0) {
+    throw "Caller process $CallerWindowProcessId does not own a visible window."
 }
 $interactiveLogonSid = (& whoami /logonid | Select-Object -Last 1).Trim()
 if ($interactiveLogonSid -notmatch '^S-1-5-5-\d+-\d+$') {
     throw "Could not determine the interactive user's logon SID: $interactiveLogonSid"
 }
 $windowHandle = [uint64]$interactiveWindow.MainWindowHandle.ToInt64()
-$reportDirectory = Join-Path ([IO.Path]::GetTempPath()) ("launch-as-probe-{0}" -f [guid]::NewGuid().ToString('N'))
+$resolvedReportRoot = Resolve-Path -LiteralPath $ReportRoot
+$reportDirectory = Join-Path $resolvedReportRoot.Path `
+    ("launch-as-probe-{0}" -f [guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($reportDirectory) | Out-Null
 $authenticatedUsersSid = [System.Security.Principal.SecurityIdentifier]::new(
     [System.Security.Principal.WellKnownSidType]::AuthenticatedUserSid, $null)
@@ -57,17 +64,24 @@ try {
     Write-Host "Launching the identity probe as managed account $Account. It must report a different logon SID and not access this interactive process or enumerate its window."
     $output = & $launcher.Path --user $Account --working-directory $workingDirectory -- `
         $probe.Path --window $windowHandle --process $PID --exit-code $ExpectedExitCode `
-        --interactive-logon-sid $interactiveLogonSid --output $reportPath
+        --interactive-logon-sid $interactiveLogonSid --output $reportPath 2>&1
     $exitCode = $LASTEXITCODE
     $output | Write-Host
     if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
-        throw "Broker child did not write its probe report: $reportPath (broker exit code $exitCode)"
+        $launcherOutput = ($output | Out-String).TrimEnd()
+        throw (
+            "Broker child did not write its probe report: $reportPath " +
+            "(broker exit code $exitCode). Output:`n$launcherOutput"
+        )
     }
     $outputText = Get-Content -LiteralPath $reportPath -Raw
 
     function Get-ProbeValue([string]$Name) {
         $match = [regex]::Match($outputText, '(?im)^' + [regex]::Escape($Name) + '\s*=\s*(.+)$')
-        return $match.Success ? $match.Groups[1].Value.Trim() : ''
+        if ($match.Success) {
+            return $match.Groups[1].Value.Trim()
+        }
+        return ''
     }
 
     $childLogonSid = [regex]::Match($outputText, '(?i)logonSid\s*=\s*(S-1-5-5-\d+-\d+)').Groups[1].Value

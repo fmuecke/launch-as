@@ -19,19 +19,10 @@ param(
     [switch] $RunSandboxTests,
 
     [Parameter()]
-    [switch] $RunElevatedTests,
-
-    [Parameter()]
-    [string] $ElevatedTestOutputPath,
-
-    [Parameter()]
     [switch] $RunAcceptanceTest,
 
     [Parameter()]
-    [switch] $PackageRelease,
-
-    [Parameter()]
-    [string] $TargetUser = "LaunchAsUser"
+    [switch] $PackageRelease
 )
 
 Set-StrictMode -Version Latest
@@ -87,12 +78,6 @@ $launcherPath = Join-Path `
     $buildDirectory `
     "$Configuration\launch-as.exe"
 
-function Test-IsAdministrator {
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
-    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-}
-
 function Invoke-CtestTests {
     param(
         [Parameter(Mandatory)]
@@ -122,40 +107,15 @@ function Invoke-WindowsSandboxIntegrationTests {
         -Configuration $Configuration
 }
 
-if ($RunElevatedTests) {
-    if (-not (Test-IsAdministrator)) {
-        throw '-RunElevatedTests must be run from an elevated PowerShell process.'
-    }
-    if (-not [string]::IsNullOrWhiteSpace($ElevatedTestOutputPath)) {
-        $outputDirectory = Split-Path -Parent $ElevatedTestOutputPath
-        if (-not [string]::IsNullOrWhiteSpace($outputDirectory)) {
-            $null = New-Item -ItemType Directory -Force -Path $outputDirectory
-        }
-    }
-    $elevatedTestExitCode = 0
-    try {
-        if ([string]::IsNullOrWhiteSpace($ElevatedTestOutputPath)) {
-            Invoke-CtestTests -Description 'all elevated' -LabelOption '--label-regex' -LabelValue 'elevated'
-        }
-        else {
-            & {
-                Invoke-CtestTests -Description 'all elevated' -LabelOption '--label-regex' -LabelValue 'elevated'
-            } *>&1 | Out-File -LiteralPath $ElevatedTestOutputPath -Encoding utf8
-        }
-    }
-    catch {
-        if ([string]::IsNullOrWhiteSpace($ElevatedTestOutputPath)) {
-            Write-Host $_.Exception.Message -ForegroundColor Red
-        }
-        else {
-            $_ | Out-File -LiteralPath $ElevatedTestOutputPath -Append -Encoding utf8
-        }
-        $elevatedTestExitCode = 1
-    }
-    if ($elevatedTestExitCode -ne 0) {
-        exit $elevatedTestExitCode
-    }
-    return
+function Invoke-WindowsSandboxAcceptanceTest {
+    & (Join-Path $projectRoot 'tests\Invoke-LauncherAcceptanceInWindowsSandbox.ps1') `
+        -BuildDirectory $buildDirectory `
+        -Configuration $Configuration
+}
+
+function Confirm-InteractiveAcceptance {
+    $answer = Read-Host 'Run the interactive acceptance test in Windows Sandbox? [y/N]'
+    return $answer -match '^(?i)y(?:es)?$'
 }
 
 $ninjaGenerator = 'Ninja Multi-Config'
@@ -244,17 +204,11 @@ elseif ($RunSandboxTests) {
     Invoke-WindowsSandboxIntegrationTests
 }
 
-if ($RunAllTests -or $RunAcceptanceTest) {
-    if ([string]::IsNullOrWhiteSpace($TargetUser)) {
-        throw '-TargetUser is required with -RunAllTests or -RunAcceptanceTest.'
-    }
-
-    Write-Host "Running interactive launcher acceptance test as .\$TargetUser"
-    & (Join-Path `
-            $projectRoot `
-            'tests\Invoke-LauncherAcceptanceTest.ps1') `
-        -TargetUser $TargetUser `
-        -LauncherPath $launcherPath
+if ($RunAcceptanceTest) {
+    Invoke-WindowsSandboxAcceptanceTest
+}
+elseif ($RunAllTests -and (Confirm-InteractiveAcceptance)) {
+    Invoke-WindowsSandboxAcceptanceTest
 }
 
 if ($PackageRelease) {

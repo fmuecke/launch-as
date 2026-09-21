@@ -119,23 +119,32 @@ needed and builds the Ninja Multi-Config Release target by default.
 `-PackageRelease` performs a clean Release build in `out\release-build` and writes the
 distributable `out\release\launch-as-v<version>-win64.zip` package.
 
-`-RunTests` runs every non-elevated, noninteractive CTest test. `-RunSandboxTests` runs the three
-privileged integration tests as SYSTEM inside a fresh Windows Sandbox without elevating or changing
-the host. It downloads a pinned revision of the Windows Sandbox test helper and verifies its
-SHA-256 before import. `-RunAllTests` runs both sets and the installed-service acceptance suite.
-It therefore requires Windows Sandbox with `wsb.exe` available, an installed broker, a configured
-launch-as-managed account, a TTY, and the authorised non-elevated interactive session.
+`-RunTests` runs every host-safe, noninteractive CTest test. The privileged audit,
+account-provisioning, and service-installer executables are built but are not registered with CTest.
+`-RunSandboxTests` runs those three executables as SYSTEM inside a fresh Windows Sandbox without
+elevating or changing the host. It downloads a pinned revision of the Windows Sandbox test helper
+and verifies its SHA-256 before import.
 
-Run the installed-service acceptance suite alone with:
+`-RunAllTests` runs the local and automated Sandbox sets, then asks whether to run interactive
+acceptance in another fresh guest. Declining the prompt completes the automated run. Run the
+interactive workflow directly with:
 
 ```powershell
 .\build.ps1 -RunAcceptanceTest
-.\tests\Invoke-BrokerConsoleAcceptanceTest.ps1 -Account LaunchAsUser -ExpectedExitCode 37
-.\tests\Invoke-BrokerProbeAcceptanceTest.ps1 -Account LaunchAsUser
 ```
 
-`-RunAllTests` and `-RunAcceptanceTest` use `LaunchAsUser` by default; pass
-`-TargetUser <account>` to select another managed account.
+The acceptance runner opens a fresh Windows Sandbox and drives it without guest command entry or a
+UAC prompt. The existing elevated Sandbox user creates `LaunchAsDevCaller`, temporarily adds it to
+Administrators so that its SID becomes the broker's authorised installer, then removes that group
+membership. A fresh standard-user logon with a real visible console runs the acceptance suite
+against the reserved `LaunchAsDevTestUser` managed account. The workflow checks console identity,
+process isolation, disconnect teardown, and same-account concurrency, returns the result through
+the shared test directory, restores temporary desktop permissions, and destroys the guest.
+
+No test entry point requires a broker service or managed test account on the host. Interactive
+acceptance requires Windows Sandbox with `wsb.exe` and a visible guest desktop, but no manual guest
+interaction. The production broker service and pipe names are intentional: they exist only inside
+the disposable guest and cannot conflict with a host installation.
 
 The probe confirms a distinct logon SID, no interactive windows, and denied `VM_READ` and
 `TERMINATE` access to the caller's process. These are blast-radius controls, not protection from a

@@ -324,9 +324,11 @@ installation for destructive, elevated, network-redirection, and failure-injecti
 | Audit | `BrokerAuditTests` | Real event fields, malformed/unauthorized traffic, unavailable Event Log, forwarding and retention behavior. |
 
 Build/test entry points are documented in [README.md](README.md). Use `build.ps1 -RunTests` for
-non-elevated CTest coverage and `-RunAllTests` for the additional elevated subset. Installed console
-acceptance needs the configured authorized caller in a real non-elevated interactive terminal.
-An elevated run, parser pass, or redirected-stdin launch does not substitute for that environment.
+host-safe CTest coverage and `-RunSandboxTests` for the privileged subset. `-RunAllTests` runs both
+and offers the separate interactive acceptance workflow in a fresh Windows Sandbox. The workflow
+automatically creates an authorized caller, removes its temporary administrator membership, and
+uses a fresh non-elevated logon with a real visible console. A SYSTEM run, parser pass, elevated
+Sandbox token, or redirected-stdin launch does not substitute for that environment.
 
 ## 9. Security invariants for future changes
 

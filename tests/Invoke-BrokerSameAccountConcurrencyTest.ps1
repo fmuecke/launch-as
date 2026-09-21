@@ -5,7 +5,9 @@
 [CmdletBinding()]
 param(
     [string] $PipeName = 'launch-as-broker.v1',
-    [string] $Account = 'LaunchAsUser'
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
+    [string] $Account
 )
 
 Set-StrictMode -Version Latest
@@ -40,9 +42,6 @@ namespace LaunchAs
         private const uint OpenExisting = 3;
         private const int ErrorFileNotFound = 2;
         private const int ErrorPipeBusy = 231;
-        private const uint ScManagerConnect = 0x00000001;
-        private const uint ServiceStart = 0x00000010;
-        private const int ErrorServiceAlreadyRunning = 1056;
         private const int ErrorBrokenPipe = 109;
         private const int ErrorNoData = 232;
         private const int ErrorPipeListening = 536;
@@ -84,57 +83,6 @@ namespace LaunchAs
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool WriteFile(SafeFileHandle pipe, byte[] buffer,
             uint bytesToWrite, out uint bytesWritten, IntPtr overlapped);
-
-        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        private static extern IntPtr OpenSCManager(
-            string machineName, string databaseName, uint desiredAccess);
-
-        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        private static extern IntPtr OpenService(
-            IntPtr manager, string serviceName, uint desiredAccess);
-
-        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        private static extern bool StartService(
-            IntPtr service, uint argumentCount, IntPtr arguments);
-
-        [DllImport("advapi32.dll")]
-        private static extern bool CloseServiceHandle(IntPtr handle);
-
-        public static void EnsureBrokerStarted()
-        {
-            IntPtr manager = OpenSCManager(null, null, ScManagerConnect);
-            if (manager == IntPtr.Zero)
-            {
-                throw new Win32Exception(Marshal.GetLastWin32Error());
-            }
-            try
-            {
-                IntPtr service = OpenService(manager, "launch-as-broker", ServiceStart);
-                if (service == IntPtr.Zero)
-                {
-                    throw new Win32Exception(Marshal.GetLastWin32Error());
-                }
-                try
-                {
-                    if (!StartService(service, 0, IntPtr.Zero))
-                    {
-                        int error = Marshal.GetLastWin32Error();
-                        if (error != ErrorServiceAlreadyRunning)
-                        {
-                            throw new Win32Exception(error);
-                        }
-                    }
-                }
-                finally
-                {
-                    CloseServiceHandle(service);
-                }
-            }
-            finally
-            {
-                CloseServiceHandle(manager);
-            }
-        }
 
         public static SafeFileHandle Create(string name, bool serverWrites, string sddl)
         {
@@ -279,8 +227,6 @@ $accountSid = ([System.Security.Principal.NTAccount]::new(
     [System.Security.Principal.SecurityIdentifier]).Value
 $pipeSddl = "D:P(A;;GA;;;SY)(A;;GRGW;;;$accountSid)"
 $windowsPowerShell = (Get-Command powershell.exe -CommandType Application).Source
-[LaunchAs.BrokerSameAccountPipesV2]::EnsureBrokerStarted()
-
 function New-BrokerSession {
     param(
         [switch] $AllowSessionLimit,

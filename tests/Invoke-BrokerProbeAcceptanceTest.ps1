@@ -5,7 +5,9 @@
 [CmdletBinding()]
 param(
     [string]$PipeName = 'launch-as-broker.v1',
-    [string]$Account = 'LaunchAsUser',
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
+    [string]$Account,
     [string]$AccessProbePath = (
         Join-Path $PSScriptRoot '..\out\build\Release\LauncherBrokerProcessAccessProbe.exe'
     )

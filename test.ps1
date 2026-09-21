@@ -1,5 +1,6 @@
 # Manual smoke test: verifies the broker is installed, then launches cmd.exe as LaunchAsUser.
 # Run after .\build.ps1 and .\Setup-LaunchAs.ps1.
+# WARNING: Requires installation on the current system!
 
 function Test-BrokerServiceInstalled {
     $serviceControl = Join-Path $env:SystemRoot 'System32\sc.exe'

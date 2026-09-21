@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: 2026 Florian Mücke
 # SPDX-License-Identifier: GPL-3.0-only
 # Project: https://github.com/fmuecke/launch-as
-# Runs the installed broker acceptance suite from its authorised non-elevated interactive session.
-# Build and install the broker and create or take over the target account before running this script.
+# Runs the broker acceptance suite from its authorised non-elevated interactive session.
+# The Windows Sandbox acceptance runner installs the broker and creates the explicit target account.
 
 [CmdletBinding()]
 param(
@@ -14,7 +14,15 @@ param(
     [ValidateNotNullOrEmpty()]
     [string] $LauncherPath = (
         Join-Path $PSScriptRoot '..\out\build\Release\launch-as.exe'
-    )
+    ),
+
+    [Parameter(Mandatory)]
+    [ValidateRange(1, [int]::MaxValue)]
+    [int] $CallerWindowProcessId,
+
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
+    [string] $ProgressPath
 )
 
 Set-StrictMode -Version Latest
@@ -46,19 +54,31 @@ $consoleAcceptance = Join-Path $PSScriptRoot 'Invoke-BrokerConsoleAcceptanceTest
 $brokerProbeAcceptance = Join-Path $PSScriptRoot 'Invoke-BrokerProbeAcceptanceTest.ps1'
 $sameAccountConcurrency = Join-Path $PSScriptRoot 'Invoke-BrokerSameAccountConcurrencyTest.ps1'
 
+function Write-AcceptancePhase([string] $Name) {
+    @(
+        'RUNNING'
+        "acceptance-phase=$Name"
+    ) | Out-File -LiteralPath $ProgressPath -Encoding utf8
+}
+
 Write-Host "Acceptance account: .\$TargetUser"
+Write-AcceptancePhase 'console-identity-isolation'
 Write-Host 'Running the installed broker console identity and isolation checks.'
 & $consoleAcceptance `
     -Account $TargetUser `
     -ExpectedExitCode 37 `
     -LauncherPath $resolvedLauncher.Path `
-    -ProbePath $identityProbe
+    -ProbePath $identityProbe `
+    -ReportRoot (Split-Path -Parent $ProgressPath) `
+    -CallerWindowProcessId $CallerWindowProcessId
 
+Write-AcceptancePhase 'process-access-disconnect'
 Write-Host 'Running the installed broker process-access and disconnect checks.'
 & $brokerProbeAcceptance `
     -Account $TargetUser `
     -AccessProbePath $accessProbe
 
+Write-AcceptancePhase 'same-account-concurrency'
 Write-Host 'Running two overlapping sessions for the same managed account.'
 & $sameAccountConcurrency -Account $TargetUser
 

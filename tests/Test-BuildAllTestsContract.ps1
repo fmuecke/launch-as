@@ -19,6 +19,9 @@ if ($scriptText -notmatch '\[switch\]\s*\$RunAllTests') {
 if ($scriptText -notmatch '\[switch\]\s*\$RunSandboxTests') {
     throw 'build.ps1 must expose the -RunSandboxTests switch.'
 }
+if ($scriptText -notmatch '\[switch\]\s*\$RunAcceptanceTest') {
+    throw 'build.ps1 must expose the -RunAcceptanceTest switch.'
+}
 if ($scriptText -notmatch "-LabelOption '--label-exclude' -LabelValue 'elevated\|interactive'") {
     throw 'The regular test run must continue to exclude elevated and interactive tests.'
 }
@@ -34,9 +37,18 @@ if ($scriptText -notmatch '(?s)if\s*\(\$RunSandboxTests\).*?Invoke-WindowsSandbo
 if ($scriptText -match 'Start-Process.*-Verb RunAs') {
     throw 'The test runner must not request host elevation.'
 }
-if ($scriptText -notmatch '(?s)if\s*\(\s*\$RunAllTests\s*-or\s*\$RunAcceptanceTest\s*\).*?Invoke-LauncherAcceptanceTest\.ps1') {
-    throw '-RunAllTests must run the installed interactive acceptance suite as well as -RunAcceptanceTest.'
+if ($scriptText -match '\$RunElevatedTests|\$ElevatedTestOutputPath') {
+    throw 'build.ps1 must not expose a host-elevated test route.'
 }
-if ($scriptText -match 'Read-Host') {
-    throw 'The sandbox test run must not wait for interactive input.'
+if ($scriptText -match '\$TargetUser\s*=\s*["'']LaunchAsUser["'']') {
+    throw 'build.ps1 must not default tests to the production-style LaunchAsUser account.'
+}
+if ($scriptText -notmatch "'tests\\Invoke-LauncherAcceptanceInWindowsSandbox.ps1'") {
+    throw 'Interactive acceptance must use the Windows Sandbox entry point.'
+}
+if ($scriptText -notmatch '(?s)if\s*\(\$RunAcceptanceTest\).*?Invoke-WindowsSandboxAcceptanceTest') {
+    throw '-RunAcceptanceTest must run interactive acceptance inside Windows Sandbox.'
+}
+if ($scriptText -notmatch '(?s)if\s*\(\$RunAllTests\).*?Confirm-InteractiveAcceptance.*?Invoke-WindowsSandboxAcceptanceTest') {
+    throw '-RunAllTests must offer the interactive Windows Sandbox acceptance test.'
 }

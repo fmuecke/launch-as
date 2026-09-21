@@ -16,5 +16,5 @@ $tokens = $null
 $errors = $null
 [Management.Automation.Language.Parser]::ParseFile($Path, [ref] $tokens, [ref] $errors) | Out-Null
 if ($errors.Count -gt 0) {
-    throw ($errors | ForEach-Object Message | Join-String -Separator [Environment]::NewLine)
+    throw (($errors | ForEach-Object Message) -join [Environment]::NewLine)
 }

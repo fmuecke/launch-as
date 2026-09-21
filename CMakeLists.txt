@@ -400,6 +400,97 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
     )
 
     add_test(
+        NAME launcher.test_isolation_contract
+        COMMAND
+            pwsh
+            -NoProfile
+            -File
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Test-TestIsolationContract.ps1"
+            -CMakePath
+            "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt"
+            -AcceptanceScriptDirectory
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+    )
+    set_tests_properties(launcher.test_isolation_contract PROPERTIES
+        LABELS "build;unit"
+    )
+
+    add_test(
+        NAME launcher.sandbox_acceptance_contract
+        COMMAND
+            pwsh
+            -NoProfile
+            -File
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Test-SandboxAcceptanceContract.ps1"
+            -RunnerPath
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Invoke-LauncherAcceptanceInWindowsSandbox.ps1"
+            -DriverPath
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Run-LauncherAcceptanceInSandbox.ps1"
+            -FixturePath
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Install-LauncherAcceptanceFixture.ps1"
+            -DemandStartPath
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Invoke-BrokerDemandStartTest.ps1"
+            -LogonHelperPath
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/LauncherAcceptanceLogon.cs"
+            -SupportModulePath
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/WindowsSandboxAcceptanceSupport.psm1"
+            -StandardCallerPath
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Invoke-LauncherAcceptanceAsStandardUser.ps1"
+            -AcceptancePath
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Invoke-LauncherAcceptanceTest.ps1"
+            -ConcurrencyPath
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Invoke-BrokerSameAccountConcurrencyTest.ps1"
+    )
+    set_tests_properties(launcher.sandbox_acceptance_contract PROPERTIES
+        LABELS "build;unit"
+    )
+
+    add_test(
+        NAME launcher.acceptance_logon_compilation
+        COMMAND
+            powershell.exe
+            -NoProfile
+            -File
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Test-CSharpCompilation.ps1"
+            -Path
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/LauncherAcceptanceLogon.cs"
+            -TypeName
+            "LaunchAs.AcceptanceLogonV2"
+    )
+    set_tests_properties(launcher.acceptance_logon_compilation PROPERTIES
+        LABELS "build;unit"
+    )
+
+    foreach(script_name IN ITEMS
+            Install-LauncherAcceptanceFixture.ps1
+            Invoke-BrokerDemandStartTest.ps1
+            Invoke-LauncherAcceptanceAsStandardUser.ps1
+            Run-LauncherAcceptanceInSandbox.ps1
+            Show-LauncherAcceptanceWindow.ps1
+            Invoke-LauncherAcceptanceInWindowsSandbox.ps1
+            Invoke-LauncherAcceptanceTest.ps1
+            Invoke-BrokerConsoleAcceptanceTest.ps1
+            Invoke-BrokerProbeAcceptanceTest.ps1
+            Invoke-BrokerSameAccountConcurrencyTest.ps1
+            WindowsSandboxAcceptanceSupport.psm1)
+        string(REGEX REPLACE "\\.psm?1$" "" script_test_name "${script_name}")
+        string(TOLOWER "${script_test_name}" script_test_name)
+        add_test(
+            NAME "launcher.${script_test_name}_syntax"
+            COMMAND
+                powershell.exe
+                -NoProfile
+                -File
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/Test-PowerShellSyntax.ps1"
+                -Path
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/${script_name}"
+        )
+        set_tests_properties("launcher.${script_test_name}_syntax" PROPERTIES
+            LABELS "build;unit"
+        )
+    endforeach()
+
+    add_test(
         NAME launcher.package_release_contract
         COMMAND
             pwsh
@@ -527,14 +618,6 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
     )
     configure_launch_as_test_target(LauncherBrokerAuditTests broker)
 
-    add_test(
-        NAME launcher.broker_audit
-        COMMAND "$<TARGET_FILE:LauncherBrokerAuditTests>"
-    )
-    set_tests_properties(launcher.broker_audit PROPERTIES
-        LABELS "broker;elevated;integration"
-    )
-
     add_executable(LauncherBrokerProcessAccessProbe
         tests/BrokerProcessAccessProbe.cpp
     )
@@ -587,14 +670,6 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
     )
     configure_launch_as_test_target(LauncherBrokerAccountProvisioningTests broker common)
 
-    add_test(
-        NAME launcher.broker_account_provisioning
-        COMMAND "$<TARGET_FILE:LauncherBrokerAccountProvisioningTests>"
-    )
-    set_tests_properties(launcher.broker_account_provisioning PROPERTIES
-        LABELS "broker;elevated;integration"
-    )
-
     add_executable(LauncherBrokerServiceInstallerTests
         tests/BrokerServiceInstallerTests.cpp
         src/broker/BrokerAudit.cpp
@@ -620,17 +695,6 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
     )
     set_tests_properties(launcher.broker_install_files PROPERTIES
         LABELS "broker;integration"
-    )
-
-    add_test(
-        NAME launcher.broker_service_installer
-        COMMAND
-            "$<TARGET_FILE:LauncherBrokerServiceInstallerTests>"
-            "$<TARGET_FILE:launch_as_broker>"
-    )
-    set_tests_properties(launcher.broker_service_installer PROPERTIES
-        LABELS "broker;elevated;integration"
-        SKIP_RETURN_CODE 77
     )
 
     add_executable(LauncherArgvProbe

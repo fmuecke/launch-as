@@ -41,9 +41,10 @@
   releases session and worker capacity.
 - Fixed: Correct Windows command-line quoting, immediate Win32 error capture, fail-fast handling
   of failed impersonation reverts, and strict null-terminated Win32 path boundaries.
-- Changed: Removed obsolete Credential Manager implementation code. `build.ps1 -RunAllTests` now
-  runs non-elevated CTest coverage, elevated integration coverage in Windows Sandbox, and the
-  installed-service acceptance suite; the broker-command test no longer needs an installed service.
+- Changed: Removed obsolete Credential Manager implementation code. Local CTest no longer registers
+  privileged tests, `build.ps1 -RunAllTests` runs their automated coverage in Windows Sandbox and
+  offers automated interactive acceptance from a fresh standard guest caller, and no test requires
+  a host-installed broker or managed account.
 
 ## [1.0.0-preview] - 2026-08-09
 

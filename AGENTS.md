@@ -36,6 +36,8 @@ Run from the repository root in PowerShell:
 .\build.ps1 -Configuration Debug     # build Debug
 .\build.ps1 -RunTests                # build all targets and run CTest
 .\build.ps1 -RunSandboxTests         # run privileged tests in a disposable guest
+.\build.ps1 -RunAllTests             # run both sets, then offer guest acceptance
+.\build.ps1 -RunAcceptanceTest        # run interactive acceptance in a fresh guest
 ctest --test-dir out\build -C Release --output-on-failure
 ```
 
@@ -43,12 +45,11 @@ Requires Visual Studio/MSVC, a Windows SDK, CMake 3.25+, PowerShell, and
 `clang-format` on `PATH`. `build.ps1` recursively formats native sources before
 configuration; review formatting-only changes before committing.
 
-Credentialed end-to-end testing is interactive and requires an existing local standard
-user:
-
-```powershell
-tests\Invoke-LauncherAcceptanceTest.ps1 -TargetUser RestrictedUser
-```
+Acceptance testing must not depend on a host-installed broker or a host test account.
+The Sandbox workflow installs the production-named broker only inside the disposable
+guest. It reserves `LaunchAsDevCaller` for a fresh standard caller and
+`LaunchAsDevTestUser` for the managed target. Leaf acceptance scripts require the
+account explicitly and are orchestrated automatically by the guest workflow.
 
 ## Code
 

@@ -400,6 +400,22 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
     )
 
     add_test(
+        NAME launcher.interactive_session_probe_contract
+        COMMAND
+            pwsh
+            -NoProfile
+            -File
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Test-InteractiveSessionProbeContract.ps1"
+            -RunnerPath
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Invoke-InteractiveSessionProbeInWindowsSandbox.ps1"
+            -DriverPath
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Run-InteractiveSessionProbeInSandbox.ps1"
+    )
+    set_tests_properties(launcher.interactive_session_probe_contract PROPERTIES
+        LABELS "build;unit"
+    )
+
+    add_test(
         NAME launcher.test_isolation_contract
         COMMAND
             pwsh
@@ -464,6 +480,7 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
     foreach(script_name IN ITEMS
             Install-LauncherAcceptanceFixture.ps1
             Invoke-BrokerDemandStartTest.ps1
+            Invoke-InteractiveSessionProbeInWindowsSandbox.ps1
             Invoke-LauncherAcceptanceAsStandardUser.ps1
             Run-LauncherAcceptanceInSandbox.ps1
             Show-LauncherAcceptanceWindow.ps1
@@ -472,6 +489,7 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
             Invoke-BrokerConsoleAcceptanceTest.ps1
             Invoke-BrokerProbeAcceptanceTest.ps1
             Invoke-BrokerSameAccountConcurrencyTest.ps1
+            Run-InteractiveSessionProbeInSandbox.ps1
             WindowsSandboxAcceptanceSupport.psm1)
         string(REGEX REPLACE "\\.psm?1$" "" script_test_name "${script_name}")
         string(TOLOWER "${script_test_name}" script_test_name)
@@ -622,6 +640,20 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
         tests/BrokerProcessAccessProbe.cpp
     )
     configure_launch_as_target(LauncherBrokerProcessAccessProbe)
+
+    add_executable(LauncherInteractiveSessionProbe
+        tests/InteractiveSessionProbe.cpp
+    )
+    configure_launch_as_target(LauncherInteractiveSessionProbe)
+
+    add_executable(LauncherInteractiveAclLeaseProbe
+        tests/InteractiveAclLeaseProbe.cpp
+    )
+    target_link_libraries(LauncherInteractiveAclLeaseProbe PRIVATE
+        Advapi32
+        User32
+    )
+    configure_launch_as_target(LauncherInteractiveAclLeaseProbe)
 
     add_executable(LauncherBrokerChildIdentityProbe
         tests/BrokerChildIdentityProbe.cpp

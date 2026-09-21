@@ -166,11 +166,12 @@ Requires crossing from session 0 into the caller's interactive session. Steps:
    ambiguous.
 2. `LogonUserW(INTERACTIVE)` → primary token (its own logon SID; session 0 by default).
 3. `SetTokenInformation(TokenSessionId, callerSession)` — needs `SeTcbPrivilege`.
-4. Extract the **child's own logon SID** (`GetTokenInformation(TokenLogonSid)`), and add the
-   minimum scoped ACEs for **that logon SID** — not the account SID — to the caller session's
-   `WinSta0` window station and `Default` desktop. `lpDesktop` selects the desktop but does not
-   grant access on its own. Record exactly which ACEs this launch added so failures and teardown
-   remove only those ACEs; account-SID grants can leave persistent cross-session access.
+4. Extract the **child's own logon SID** (`GetTokenInformation(TokenLogonSid)`). A coordinator
+   already running in the authenticated caller's session adds minimum scoped ACEs for **that logon
+   SID** — not the account SID — to that session's `WinSta0` window station and `Default` desktop.
+   `lpDesktop` selects the desktop but does not grant access on its own. Record exactly which ACEs
+   this launch added so failures and teardown remove only those ACEs; account-SID grants can leave
+   persistent cross-session access.
 5. `LoadUserProfile` + `CreateEnvironmentBlock` (GUI apps need `HKCU`/`%APPDATA%`).
 6. `STARTUPINFO.lpDesktop = L"WinSta0\\Default"`; `CreateProcessAsUserW`.
 7. On process-tree exit, launch failure, or teardown: remove the temporary winsta/desktop ACEs,
@@ -179,13 +180,31 @@ Requires crossing from session 0 into the caller's interactive session. Steps:
 
 > Rationale for why Surface 2 stays closed in GUI mode: granting the child's *own* logon SID rights on the interactive desktop gives desktop access without placing the interactive user's logon SID into the child token — so the interactive user's process default-DACL ACE still does not match.
 
-#### 7.2.1 No normal-user token helper
+#### 7.2.1 Session-local ACL coordination
+
+**Decision (2026-09-21):** use a caller-side ACL lease for the first interactive-mode slice and keep
+a session-local SYSTEM coordinator as a fallback. The Session-0 broker cannot use
+`OpenWindowStation` to modify another session's identically named `WinSta0`. In a live Windows
+Sandbox probe, a session-1 caller saw a controlled window while a Session-0 SYSTEM process
+successfully opened its own `WinSta0\Default` but could not see that window. The same run returned
+`0xFFFFFFFF` from `WTSGetActiveConsoleSessionId`, so the physical-console API is diagnostic only and
+never selects the target session.
+
+That first gate passed in a fresh Windows Sandbox guest: a session-1, non-administrator,
+non-elevated standard-account process added and removed one exact synthetic logon-SID ACE on both
+`WinSta0` and `Default`; all Win32 results and the native exit code were zero, and both final DACLs
+were semantically identical to their originals. The launcher or a small caller-owned background
+coordinator may therefore hold the ACL lease. It receives only a nonce, desktop name, and child
+logon SID. The detailed alternatives, evidence boundary, and retained-run path are recorded in
+[Interactive mode session coordination](discovery/Spike%20-%20interactive%20mode%20session%20coordination.md).
+
+#### 7.2.2 No normal-user token helper
 
 Do not move GUI or terminal plumbing into a helper running as the interactive user if that requires
 passing it the restricted primary token. A process able to control that helper could duplicate or
-misuse the token, reopening a privileged-launch boundary. A session-local helper may only be used
-after a separate design proves it cannot receive credentials or a reusable restricted token; the
-broker retains both and performs `CreateProcessAsUserW` directly. Phase 1 avoids this issue by
+misuse the token, reopening a privileged-launch boundary. The session-local ACL coordinator never
+receives credentials, a reusable restricted token, or a privileged target process handle; the
+broker retains them and performs `CreateProcessAsUserW` directly. Phase 1 avoids this issue by
 keeping terminal ownership in the client and connecting the broker-launched console host through
 SID-scoped named pipes.
 
@@ -488,14 +507,15 @@ service scaffold (SCM, demand-start, `sc sdset` delegation), bounded multi-sessi
 **Phase n — `interactive` GUI adapter + optional hardened policy:** when GUI support is selected,
 implement the adapter (§7.2): derive and validate the caller's session from the authenticated pipe
 token; `SetTokenInformation(TokenSessionId)`; child-logon-SID-only, minimum `WinSta0`/`Default`
-ACEs with failure-safe teardown; `LoadUserProfile`/`CreateEnvironmentBlock`; and detached Job
-lifetime. The Session-0 broker remains the direct process creator and never transfers a reusable
-restricted token to a normal-user helper. Test the path in real RDP/Fast User Switching scenarios,
-not merely the console path, before accepting it for VS Code or Claude Desktop in the caller's
-session (Surface 2 closed, Surface 1 accepted). This later phase can also select multi-profile
-config + admin tooling, optional executable allow-listing, canonical-path/ACL checks, working-dir
-environment policy, credential rotation schedule, config integrity protection, and rate limits.
-The §6.1 result does not support a `LocalService` downgrade.
+ACEs leased by a caller-session coordinator with failure-safe teardown;
+`LoadUserProfile`/`CreateEnvironmentBlock`; and detached Job lifetime. The Session-0 broker remains
+the direct process creator and never transfers a reusable restricted token to a normal-user helper.
+Test the path in real RDP/Fast User Switching scenarios, not merely the console path, before
+accepting it for VS Code or Claude Desktop in the caller's session (Surface 2 closed, Surface 1
+accepted). This later phase can also select multi-profile config + admin tooling, optional
+executable allow-listing, canonical-path/ACL checks, working-dir environment policy, credential
+rotation schedule, config integrity protection, and rate limits. The §6.1 result does not support a
+`LocalService` downgrade.
 
 **Later GUI hardening phase (postponed):** evaluate a private window station/desktop or a separate session for GUI where feasible; `SetWindowDisplayAffinity`-style mitigations are out of the child's control, so this likely means a dedicated session rather than co-locating on the human's desktop.
 

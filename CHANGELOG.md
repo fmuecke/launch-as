@@ -1,5 +1,12 @@
 # Changelog
 
+## [unreleased] - 2026-09-21
+
+- Changed: (internal) Modfying integration tests are now encapsulated by using the Windows Sandbox as
+  as test environment.
+- Changed: (internal) Restructured source according to the different aspects (admin, broker, common,
+  conhost, launcher, protocol, and terminal) to improve maintainability.
+
 ## [1.2.0-preview] - 2026-09-15
 
 - Changed: Setup installs, updates, and uninstalls `launch-as.exe` and `launch-as-admin.exe`

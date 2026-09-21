@@ -10,7 +10,7 @@ param(
 
     [Parameter(Mandatory)]
     [ValidateNotNullOrEmpty()]
-    [string] $AcceptanceScriptDirectory,
+    [string] $AcceptanceScriptDirectory
 )
 
 Set-StrictMode -Version Latest

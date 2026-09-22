@@ -59,6 +59,7 @@ $logFileName = 'interactive-session-probe-command.log'
 $artifactPaths = @(
     (Join-Path $configurationDirectory 'LauncherInteractiveSessionProbe.exe')
     (Join-Path $configurationDirectory 'LauncherInteractiveAclLeaseProbe.exe')
+    (Join-Path $configurationDirectory 'LauncherInteractiveLeaseHandshakeProbe.exe')
     (Join-Path $PSScriptRoot $driverFileName)
     (Join-Path $PSScriptRoot 'Show-LauncherAcceptanceWindow.ps1')
 )

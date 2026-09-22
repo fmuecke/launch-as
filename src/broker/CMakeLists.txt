@@ -18,6 +18,8 @@ add_library(launch_as_broker_core STATIC
     BrokerDataDirectory.h
     BrokerEnrollmentStore.cpp
     BrokerEnrollmentStore.h
+    InteractiveDesktopLeaseClient.cpp
+    InteractiveDesktopLeaseClient.h
     BrokerLogonToken.cpp
     BrokerLogonToken.h
     BrokerPassword.cpp

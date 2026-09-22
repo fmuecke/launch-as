@@ -78,7 +78,7 @@ of the managed account instead of scoping access to one unique child logon SID.
 The caller-side ACL gate passed in a fresh interactive Windows Sandbox guest. The original
 test-local implementation was then replaced by the production launcher component
 `InteractiveDesktopAclLease`; its retained passing run is
-`out/windows-sandbox-interactive-session-probe/2aa3fd01e896474cb037f29b26db8aee`.
+`out/windows-sandbox-interactive-session-probe/fd17d091683e47b5a46e7b459c1e708e`.
 
 The probe used `Start-Process -Credential` to run the fresh local standard account
 `LaunchAsDevCaller` on the connected session's desktop. The process reported:
@@ -111,9 +111,44 @@ standard ownership right to the target logon SID. The coordinator itself opens t
 `READ_CONTROL | WRITE_DAC`, retains those handles for the lease, and retries exact removal during
 destruction if an explicit release failed.
 
-This completes the caller-session ACL lease-owner primitive. It does not yet prove that a
-broker-created target can use the granted masks or cover broker-to-coordinator authentication,
-detached coordinator lifetime, RDP, Fast User Switching, coordinator crashes, launcher
-disappearance, and broker restart. Those remain end-to-end acceptance gates. The next vertical
-slice should add the authenticated broker/coordinator handshake and exercise a broker-created
-target token against the lease, with removal after normal Job completion.
+## Authenticated handshake slice
+
+The next production slice adds the broker/client and caller-session coordinator halves of a
+one-connection lease protocol. The caller creates a random, first-instance, local-only message pipe
+whose DACL grants access only to LocalSystem. Before reading a request, the coordinator requires:
+
+- a LocalSystem named-pipe impersonation token in session 0;
+- a nonzero kernel-reported client process id; and
+- a kernel-reported named-pipe client session id of 0.
+
+The standard-user coordinator cannot open an arbitrary LocalSystem process token for a redundant
+user-SID cross-check; the live probe returned `ERROR_ACCESS_DENIED` for that attempt. Authentication
+therefore uses the pipe DACL, the impersonated client token, and named-pipe process/session metadata.
+This does not trust a client-supplied identity field.
+
+After peer authentication, the coordinator accepts only the versioned acquire and release messages
+defined in `BrokerProtocol`. Acquire contains exactly the nonce, fixed `WinSta0\Default` desktop,
+and child logon SID. Release contains only the same nonce. Unexpected fields, account-SID-shaped
+values, nonce mismatches, duplicate fields, and malformed operations are rejected. The broker-side
+connection remains open for the lease lifetime; closing it early destroys the coordinator's RAII
+lease and removes the exact ACEs.
+
+A fresh Windows Sandbox run exercised the production components across the real identity and
+session boundary:
+
+- the coordinator ran as the non-administrator, non-elevated session-1 caller;
+- the client ran as LocalSystem in session 0 and used its token's real logon SID;
+- acquire and release both returned zero;
+- the connection remained held after acquire; and
+- independent before/after DACL snapshots matched for both `WinSta0` and `Default`.
+
+The retained passing run is
+`out/windows-sandbox-interactive-session-probe/fd17d091683e47b5a46e7b459c1e708e`.
+
+This completes the authenticated lease-channel primitive. It does not yet integrate the channel
+with the installed broker request path or prove that a broker-created managed-account target can
+use the granted masks. Detached coordinator lifetime, `TokenSessionId`, GUI process creation, Job
+completion release, RDP, Fast User Switching, coordinator crashes, launcher disappearance, and
+broker restart remain end-to-end acceptance gates. The next vertical slice should create the
+managed-account target token, assign the authenticated caller session, acquire the lease for that
+token's logon SID, and release it after normal Job completion.

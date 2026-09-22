@@ -61,6 +61,20 @@ struct BrokerRequest
     ConsoleRequest console;
 };
 
+enum class InteractiveLeaseOperation
+{
+    Acquire,
+    Release
+};
+
+struct InteractiveLeaseRequest
+{
+    InteractiveLeaseOperation operation = InteractiveLeaseOperation::Acquire;
+    std::wstring nonce;
+    std::wstring desktop;
+    std::wstring childLogonSid;
+};
+
 enum class ParseResult
 {
     Success,
@@ -69,6 +83,16 @@ enum class ParseResult
 };
 
 [[nodiscard]] ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request);
+[[nodiscard]] std::string BuildInteractiveLeaseAcquireRequest(
+    std::wstring_view nonce, std::wstring_view childLogonSid);
+[[nodiscard]] std::string BuildInteractiveLeaseReleaseRequest(std::wstring_view nonce);
+[[nodiscard]] bool ParseInteractiveLeaseRequest(
+    std::string_view message, std::wstring_view expectedNonce, InteractiveLeaseRequest& request);
+[[nodiscard]] std::string BuildInteractiveLeaseResponse(
+    InteractiveLeaseOperation operation, std::wstring_view nonce, DWORD win32Error);
+[[nodiscard]] bool ParseInteractiveLeaseResponse(std::string_view response,
+    InteractiveLeaseOperation expectedOperation, std::wstring_view expectedNonce,
+    DWORD& win32Error);
 [[nodiscard]] std::string BuildManagementRequest(RequestOperation operation,
     std::wstring_view requestId, std::wstring_view profileId, bool confirmed, bool force = false);
 [[nodiscard]] std::string BuildErrorResponse(

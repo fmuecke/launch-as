@@ -198,10 +198,17 @@ coordinator may therefore hold the ACL lease. It receives only a nonce, desktop 
 logon SID. The detailed alternatives, evidence boundary, and retained-run path are recorded in
 [Interactive mode session coordination](discovery/Spike%20-%20interactive%20mode%20session%20coordination.md).
 
-The first production slice implements the caller-owned `InteractiveDesktopAclLease` primitive and
-verifies it as a non-elevated standard account in a fresh interactive Windows Sandbox guest. The
-broker/coordinator handshake, detached helper lifetime, and broker-created GUI child are not part
-of that slice and remain unsupported at the public CLI/protocol seam.
+The first production slice implements the caller-owned `InteractiveDesktopAclLease` primitive. The
+second implements the authenticated lease channel: a first-instance, local-only, SYSTEM-only pipe;
+LocalSystem impersonation-token and Session-0 metadata checks; an exact nonce-bound acquire/release
+protocol; and disconnect-triggered RAII cleanup. A fresh interactive Windows Sandbox guest verified
+the production channel between a non-elevated session-1 coordinator and a Session-0 LocalSystem
+client, including independent final-DACL equality.
+
+The channel is not yet wired into the installed broker request path. Detached helper lifetime,
+caller-session assignment of a broker-created managed-account token, GUI process creation, and
+Job-completion release remain unsupported. The public CLI/protocol therefore continues to reject
+interactive launches until that complete vertical path is implemented and accepted.
 
 #### 7.2.2 No normal-user token helper
 

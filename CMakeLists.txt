@@ -656,6 +656,37 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
     )
     configure_launch_as_test_target(LauncherInteractiveAclLeaseProbe launcher)
 
+    add_executable(LauncherInteractiveLeaseHandshakeTests
+        tests/InteractiveLeaseHandshakeTests.cpp
+    )
+    target_link_libraries(LauncherInteractiveLeaseHandshakeTests PRIVATE
+        Advapi32
+        launch_as::launcher
+    )
+    configure_launch_as_test_target(
+        LauncherInteractiveLeaseHandshakeTests launcher protocol common)
+
+    add_test(
+        NAME launcher.interactive_lease_handshake
+        COMMAND "$<TARGET_FILE:LauncherInteractiveLeaseHandshakeTests>"
+    )
+    set_tests_properties(launcher.interactive_lease_handshake PROPERTIES
+        LABELS "broker;launcher;integration"
+    )
+
+    add_executable(LauncherInteractiveLeaseHandshakeProbe
+        tests/InteractiveLeaseHandshakeProbe.cpp
+    )
+    target_link_libraries(LauncherInteractiveLeaseHandshakeProbe PRIVATE
+        Advapi32
+        User32
+        Userenv
+        launch_as::broker
+        launch_as::launcher
+    )
+    configure_launch_as_test_target(
+        LauncherInteractiveLeaseHandshakeProbe broker launcher protocol common)
+
     add_executable(LauncherBrokerChildIdentityProbe
         tests/BrokerChildIdentityProbe.cpp
     )

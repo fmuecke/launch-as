@@ -7,6 +7,8 @@ add_library(launch_as_launcher_core STATIC
     BrokerControlClient.h
     InteractiveDesktopAclLease.cpp
     InteractiveDesktopAclLease.h
+    InteractiveDesktopLeaseCoordinator.cpp
+    InteractiveDesktopLeaseCoordinator.h
     LauncherOptions.cpp
     LauncherOptions.h
     LaunchProcess.cpp

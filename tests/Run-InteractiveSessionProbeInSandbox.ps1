@@ -18,15 +18,22 @@ $callerResultPath = Join-Path $workDirectory 'caller-session.txt'
 $systemResultPath = Join-Path $workDirectory 'system-session.txt'
 $probePath = Join-Path $workDirectory 'LauncherInteractiveSessionProbe.exe'
 $aclProbePath = Join-Path $workDirectory 'LauncherInteractiveAclLeaseProbe.exe'
+$handshakeProbePath = Join-Path $workDirectory 'LauncherInteractiveLeaseHandshakeProbe.exe'
 $windowScriptPath = Join-Path $workDirectory 'Show-LauncherAcceptanceWindow.ps1'
 $canaryTitle = 'launch-as Sandbox acceptance caller'
 $taskName = 'launch-as-interactive-session-probe-' + [guid]::NewGuid().ToString('N')
+$handshakeTaskName = 'launch-as-interactive-handshake-probe-' + [guid]::NewGuid().ToString('N')
 $windowProcess = $null
+$handshakeCoordinator = $null
 $taskRegistered = $false
+$handshakeTaskRegistered = $false
 $callerAccount = 'LaunchAsDevCaller'
 $callerCreated = $false
 $aclResultPath = $null
 $aclExitCodePath = $null
+$handshakeCoordinatorResultPath = $null
+$handshakeClientResultPath = $null
+$handshakeCoordinatorExitCodePath = $null
 
 function Read-ProbeResult {
     param(
@@ -60,6 +67,8 @@ try {
         -Destination $probePath
     Copy-Item -LiteralPath (Join-Path $SourceDirectory 'LauncherInteractiveAclLeaseProbe.exe') `
         -Destination $aclProbePath
+    Copy-Item -LiteralPath (Join-Path $SourceDirectory 'LauncherInteractiveLeaseHandshakeProbe.exe') `
+        -Destination $handshakeProbePath
     Copy-Item -LiteralPath (Join-Path $SourceDirectory 'Show-LauncherAcceptanceWindow.ps1') `
         -Destination $windowScriptPath
 
@@ -267,6 +276,96 @@ try {
         throw "The standard-caller ACL lease probe failed with exit code '$probeExitCode'.`n$((Get-Content -LiteralPath $aclResultPath) -join [Environment]::NewLine)"
     }
 
+    $handshakeCoordinatorResultPath = Join-Path $aclResultDirectory 'handshake-coordinator-result.txt'
+    $handshakeClientResultPath = Join-Path $aclResultDirectory 'handshake-client-result.txt'
+    $handshakeCoordinatorExitCodePath = Join-Path $aclResultDirectory 'handshake-coordinator-exit-code.txt'
+    $handshakeReadyPath = Join-Path $aclResultDirectory 'handshake-ready.txt'
+    $handshakeWrapperPath = Join-Path $workDirectory 'Run-InteractiveLeaseHandshakeCoordinator.cmd'
+    $handshakeId = [guid]::NewGuid().ToString('D')
+    $handshakePipeName = '\\.\pipe\launch-as-interactive-' + [guid]::NewGuid().ToString('N')
+    @(
+        '@echo off'
+        ('"{0}" --coordinator "{1}" "{2}" "{3}" "{4}"' -f `
+            $handshakeProbePath,
+            $handshakePipeName,
+            $handshakeId,
+            $handshakeCoordinatorResultPath,
+            $handshakeReadyPath)
+        'set "probeExitCode=%ERRORLEVEL%"'
+        ('> "{0}" echo %probeExitCode%' -f $handshakeCoordinatorExitCodePath)
+        'exit /b %probeExitCode%'
+    ) | Set-Content -LiteralPath $handshakeWrapperPath -Encoding Ascii
+    $handshakeCoordinator = Start-Process `
+        -FilePath $env:ComSpec `
+        -ArgumentList @('/d', '/s', '/c', ('"{0}"' -f $handshakeWrapperPath)) `
+        -Credential $callerCredential `
+        -LoadUserProfile `
+        -WorkingDirectory $workDirectory `
+        -WindowStyle Hidden `
+        -PassThru
+    $readyDeadline = [DateTime]::UtcNow.AddSeconds(15)
+    while (-not (Test-Path -LiteralPath $handshakeReadyPath -PathType Leaf) -and
+        -not $handshakeCoordinator.HasExited -and
+        [DateTime]::UtcNow -lt $readyDeadline) {
+        Start-Sleep -Milliseconds 100
+        $handshakeCoordinator.Refresh()
+    }
+    if (-not (Test-Path -LiteralPath $handshakeReadyPath -PathType Leaf)) {
+        throw 'The standard-caller lease coordinator did not become ready.'
+    }
+
+    $handshakeAction = New-ScheduledTaskAction `
+        -Execute $handshakeProbePath `
+        -Argument ('--broker "{0}" "{1}" "{2}"' -f `
+            $handshakePipeName,
+            $handshakeId,
+            $handshakeClientResultPath)
+    $null = Register-ScheduledTask `
+        -TaskName $handshakeTaskName `
+        -Action $handshakeAction `
+        -Principal $taskPrincipal
+    $handshakeTaskRegistered = $true
+    Start-ScheduledTask -TaskName $handshakeTaskName
+    $handshakeDeadline = [DateTime]::UtcNow.AddSeconds(30)
+    do {
+        Start-Sleep -Milliseconds 100
+        $handshakeTask = Get-ScheduledTask -TaskName $handshakeTaskName
+        $handshakeTaskInfo = Get-ScheduledTaskInfo -TaskName $handshakeTaskName
+    } while (($handshakeTask.State -eq 'Running' -or
+            -not (Test-Path -LiteralPath $handshakeClientResultPath -PathType Leaf)) -and
+        [DateTime]::UtcNow -lt $handshakeDeadline)
+    if (-not (Test-Path -LiteralPath $handshakeClientResultPath -PathType Leaf)) {
+        throw 'The Session-0 SYSTEM handshake client did not create its result.'
+    }
+    if ($handshakeTaskInfo.LastTaskResult -ne 0) {
+        throw "The Session-0 SYSTEM handshake client failed with exit code $($handshakeTaskInfo.LastTaskResult)."
+    }
+    if (-not $handshakeCoordinator.WaitForExit(15000)) {
+        Stop-Process -Id $handshakeCoordinator.Id -Force -ErrorAction SilentlyContinue
+        throw 'The standard-caller lease coordinator did not finish after release.'
+    }
+    if (-not (Test-Path -LiteralPath $handshakeCoordinatorResultPath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $handshakeCoordinatorExitCodePath -PathType Leaf)) {
+        throw 'The standard-caller lease coordinator omitted its result or exit code.'
+    }
+    $handshakeCoordinatorExitCode = [int] (
+        Get-Content -LiteralPath $handshakeCoordinatorExitCodePath -Raw).Trim()
+    $handshakeCoordinatorResult = Read-ProbeResult -Path $handshakeCoordinatorResultPath
+    $handshakeClientResult = Read-ProbeResult -Path $handshakeClientResultPath
+    if ($handshakeCoordinatorExitCode -ne 0 -or
+        $handshakeCoordinatorResult['createPipeError'] -ne '0' -or
+        $handshakeCoordinatorResult['connectError'] -ne '0' -or
+        $handshakeCoordinatorResult['serveError'] -ne '0' -or
+        $handshakeCoordinatorResult['independentDaclSemanticallyRestored'] -ne 'true' -or
+        $handshakeCoordinatorResult['probeSucceeded'] -ne 'true' -or
+        $handshakeClientResult['clientIsLocalSystem'] -ne 'true' -or
+        $handshakeClientResult['connectionHeldAfterAcquire'] -ne 'true' -or
+        $handshakeClientResult['acquireError'] -ne '0' -or
+        $handshakeClientResult['releaseError'] -ne '0' -or
+        $handshakeClientResult['probeSucceeded'] -ne 'true') {
+        throw "The authenticated interactive lease handshake failed.`n$((Get-Content -LiteralPath $handshakeCoordinatorResultPath) -join [Environment]::NewLine)`n$((Get-Content -LiteralPath $handshakeClientResultPath) -join [Environment]::NewLine)"
+    }
+
     @(
         'PASS'
         "caller.processSessionId=$callerSessionId"
@@ -291,6 +390,11 @@ try {
         "acl.daclSemanticallyRestored=$($aclResult['daclSemanticallyRestored'])"
         "acl.independentDaclSemanticallyRestored=$($aclResult['independentDaclSemanticallyRestored'])"
         "acl.probeSucceeded=$($aclResult['probeSucceeded'])"
+        "handshake.clientIsLocalSystem=$($handshakeClientResult['clientIsLocalSystem'])"
+        "handshake.acquireError=$($handshakeClientResult['acquireError'])"
+        "handshake.releaseError=$($handshakeClientResult['releaseError'])"
+        "handshake.independentDaclSemanticallyRestored=$($handshakeCoordinatorResult['independentDaclSemanticallyRestored'])"
+        "handshake.probeSucceeded=$($handshakeClientResult['probeSucceeded'])"
     ) | Out-File -LiteralPath $sharedResultPath -Encoding utf8
 }
 catch {
@@ -303,7 +407,10 @@ catch {
             $callerResultPath,
             $systemResultPath,
             $aclResultPath,
-            $aclExitCodePath)) {
+            $aclExitCodePath,
+            $handshakeCoordinatorResultPath,
+            $handshakeClientResultPath,
+            $handshakeCoordinatorExitCodePath)) {
         if (-not [string]::IsNullOrEmpty($probeResultPath) -and
             (Test-Path -LiteralPath $probeResultPath -PathType Leaf)) {
             $failure += "--- $(Split-Path -Leaf $probeResultPath) ---"
@@ -314,8 +421,17 @@ catch {
     throw
 }
 finally {
+    if ($null -ne $handshakeCoordinator -and -not $handshakeCoordinator.HasExited) {
+        Stop-Process -Id $handshakeCoordinator.Id -Force -ErrorAction SilentlyContinue
+    }
     if ($taskRegistered) {
         Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+    }
+    if ($handshakeTaskRegistered) {
+        Unregister-ScheduledTask `
+            -TaskName $handshakeTaskName `
+            -Confirm:$false `
+            -ErrorAction SilentlyContinue
     }
     if ($callerCreated) {
         Remove-LocalUser -Name $callerAccount -ErrorAction SilentlyContinue

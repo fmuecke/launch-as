@@ -279,6 +279,35 @@ class JsonReader final
     return true;
 }
 
+[[nodiscard]] bool IsLogonSid(std::wstring_view value)
+{
+    constexpr std::wstring_view prefix = L"S-1-5-5-";
+    if (!value.starts_with(prefix))
+    {
+        return false;
+    }
+    value.remove_prefix(prefix.size());
+    const std::size_t separator = value.find(L'-');
+    if (separator == std::wstring_view::npos || separator == 0 || separator + 1 == value.size() ||
+        value.find(L'-', separator + 1) != std::wstring_view::npos)
+    {
+        return false;
+    }
+    const auto isDecimal = [](std::wstring_view component)
+    {
+        return std::all_of(component.begin(),
+            component.end(),
+            [](wchar_t character) { return character >= L'0' && character <= L'9'; });
+    };
+    return isDecimal(value.substr(0, separator)) && isDecimal(value.substr(separator + 1));
+}
+
+[[nodiscard]] std::wstring_view InteractiveLeaseOperationName(
+    InteractiveLeaseOperation operation) noexcept
+{
+    return operation == InteractiveLeaseOperation::Acquire ? L"acquire" : L"release";
+}
+
 [[nodiscard]] bool IsConsolePipeName(const std::wstring& value)
 {
     constexpr std::wstring_view prefix = L"\\\\.\\pipe\\launch-as-";
@@ -821,6 +850,232 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
     }
     request.operation = RequestOperation::ConsoleLaunch;
     return ParseResult::Success;
+}
+
+std::string BuildInteractiveLeaseAcquireRequest(
+    std::wstring_view nonce, std::wstring_view childLogonSid)
+{
+    if (!IsRequestId(std::wstring(nonce)) || !IsLogonSid(childLogonSid))
+    {
+        return {};
+    }
+    std::string request = "{\"version\":1,\"operation\":\"acquire\",\"nonce\":";
+    AppendJsonString(request, nonce);
+    request += ",\"desktop\":\"WinSta0\\\\Default\",\"childLogonSid\":";
+    AppendJsonString(request, childLogonSid);
+    request += '}';
+    return request;
+}
+
+std::string BuildInteractiveLeaseReleaseRequest(std::wstring_view nonce)
+{
+    if (!IsRequestId(std::wstring(nonce)))
+    {
+        return {};
+    }
+    std::string request = "{\"version\":1,\"operation\":\"release\",\"nonce\":";
+    AppendJsonString(request, nonce);
+    request += '}';
+    return request;
+}
+
+bool ParseInteractiveLeaseRequest(
+    std::string_view message, std::wstring_view expectedNonce, InteractiveLeaseRequest& request)
+{
+    request = {};
+    if (message.empty() || message.size() > MaximumMessageBytes ||
+        !IsRequestId(std::wstring(expectedNonce)))
+    {
+        return false;
+    }
+    JsonReader reader(message);
+    if (!reader.Consume('{'))
+    {
+        return false;
+    }
+    bool version = false;
+    bool versionSeen = false;
+    bool operation = false;
+    bool operationSeen = false;
+    bool nonce = false;
+    bool nonceSeen = false;
+    bool desktop = false;
+    bool desktopSeen = false;
+    bool childLogonSid = false;
+    bool childLogonSidSeen = false;
+    std::wstring operationName;
+    for (;;)
+    {
+        std::wstring name;
+        if (!reader.String(name) || !reader.Consume(':'))
+        {
+            return false;
+        }
+        if (name == L"version" && !versionSeen)
+        {
+            versionSeen = true;
+            DWORD value = 0;
+            version = reader.Unsigned(value) && value == 1;
+        }
+        else if (name == L"operation" && !operationSeen)
+        {
+            operationSeen = true;
+            operation = reader.String(operationName) &&
+                        (operationName == L"acquire" || operationName == L"release");
+        }
+        else if (name == L"nonce" && !nonceSeen)
+        {
+            nonceSeen = true;
+            nonce = reader.String(request.nonce) && request.nonce == expectedNonce;
+        }
+        else if (name == L"desktop" && !desktopSeen)
+        {
+            desktopSeen = true;
+            desktop = reader.String(request.desktop) && request.desktop == L"WinSta0\\Default";
+        }
+        else if (name == L"childLogonSid" && !childLogonSidSeen)
+        {
+            childLogonSidSeen = true;
+            childLogonSid =
+                reader.String(request.childLogonSid) && IsLogonSid(request.childLogonSid);
+        }
+        else
+        {
+            return false;
+        }
+        if (reader.Consume('}'))
+        {
+            break;
+        }
+        if (!reader.Consume(','))
+        {
+            return false;
+        }
+    }
+    if (!reader.End() || !version || !operation || !nonce)
+    {
+        return false;
+    }
+    if (operationName == L"acquire")
+    {
+        if (!desktop || !childLogonSid)
+        {
+            return false;
+        }
+        request.operation = InteractiveLeaseOperation::Acquire;
+        return true;
+    }
+    if (desktopSeen || childLogonSidSeen)
+    {
+        return false;
+    }
+    request.operation = InteractiveLeaseOperation::Release;
+    request.desktop.clear();
+    request.childLogonSid.clear();
+    return true;
+}
+
+std::string BuildInteractiveLeaseResponse(
+    InteractiveLeaseOperation operation, std::wstring_view nonce, DWORD win32Error)
+{
+    if (!IsRequestId(std::wstring(nonce)))
+    {
+        return {};
+    }
+    std::string response = "{\"version\":1,\"operation\":";
+    AppendJsonString(response, InteractiveLeaseOperationName(operation));
+    response += ",\"nonce\":";
+    AppendJsonString(response, nonce);
+    response += win32Error == ERROR_SUCCESS ? ",\"status\":\"ok\",\"win32Error\":"
+                                            : ",\"status\":\"error\",\"win32Error\":";
+    response += std::to_string(win32Error);
+    response += '}';
+    return response;
+}
+
+bool ParseInteractiveLeaseResponse(std::string_view response,
+    InteractiveLeaseOperation expectedOperation, std::wstring_view expectedNonce, DWORD& win32Error)
+{
+    win32Error = ERROR_INVALID_DATA;
+    if (response.empty() || response.size() > MaximumMessageBytes ||
+        !IsRequestId(std::wstring(expectedNonce)))
+    {
+        return false;
+    }
+    JsonReader reader(response);
+    if (!reader.Consume('{'))
+    {
+        return false;
+    }
+    bool version = false;
+    bool versionSeen = false;
+    bool operation = false;
+    bool operationSeen = false;
+    bool nonce = false;
+    bool nonceSeen = false;
+    bool status = false;
+    bool statusSeen = false;
+    bool error = false;
+    bool errorSeen = false;
+    bool statusIsOk = false;
+    for (;;)
+    {
+        std::wstring name;
+        if (!reader.String(name) || !reader.Consume(':'))
+        {
+            return false;
+        }
+        if (name == L"version" && !versionSeen)
+        {
+            versionSeen = true;
+            DWORD value = 0;
+            version = reader.Unsigned(value) && value == 1;
+        }
+        else if (name == L"operation" && !operationSeen)
+        {
+            operationSeen = true;
+            std::wstring value;
+            operation =
+                reader.String(value) && value == InteractiveLeaseOperationName(expectedOperation);
+        }
+        else if (name == L"nonce" && !nonceSeen)
+        {
+            nonceSeen = true;
+            std::wstring value;
+            nonce = reader.String(value) && value == expectedNonce;
+        }
+        else if (name == L"status" && !statusSeen)
+        {
+            statusSeen = true;
+            std::wstring value;
+            status = reader.String(value) && (value == L"ok" || value == L"error");
+            statusIsOk = value == L"ok";
+        }
+        else if (name == L"win32Error" && !errorSeen)
+        {
+            errorSeen = true;
+            error = reader.Unsigned(win32Error);
+        }
+        else
+        {
+            return false;
+        }
+        if (reader.Consume('}'))
+        {
+            break;
+        }
+        if (!reader.Consume(','))
+        {
+            return false;
+        }
+    }
+    const bool valid = reader.End() && version && operation && nonce && status && error &&
+                       statusIsOk == (win32Error == ERROR_SUCCESS);
+    if (!valid)
+    {
+        win32Error = ERROR_INVALID_DATA;
+    }
+    return valid;
 }
 
 std::string BuildErrorResponse(

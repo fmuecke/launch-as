@@ -78,6 +78,9 @@ constexpr char UnconfirmedCreateRequest[] = R"json({
   "profileId": "sandbox"
 })json";
 
+constexpr wchar_t InteractiveLeaseNonce[] = L"6f9619ff-8b86-d011-b42d-00c04fc964ff";
+constexpr wchar_t InteractiveLeaseLogonSid[] = L"S-1-5-5-123-456";
+
 } // namespace
 
 int wmain()
@@ -144,6 +147,75 @@ int wmain()
     if (!Expect(launch_as::broker::ParseBrokerRequest(UnconfirmedCreateRequest, request) ==
                     launch_as::broker::ParseResult::InvalidRequest,
             L"Unconfirmed registration request was accepted."))
+    {
+        return 1;
+    }
+
+    launch_as::broker::InteractiveLeaseRequest leaseRequest;
+    const std::string acquireLease = launch_as::broker::BuildInteractiveLeaseAcquireRequest(
+        InteractiveLeaseNonce, InteractiveLeaseLogonSid);
+    if (!Expect(acquireLease == "{\"version\":1,\"operation\":\"acquire\",\"nonce\":"
+                                "\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"desktop\":"
+                                "\"WinSta0\\\\Default\",\"childLogonSid\":\"S-1-5-5-123-456\"}",
+            L"Interactive lease acquire encoding is not stable.") ||
+        !Expect(
+            launch_as::broker::ParseInteractiveLeaseRequest(
+                acquireLease, InteractiveLeaseNonce, leaseRequest) &&
+                leaseRequest.operation == launch_as::broker::InteractiveLeaseOperation::Acquire &&
+                leaseRequest.nonce == InteractiveLeaseNonce &&
+                leaseRequest.desktop == L"WinSta0\\Default" &&
+                leaseRequest.childLogonSid == InteractiveLeaseLogonSid,
+            L"Interactive lease acquire request was not decoded."))
+    {
+        return 1;
+    }
+
+    std::string unexpectedLeaseField = acquireLease;
+    unexpectedLeaseField.insert(unexpectedLeaseField.rfind('}'), ",\"sessionId\":1");
+    std::string accountSidLease = acquireLease;
+    accountSidLease.replace(accountSidLease.find("S-1-5-5-123-456"),
+        std::string("S-1-5-5-123-456").size(),
+        "S-1-5-21-1-2-3-1000");
+    if (!Expect(!launch_as::broker::ParseInteractiveLeaseRequest(
+                    acquireLease, L"00000000-0000-0000-0000-000000000000", leaseRequest),
+            L"Interactive lease request accepted a mismatched nonce.") ||
+        !Expect(!launch_as::broker::ParseInteractiveLeaseRequest(
+                    unexpectedLeaseField, InteractiveLeaseNonce, leaseRequest),
+            L"Interactive lease request accepted an unexpected session id.") ||
+        !Expect(!launch_as::broker::ParseInteractiveLeaseRequest(
+                    accountSidLease, InteractiveLeaseNonce, leaseRequest),
+            L"Interactive lease request accepted an account SID instead of a logon SID."))
+    {
+        return 1;
+    }
+
+    const std::string acquiredLease = launch_as::broker::BuildInteractiveLeaseResponse(
+        launch_as::broker::InteractiveLeaseOperation::Acquire,
+        InteractiveLeaseNonce,
+        ERROR_SUCCESS);
+    DWORD leaseError = ERROR_INVALID_DATA;
+    if (!Expect(acquiredLease == "{\"version\":1,\"operation\":\"acquire\",\"nonce\":"
+                                 "\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"status\":\"ok\","
+                                 "\"win32Error\":0}",
+            L"Interactive lease acknowledgement encoding is not stable.") ||
+        !Expect(launch_as::broker::ParseInteractiveLeaseResponse(acquiredLease,
+                    launch_as::broker::InteractiveLeaseOperation::Acquire,
+                    InteractiveLeaseNonce,
+                    leaseError) &&
+                    leaseError == ERROR_SUCCESS,
+            L"Interactive lease acknowledgement was not decoded."))
+    {
+        return 1;
+    }
+
+    const std::string releaseLease =
+        launch_as::broker::BuildInteractiveLeaseReleaseRequest(InteractiveLeaseNonce);
+    if (!Expect(
+            launch_as::broker::ParseInteractiveLeaseRequest(
+                releaseLease, InteractiveLeaseNonce, leaseRequest) &&
+                leaseRequest.operation == launch_as::broker::InteractiveLeaseOperation::Release &&
+                leaseRequest.desktop.empty() && leaseRequest.childLogonSid.empty(),
+            L"Interactive lease release request was not decoded."))
     {
         return 1;
     }

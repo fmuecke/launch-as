@@ -31,6 +31,7 @@ foreach ($requiredText in @(
         'Invoke-WindowsSandboxTest',
         'LauncherInteractiveSessionProbe.exe',
         'LauncherInteractiveAclLeaseProbe.exe',
+        'LauncherInteractiveLeaseHandshakeProbe.exe',
         'Show-LauncherAcceptanceWindow.ps1',
         'Run-InteractiveSessionProbeInSandbox.ps1',
         'ExistingLogin',
@@ -57,6 +58,11 @@ foreach ($requiredText in @(
         'desktopLeaseRemoved',
         'daclSemanticallyRestored',
         'independentDaclSemanticallyRestored',
+        'handshake.clientIsLocalSystem',
+        'handshake.acquireError',
+        'handshake.releaseError',
+        'handshake.independentDaclSemanticallyRestored',
+        'handshake.probeSucceeded',
         'probeSucceeded',
         'canaryVisible')) {
     if ($combinedText -notmatch [regex]::Escape($requiredText)) {

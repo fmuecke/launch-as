@@ -4,6 +4,7 @@
 
 #include "BrokerProcessLauncher.h"
 
+#include "InteractiveDesktopLeaseClient.h"
 #include "PseudoConsoleHostReport.h"
 #include "Utf8.h"
 #include "WindowsCommandLine.h"
@@ -51,7 +52,7 @@ class EnabledProcessPrivileges final
         }
     }
 
-    [[nodiscard]] DWORD EnableRequired()
+    [[nodiscard]] DWORD EnableRequired(bool includeTrustedComputerBase = false)
     {
         if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &token_))
         {
@@ -75,7 +76,12 @@ class EnabledProcessPrivileges final
         {
             return assignTokenError;
         }
-        return Enable(SE_INCREASE_QUOTA_NAME);
+        const DWORD quotaError = Enable(SE_INCREASE_QUOTA_NAME);
+        if (quotaError != ERROR_SUCCESS)
+        {
+            return quotaError;
+        }
+        return includeTrustedComputerBase ? Enable(SE_TCB_NAME) : ERROR_SUCCESS;
     }
 
   private:
@@ -112,7 +118,7 @@ class EnabledProcessPrivileges final
     }
 
     HANDLE token_ = nullptr;
-    std::array<TOKEN_PRIVILEGES, 4> previous_ {};
+    std::array<TOKEN_PRIVILEGES, 5> previous_ {};
     DWORD enabledCount_ = 0;
 };
 
@@ -479,26 +485,39 @@ bool BrokerChildProcess::TerminateAndWaitForExit() noexcept
             return false;
         }
     }
+    const ULONGLONG now = GetTickCount64();
+    const DWORD remaining = now >= deadline ? 0 : static_cast<DWORD>(deadline - now);
+    const bool processTreeExited = WaitForProcessTreeExit(remaining);
+    Reset();
+    return processTreeExited;
+}
+
+bool BrokerChildProcess::WaitForProcessTreeExit(DWORD timeoutMilliseconds) const noexcept
+{
+    if (job_ == nullptr)
+    {
+        return false;
+    }
+    const ULONGLONG deadline =
+        timeoutMilliseconds == INFINITE ? 0 : GetTickCount64() + timeoutMilliseconds;
     for (;;)
     {
         JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting {};
         if (!QueryBrokerJobBasicAccountingInformation(job_, accounting))
         {
-            Reset();
             return false;
         }
         if (accounting.ActiveProcesses == 0)
         {
-            Reset();
             return true;
         }
         const ULONGLONG now = GetTickCount64();
-        if (now >= deadline)
+        if (timeoutMilliseconds != INFINITE && now >= deadline)
         {
-            Reset();
             return false;
         }
-        const DWORD remaining = static_cast<DWORD>(deadline - now);
+        const DWORD remaining =
+            timeoutMilliseconds == INFINITE ? 10 : static_cast<DWORD>(deadline - now);
         Sleep(remaining < 10 ? remaining : 10);
     }
 }
@@ -830,6 +849,185 @@ DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,
     child.SetProcess(processInfo.hProcess, processInfo.hThread);
     child.SetUserProfile(profileToken, profileInfo.hProfile);
     child.SetPseudoConsoleHostReports(exitReportRead, diagnosticsRead);
+    return ERROR_SUCCESS;
+}
+
+DWORD LaunchBrokerInteractiveProcess(HANDLE token, std::wstring_view accountName,
+    std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
+    DWORD targetSessionId, std::wstring_view leasePipeName, std::wstring_view leaseNonce,
+    const std::vector<BYTE>& callerLogonSid, BrokerChildProcess& child,
+    InteractiveDesktopLeaseConnection& lease)
+{
+    child.Reset();
+    lease.Reset();
+    if (token == nullptr || accountName.empty() || arguments.empty() || arguments.front().empty() ||
+        arguments.front().find(L'"') != std::wstring::npos || workingDirectory.empty() ||
+        targetSessionId == 0 || targetSessionId == MAXDWORD || leasePipeName.empty() ||
+        leaseNonce.empty() || callerLogonSid.empty() ||
+        !IsValidSid(const_cast<BYTE*>(callerLogonSid.data())))
+    {
+        return ERROR_INVALID_PARAMETER;
+    }
+    std::wstring directory;
+    const DWORD workingDirectoryError = ResolveBrokerWorkingDirectory(workingDirectory, directory);
+    if (workingDirectoryError != ERROR_SUCCESS)
+    {
+        return workingDirectoryError;
+    }
+    const DWORD jobError = CreateBrokerJob(child);
+    if (jobError != ERROR_SUCCESS)
+    {
+        return jobError;
+    }
+    EnabledProcessPrivileges privileges;
+    const DWORD privilegeError = privileges.EnableRequired(true);
+    if (privilegeError != ERROR_SUCCESS)
+    {
+        child.Reset();
+        return privilegeError;
+    }
+    if (!SetTokenInformation(
+            token, TokenSessionId, &targetSessionId, static_cast<DWORD>(sizeof(targetSessionId))))
+    {
+        const DWORD sessionError = GetLastError();
+        child.Reset();
+        return sessionError;
+    }
+    std::vector<BYTE> childLogonSid;
+    const DWORD logonSidError = GetTokenLogonSid(token, childLogonSid);
+    if (logonSidError != ERROR_SUCCESS)
+    {
+        child.Reset();
+        return logonSidError;
+    }
+    if (EqualSid(const_cast<BYTE*>(callerLogonSid.data()), childLogonSid.data()) != FALSE)
+    {
+        child.Reset();
+        return ERROR_ACCESS_DENIED;
+    }
+    const DWORD acquireError =
+        AcquireInteractiveDesktopLease(leasePipeName, leaseNonce, childLogonSid.data(), lease);
+    if (acquireError != ERROR_SUCCESS)
+    {
+        child.Reset();
+        return acquireError;
+    }
+    const auto releaseAfterFailure = [&](DWORD error)
+    {
+        const DWORD releaseError = ReleaseInteractiveDesktopLease(lease);
+        return releaseError == ERROR_SUCCESS ? error : releaseError;
+    };
+
+    std::wstring executable(arguments.front());
+    const std::span<const std::wstring> targetArguments = arguments.subspan(1);
+    std::wstring commandLine = BuildWindowsCommandLine(executable, targetArguments);
+    std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
+    mutableCommandLine.push_back(L'\0');
+    std::wstring desktopName = L"WinSta0\\Default";
+    STARTUPINFOW startupInfo {};
+    startupInfo.cb = sizeof(startupInfo);
+    startupInfo.lpDesktop = desktopName.data();
+    PROCESS_INFORMATION processInfo {};
+    std::wstring mutableAccountName(accountName);
+    PROFILEINFOW profileInfo {};
+    profileInfo.dwSize = sizeof(profileInfo);
+    profileInfo.lpUserName = mutableAccountName.data();
+    if (!LoadUserProfileW(token, &profileInfo))
+    {
+        const DWORD profileError = GetLastError();
+        child.Reset();
+        return releaseAfterFailure(profileError);
+    }
+    UserEnvironmentBlock environment;
+    const DWORD environmentError = environment.Create(token);
+    if (environmentError != ERROR_SUCCESS)
+    {
+        UnloadUserProfile(token, profileInfo.hProfile);
+        child.Reset();
+        return releaseAfterFailure(environmentError);
+    }
+    const BOOL created = CreateProcessAsUserW(token,
+        executable.c_str(),
+        mutableCommandLine.data(),
+        nullptr,
+        nullptr,
+        FALSE,
+        CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
+        environment.get(),
+        directory.c_str(),
+        &startupInfo,
+        &processInfo);
+    const DWORD processError = created ? ERROR_SUCCESS : GetLastError();
+    if (!created)
+    {
+        UnloadUserProfile(token, profileInfo.hProfile);
+        child.Reset();
+        return releaseAfterFailure(processError);
+    }
+    if (!AssignProcessToJobObject(child.job_, processInfo.hProcess))
+    {
+        const DWORD assignmentError = GetLastError();
+        if (TerminateProcess(processInfo.hProcess, ERROR_CANCELLED))
+        {
+            static_cast<void>(WaitForSingleObject(processInfo.hProcess, INFINITE));
+        }
+        CloseHandle(processInfo.hThread);
+        CloseHandle(processInfo.hProcess);
+        UnloadUserProfile(token, profileInfo.hProfile);
+        child.Reset();
+        return releaseAfterFailure(assignmentError);
+    }
+    HANDLE profileToken = nullptr;
+    if (!DuplicateHandle(GetCurrentProcess(),
+            token,
+            GetCurrentProcess(),
+            &profileToken,
+            0,
+            FALSE,
+            DUPLICATE_SAME_ACCESS))
+    {
+        const DWORD duplicateError = GetLastError();
+        if (TerminateProcess(processInfo.hProcess, ERROR_CANCELLED))
+        {
+            static_cast<void>(WaitForSingleObject(processInfo.hProcess, INFINITE));
+        }
+        CloseHandle(processInfo.hThread);
+        CloseHandle(processInfo.hProcess);
+        UnloadUserProfile(token, profileInfo.hProfile);
+        child.Reset();
+        return releaseAfterFailure(duplicateError);
+    }
+    child.SetProcess(processInfo.hProcess, processInfo.hThread);
+    child.SetUserProfile(profileToken, profileInfo.hProfile);
+
+    HANDLE childToken = nullptr;
+    if (!OpenProcessToken(child.process(), TOKEN_QUERY, &childToken))
+    {
+        const DWORD childTokenError = GetLastError();
+        static_cast<void>(child.TerminateAndWaitForExit());
+        return releaseAfterFailure(childTokenError);
+    }
+    std::vector<BYTE> launchedLogonSid;
+    const DWORD launchedLogonSidError = GetTokenLogonSid(childToken, launchedLogonSid);
+    DWORD launchedSessionId = MAXDWORD;
+    DWORD returnedBytes = 0;
+    const BOOL readSession = GetTokenInformation(
+        childToken, TokenSessionId, &launchedSessionId, sizeof(launchedSessionId), &returnedBytes);
+    const DWORD launchedSessionError = readSession ? ERROR_SUCCESS : GetLastError();
+    CloseHandle(childToken);
+    const bool identityMatches =
+        launchedLogonSidError == ERROR_SUCCESS &&
+        EqualSid(childLogonSid.data(), launchedLogonSid.data()) != FALSE &&
+        EqualSid(const_cast<BYTE*>(callerLogonSid.data()), launchedLogonSid.data()) == FALSE;
+    if (!identityMatches || launchedSessionError != ERROR_SUCCESS ||
+        returnedBytes != sizeof(launchedSessionId) || launchedSessionId != targetSessionId)
+    {
+        static_cast<void>(child.TerminateAndWaitForExit());
+        const DWORD validationError = launchedLogonSidError != ERROR_SUCCESS ? launchedLogonSidError
+                                      : launchedSessionError != ERROR_SUCCESS ? launchedSessionError
+                                                                              : ERROR_ACCESS_DENIED;
+        return releaseAfterFailure(validationError);
+    }
     return ERROR_SUCCESS;
 }
 

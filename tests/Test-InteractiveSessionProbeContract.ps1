@@ -30,6 +30,7 @@ $combinedText = $runnerText + [Environment]::NewLine + $driverText
 foreach ($requiredText in @(
         'Invoke-WindowsSandboxTest',
         'LauncherInteractiveSessionProbe.exe',
+        'LauncherInteractiveTargetProbe.exe',
         'LauncherInteractiveAclLeaseProbe.exe',
         'LauncherInteractiveLeaseHandshakeProbe.exe',
         'Show-LauncherAcceptanceWindow.ps1',
@@ -63,6 +64,14 @@ foreach ($requiredText in @(
         'handshake.releaseError',
         'handshake.independentDaclSemanticallyRestored',
         'handshake.probeSucceeded',
+        'target.sessionIdMatchesCaller',
+        'target.windowStationIsWinSta0',
+        'target.desktopIsDefault',
+        'target.logonSidMatchesLease',
+        'target.windowVisible',
+        'target.jobTreeExitedBeforeRelease',
+        'target.releaseError',
+        'target.probeSucceeded',
         'probeSucceeded',
         'canaryVisible')) {
     if ($combinedText -notmatch [regex]::Escape($requiredText)) {

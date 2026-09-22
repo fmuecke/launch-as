@@ -232,12 +232,12 @@ DWORD InteractiveDesktopAclLease::Acquire(PSID childLogonSid)
     }
 
     windowStationLease_.object = windowStation_;
-    windowStationLease_.accessMask = WINSTA_ALL_ACCESS;
+    windowStationLease_.accessMask = WINSTA_ALL_ACCESS | READ_CONTROL;
     desktopLease_.object = desktop_;
     desktopLease_.accessMask = DESKTOP_CREATEMENU | DESKTOP_CREATEWINDOW | DESKTOP_ENUMERATE |
                                DESKTOP_HOOKCONTROL | DESKTOP_JOURNALPLAYBACK |
                                DESKTOP_JOURNALRECORD | DESKTOP_READOBJECTS | DESKTOP_SWITCHDESKTOP |
-                               DESKTOP_WRITEOBJECTS;
+                               DESKTOP_WRITEOBJECTS | READ_CONTROL;
 
     const DWORD windowStationError = Apply(windowStationLease_);
     if (windowStationError != ERROR_SUCCESS)

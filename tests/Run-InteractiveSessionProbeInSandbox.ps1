@@ -17,6 +17,7 @@ $sharedResultPath = Join-Path $SourceDirectory 'interactive-session-probe-result
 $callerResultPath = Join-Path $workDirectory 'caller-session.txt'
 $systemResultPath = Join-Path $workDirectory 'system-session.txt'
 $probePath = Join-Path $workDirectory 'LauncherInteractiveSessionProbe.exe'
+$targetProbePath = Join-Path $workDirectory 'LauncherInteractiveTargetProbe.exe'
 $aclProbePath = Join-Path $workDirectory 'LauncherInteractiveAclLeaseProbe.exe'
 $handshakeProbePath = Join-Path $workDirectory 'LauncherInteractiveLeaseHandshakeProbe.exe'
 $windowScriptPath = Join-Path $workDirectory 'Show-LauncherAcceptanceWindow.ps1'
@@ -34,6 +35,7 @@ $aclExitCodePath = $null
 $handshakeCoordinatorResultPath = $null
 $handshakeClientResultPath = $null
 $handshakeCoordinatorExitCodePath = $null
+$targetResultPath = $null
 
 function Read-ProbeResult {
     param(
@@ -65,6 +67,8 @@ try {
     $null = New-Item -ItemType Directory -Path $workDirectory
     Copy-Item -LiteralPath (Join-Path $SourceDirectory 'LauncherInteractiveSessionProbe.exe') `
         -Destination $probePath
+    Copy-Item -LiteralPath (Join-Path $SourceDirectory 'LauncherInteractiveTargetProbe.exe') `
+        -Destination $targetProbePath
     Copy-Item -LiteralPath (Join-Path $SourceDirectory 'LauncherInteractiveAclLeaseProbe.exe') `
         -Destination $aclProbePath
     Copy-Item -LiteralPath (Join-Path $SourceDirectory 'LauncherInteractiveLeaseHandshakeProbe.exe') `
@@ -220,6 +224,10 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Granting the standard probe caller access to $aclResultDirectory failed."
     }
+    & icacls.exe $aclResultDirectory /grant '*S-1-5-32-545:(OI)(CI)M' | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Granting standard target accounts access to $aclResultDirectory failed."
+    }
     @(
         '@echo off'
         ('"{0}" "{1}"' -f $aclProbePath, $aclResultPath)
@@ -280,17 +288,20 @@ try {
     $handshakeClientResultPath = Join-Path $aclResultDirectory 'handshake-client-result.txt'
     $handshakeCoordinatorExitCodePath = Join-Path $aclResultDirectory 'handshake-coordinator-exit-code.txt'
     $handshakeReadyPath = Join-Path $aclResultDirectory 'handshake-ready.txt'
+    $targetResultPath = Join-Path $aclResultDirectory 'interactive-target-result.txt'
     $handshakeWrapperPath = Join-Path $workDirectory 'Run-InteractiveLeaseHandshakeCoordinator.cmd'
     $handshakeId = [guid]::NewGuid().ToString('D')
     $handshakePipeName = '\\.\pipe\launch-as-interactive-' + [guid]::NewGuid().ToString('N')
+    $targetWindowTitle = 'launch-as managed target ' + [guid]::NewGuid().ToString('N')
     @(
         '@echo off'
-        ('"{0}" --coordinator "{1}" "{2}" "{3}" "{4}"' -f `
+        ('"{0}" --coordinator-target "{1}" "{2}" "{3}" "{4}" "{5}"' -f `
             $handshakeProbePath,
             $handshakePipeName,
             $handshakeId,
             $handshakeCoordinatorResultPath,
-            $handshakeReadyPath)
+            $handshakeReadyPath,
+            $targetWindowTitle)
         'set "probeExitCode=%ERRORLEVEL%"'
         ('> "{0}" echo %probeExitCode%' -f $handshakeCoordinatorExitCodePath)
         'exit /b %probeExitCode%'
@@ -313,13 +324,24 @@ try {
     if (-not (Test-Path -LiteralPath $handshakeReadyPath -PathType Leaf)) {
         throw 'The standard-caller lease coordinator did not become ready.'
     }
+    $handshakeReady = Read-ProbeResult -Path $handshakeReadyPath
+    if ($handshakeReady['callerSessionId'] -ne [string] $callerSessionId -or
+        [string]::IsNullOrWhiteSpace($handshakeReady['callerLogonSid'])) {
+        throw "The standard-caller lease coordinator reported an invalid identity.`n$((Get-Content -LiteralPath $handshakeReadyPath) -join [Environment]::NewLine)"
+    }
 
     $handshakeAction = New-ScheduledTaskAction `
         -Execute $handshakeProbePath `
-        -Argument ('--broker "{0}" "{1}" "{2}"' -f `
+        -Argument ('--broker-target "{0}" "{1}" "{2}" "{3}" "{4}" "{5}" "{6}" "{7}" "{8}"' -f `
             $handshakePipeName,
             $handshakeId,
-            $handshakeClientResultPath)
+            $handshakeClientResultPath,
+            $handshakeReady['callerSessionId'],
+            $handshakeReady['callerLogonSid'],
+            $targetProbePath,
+            $workDirectory,
+            $targetResultPath,
+            $targetWindowTitle)
     $null = Register-ScheduledTask `
         -TaskName $handshakeTaskName `
         -Action $handshakeAction `
@@ -356,12 +378,19 @@ try {
         $handshakeCoordinatorResult['createPipeError'] -ne '0' -or
         $handshakeCoordinatorResult['connectError'] -ne '0' -or
         $handshakeCoordinatorResult['serveError'] -ne '0' -or
+        $handshakeCoordinatorResult['targetWindowVisible'] -ne 'true' -or
         $handshakeCoordinatorResult['independentDaclSemanticallyRestored'] -ne 'true' -or
         $handshakeCoordinatorResult['probeSucceeded'] -ne 'true' -or
         $handshakeClientResult['clientIsLocalSystem'] -ne 'true' -or
         $handshakeClientResult['connectionHeldAfterAcquire'] -ne 'true' -or
         $handshakeClientResult['acquireError'] -ne '0' -or
         $handshakeClientResult['releaseError'] -ne '0' -or
+        $handshakeClientResult['sessionIdMatchesCaller'] -ne 'true' -or
+        $handshakeClientResult['windowStationIsWinSta0'] -ne 'true' -or
+        $handshakeClientResult['desktopIsDefault'] -ne 'true' -or
+        $handshakeClientResult['logonSidMatchesLease'] -ne 'true' -or
+        $handshakeClientResult['windowCreated'] -ne 'true' -or
+        $handshakeClientResult['jobTreeExitedBeforeRelease'] -ne 'true' -or
         $handshakeClientResult['probeSucceeded'] -ne 'true') {
         throw "The authenticated interactive lease handshake failed.`n$((Get-Content -LiteralPath $handshakeCoordinatorResultPath) -join [Environment]::NewLine)`n$((Get-Content -LiteralPath $handshakeClientResultPath) -join [Environment]::NewLine)"
     }
@@ -395,6 +424,14 @@ try {
         "handshake.releaseError=$($handshakeClientResult['releaseError'])"
         "handshake.independentDaclSemanticallyRestored=$($handshakeCoordinatorResult['independentDaclSemanticallyRestored'])"
         "handshake.probeSucceeded=$($handshakeClientResult['probeSucceeded'])"
+        "target.sessionIdMatchesCaller=$($handshakeClientResult['sessionIdMatchesCaller'])"
+        "target.windowStationIsWinSta0=$($handshakeClientResult['windowStationIsWinSta0'])"
+        "target.desktopIsDefault=$($handshakeClientResult['desktopIsDefault'])"
+        "target.logonSidMatchesLease=$($handshakeClientResult['logonSidMatchesLease'])"
+        "target.windowVisible=$($handshakeCoordinatorResult['targetWindowVisible'])"
+        "target.jobTreeExitedBeforeRelease=$($handshakeClientResult['jobTreeExitedBeforeRelease'])"
+        "target.releaseError=$($handshakeClientResult['releaseError'])"
+        "target.probeSucceeded=$($handshakeClientResult['probeSucceeded'])"
     ) | Out-File -LiteralPath $sharedResultPath -Encoding utf8
 }
 catch {
@@ -410,7 +447,8 @@ catch {
             $aclExitCodePath,
             $handshakeCoordinatorResultPath,
             $handshakeClientResultPath,
-            $handshakeCoordinatorExitCodePath)) {
+            $handshakeCoordinatorExitCodePath,
+            $targetResultPath)) {
         if (-not [string]::IsNullOrEmpty($probeResultPath) -and
             (Test-Path -LiteralPath $probeResultPath -PathType Leaf)) {
             $failure += "--- $(Split-Path -Leaf $probeResultPath) ---"

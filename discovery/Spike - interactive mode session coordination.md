@@ -104,12 +104,12 @@ after each add, absent after each remove, and the sorted final ACE fingerprints 
 the originals. An independent before/after SDDL comparison outside the production component also
 matched for both objects. The probe never restored a saved whole DACL.
 
-The production component rejects SIDs that are not shaped as a Windows logon SID. It grants only
-object-specific GUI rights: `WINSTA_ALL_ACCESS` for the window station and the complete set of
-desktop-specific rights for the desktop. It does not grant `WRITE_DAC`, `WRITE_OWNER`, or another
-standard ownership right to the target logon SID. The coordinator itself opens the objects with
-`READ_CONTROL | WRITE_DAC`, retains those handles for the lease, and retries exact removal during
-destruction if an explicit release failed.
+The production component rejects SIDs that are not shaped as a Windows logon SID. It grants
+`READ_CONTROL` plus the object-specific GUI rights: `WINSTA_ALL_ACCESS` for the window station and
+the complete set of desktop-specific rights for the desktop. It does not grant `WRITE_DAC`,
+`WRITE_OWNER`, `DELETE`, or another standard mutation right to the target logon SID. The
+coordinator itself opens the objects with `READ_CONTROL | WRITE_DAC`, retains those handles for the
+lease, and retries exact removal during destruction if an explicit release failed.
 
 ## Authenticated handshake slice
 
@@ -145,10 +145,37 @@ session boundary:
 The retained passing run is
 `out/windows-sandbox-interactive-session-probe/fd17d091683e47b5a46e7b459c1e708e`.
 
-This completes the authenticated lease-channel primitive. It does not yet integrate the channel
-with the installed broker request path or prove that a broker-created managed-account target can
-use the granted masks. Detached coordinator lifetime, `TokenSessionId`, GUI process creation, Job
-completion release, RDP, Fast User Switching, coordinator crashes, launcher disappearance, and
-broker restart remain end-to-end acceptance gates. The next vertical slice should create the
-managed-account target token, assign the authenticated caller session, acquire the lease for that
-token's logon SID, and release it after normal Job completion.
+This completes the authenticated lease-channel primitive.
+
+## Broker-created target slice
+
+The next internal slice now connects the production token and process-launch pieces to that lease
+channel. It deliberately does not expose public interactive mode yet. In a fresh Windows Sandbox
+guest, a Session-0 LocalSystem probe used the production account provisioner and logon path to:
+
+1. Create a temporary standard managed account and its restricted primary token.
+2. Assign that token to the authenticated caller coordinator's session 1.
+3. Acquire the `WinSta0\Default` lease for the target token's own logon SID.
+4. Load the target profile and environment, create a native GUI target suspended, assign it to the
+   broker Job, validate the child session and logon SID, and resume it.
+5. Wait for the complete Job tree to reach zero before releasing the lease and deleting the
+   temporary account.
+
+The first live attempt exposed an important mask requirement: object-specific GUI rights alone let
+`CreateProcessAsUserW` return successfully, but the child exited `0xC0000142` before its entry point.
+A target-side diagnostic narrowed that to `user32.dll` returning `ERROR_DLL_INIT_FAILED` (1114).
+Adding `READ_CONTROL` to both temporary ACEs fixed initialization; no `WRITE_DAC`, `WRITE_OWNER`,
+or `DELETE` grant was needed.
+
+The final probe used the normal statically linked GUI executable. The target itself reported
+session 1, `WinSta0`, `Default`, and the exact logon SID used for the lease. The caller-session
+coordinator independently observed its visible window. The Job was empty before release, release
+returned zero, and the independent before/after DACL comparison matched. The retained passing run
+is `out/windows-sandbox-interactive-session-probe/b5c19f51a91442908abcdbd6f94bf186`.
+
+This proves normal-completion behavior for the internal broker launch primitive in one connected
+Windows Sandbox session. It does not wire interactive mode into the installed broker request or
+public CLI, and it does not yet prove detached coordinator lifetime, RDP, Fast User Switching,
+coordinator crashes, launcher disappearance, or broker restart. The next slice should derive the
+session and caller logon SID only from the installed broker's authenticated pipe context, then wire
+the internal launch primitive to a still-private interactive request path before exposing the CLI.

@@ -3,6 +3,7 @@
 // Project: https://github.com/fmuecke/launch-as
 
 #include "BrokerProcessLauncher.h"
+#include "InteractiveDesktopLeaseClient.h"
 #include "TestSupport.h"
 
 #include <Windows.h>
@@ -158,12 +159,26 @@ namespace
                L"The broker did not return promptly after failing to query its Job process tree.");
 }
 
+[[nodiscard]] bool TestInteractiveLaunchRejectsIncompleteInputs()
+{
+    launch_as::broker::BrokerChildProcess child;
+    launch_as::broker::InteractiveDesktopLeaseConnection lease;
+    const std::vector<std::wstring> arguments;
+    const std::vector<BYTE> callerLogonSid;
+    return Expect(launch_as::broker::LaunchBrokerInteractiveProcess(
+                      nullptr, {}, arguments, {}, 0, {}, {}, callerLogonSid, child, lease) ==
+                      ERROR_INVALID_PARAMETER,
+               L"The broker accepted an incomplete interactive launch request.") &&
+           Expect(!child, L"A rejected interactive launch retained a child process.") &&
+           Expect(!lease, L"A rejected interactive launch retained a desktop lease.");
+}
+
 } // namespace
 
 int wmain()
 {
     if (!TestWorkingDirectoryValidation() || !TestJobTerminationConfirmsActiveProcessZero() ||
-        !TestTeardownFailureReturnsPromptly())
+        !TestTeardownFailureReturnsPromptly() || !TestInteractiveLaunchRejectsIncompleteInputs())
     {
         return 1;
     }

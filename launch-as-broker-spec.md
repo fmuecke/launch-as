@@ -205,10 +205,20 @@ protocol; and disconnect-triggered RAII cleanup. A fresh interactive Windows San
 the production channel between a non-elevated session-1 coordinator and a Session-0 LocalSystem
 client, including independent final-DACL equality.
 
-The channel is not yet wired into the installed broker request path. Detached helper lifetime,
-caller-session assignment of a broker-created managed-account token, GUI process creation, and
-Job-completion release remain unsupported. The public CLI/protocol therefore continues to reject
-interactive launches until that complete vertical path is implemented and accepted.
+The third internal slice assigns a production restricted managed-account token to the authenticated
+caller's session, leases that token's independent logon SID, creates and validates a suspended GUI
+process on `WinSta0\Default`, and releases only after the complete Job tree exits. The lease needs
+`READ_CONTROL` in addition to the object-specific GUI rights; omitting it caused the created process
+to exit `0xC0000142` because `user32.dll` initialization failed. The accepted mask still omits
+`WRITE_DAC`, `WRITE_OWNER`, and `DELETE`. A fresh Windows Sandbox run proved the target's session,
+window station, desktop, independent logon SID, visible window, Job-before-release ordering, and
+independent final-DACL equality. The retained evidence is
+`out/windows-sandbox-interactive-session-probe/b5c19f51a91442908abcdbd6f94bf186`.
+
+The channel and launch primitive are still not wired into the installed broker request path.
+Authenticated pipe-derived caller identity, detached helper lifetime, failure/crash acceptance,
+RDP, and Fast User Switching remain unsupported. The public CLI/protocol therefore continues to
+reject interactive launches until those boundaries are implemented and accepted.
 
 #### 7.2.2 No normal-user token helper
 

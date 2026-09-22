@@ -229,6 +229,8 @@ if(BUILD_TESTING)
         tests/BrokerPipeTests.cpp
         src/broker/BrokerProcessLauncher.cpp
         src/broker/BrokerProcessLauncher.h
+        src/broker/InteractiveDesktopLeaseClient.cpp
+        src/broker/InteractiveDesktopLeaseClient.h
         src/protocol/PseudoConsoleHostReport.h
         src/broker/BrokerPipeServer.cpp
         src/broker/BrokerPipeServer.h
@@ -260,6 +262,8 @@ if(BUILD_TESTING)
         src/protocol/BrokerControlPipe.h
         src/broker/BrokerProcessLauncher.cpp
         src/broker/BrokerProcessLauncher.h
+        src/broker/InteractiveDesktopLeaseClient.cpp
+        src/broker/InteractiveDesktopLeaseClient.h
         src/protocol/PseudoConsoleHostReport.h
         src/broker/BrokerPipeServer.cpp
         src/broker/BrokerPipeServer.h
@@ -605,12 +609,15 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
         tests/BrokerProcessLauncherTests.cpp
         src/broker/BrokerProcessLauncher.cpp
         src/broker/BrokerProcessLauncher.h
+        src/broker/InteractiveDesktopLeaseClient.cpp
+        src/broker/InteractiveDesktopLeaseClient.h
         src/common/WindowsCommandLine.cpp
         src/common/WindowsCommandLine.h
     )
     target_link_libraries(LauncherBrokerProcessLauncherTests PRIVATE
         Advapi32
         Userenv
+        launch_as::protocol
     )
     configure_launch_as_test_target(
         LauncherBrokerProcessLauncherTests broker protocol common)
@@ -646,6 +653,15 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
     )
     configure_launch_as_target(LauncherInteractiveSessionProbe)
 
+    add_executable(LauncherInteractiveTargetProbe
+        tests/InteractiveTargetProbe.cpp
+    )
+    target_link_libraries(LauncherInteractiveTargetProbe PRIVATE
+        Advapi32
+        User32
+    )
+    configure_launch_as_target(LauncherInteractiveTargetProbe)
+
     add_executable(LauncherInteractiveAclLeaseProbe
         tests/InteractiveAclLeaseProbe.cpp
     )
@@ -679,6 +695,8 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
     )
     target_link_libraries(LauncherInteractiveLeaseHandshakeProbe PRIVATE
         Advapi32
+        Bcrypt
+        Netapi32
         User32
         Userenv
         launch_as::broker

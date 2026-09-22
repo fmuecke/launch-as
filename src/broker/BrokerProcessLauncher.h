@@ -13,6 +13,8 @@
 namespace launch_as::broker
 {
 
+class InteractiveDesktopLeaseConnection;
+
 class BrokerChildProcess final
 {
   public:
@@ -30,6 +32,7 @@ class BrokerChildProcess final
     [[nodiscard]] bool ReadPseudoConsoleHostResult(
         DWORD& childExitCode, std::wstring& diagnostics) noexcept;
     [[nodiscard]] bool TerminateAndWaitForExit() noexcept;
+    [[nodiscard]] bool WaitForProcessTreeExit(DWORD timeoutMilliseconds) const noexcept;
 
   private:
     void Reset() noexcept;
@@ -49,6 +52,11 @@ class BrokerChildProcess final
     friend DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,
         std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
         BrokerChildProcess& child);
+    friend DWORD LaunchBrokerInteractiveProcess(HANDLE token, std::wstring_view accountName,
+        std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
+        DWORD targetSessionId, std::wstring_view leasePipeName, std::wstring_view leaseNonce,
+        const std::vector<BYTE>& callerLogonSid, BrokerChildProcess& child,
+        InteractiveDesktopLeaseConnection& lease);
     friend DWORD LaunchFixedBrokerProbe(HANDLE token, BrokerChildProcess& child);
 #ifdef LAUNCH_AS_TESTING
     friend DWORD LaunchQuickBrokerChildForTesting(BrokerChildProcess& child);
@@ -61,6 +69,11 @@ class BrokerChildProcess final
 [[nodiscard]] DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
     BrokerChildProcess& child);
+[[nodiscard]] DWORD LaunchBrokerInteractiveProcess(HANDLE token, std::wstring_view accountName,
+    std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
+    DWORD targetSessionId, std::wstring_view leasePipeName, std::wstring_view leaseNonce,
+    const std::vector<BYTE>& callerLogonSid, BrokerChildProcess& child,
+    InteractiveDesktopLeaseConnection& lease);
 [[nodiscard]] DWORD LaunchFixedBrokerProbe(HANDLE token, BrokerChildProcess& child);
 [[nodiscard]] DWORD GetTokenLogonSid(HANDLE token, std::vector<BYTE>& logonSid);
 [[nodiscard]] DWORD ValidateChildLogonSid(HANDLE process, const std::vector<BYTE>& callerLogonSid);

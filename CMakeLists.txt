@@ -652,8 +652,9 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
     target_link_libraries(LauncherInteractiveAclLeaseProbe PRIVATE
         Advapi32
         User32
+        launch_as::launcher
     )
-    configure_launch_as_target(LauncherInteractiveAclLeaseProbe)
+    configure_launch_as_test_target(LauncherInteractiveAclLeaseProbe launcher)
 
     add_executable(LauncherBrokerChildIdentityProbe
         tests/BrokerChildIdentityProbe.cpp

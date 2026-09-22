@@ -75,8 +75,10 @@ of the managed account instead of scoping access to one unique child logon SID.
 
 ## Probe result and evidence boundary
 
-The caller-side ACL gate passed in a fresh interactive Windows Sandbox guest. The retained run is
-`out/windows-sandbox-interactive-session-probe/7c6ce78390d944488edd613d7973c4f9`.
+The caller-side ACL gate passed in a fresh interactive Windows Sandbox guest. The original
+test-local implementation was then replaced by the production launcher component
+`InteractiveDesktopAclLease`; its retained passing run is
+`out/windows-sandbox-interactive-session-probe/2aa3fd01e896474cb037f29b26db8aee`.
 
 The probe used `Start-Process -Credential` to run the fresh local standard account
 `LaunchAsDevCaller` on the connected session's desktop. The process reported:
@@ -99,11 +101,19 @@ For both `WinSta0` and `Default`, it:
 
 Every read, add, verify, remove, and final-verify Win32 result was 0. The exact lease ACE was present
 after each add, absent after each remove, and the sorted final ACE fingerprints were identical to
-the originals. The probe never restored a saved whole DACL.
+the originals. An independent before/after SDDL comparison outside the production component also
+matched for both objects. The probe never restored a saved whole DACL.
 
-This passes the architectural gate for a caller-session coordinator. It does not yet establish the
-final GUI access masks, prove that the broker-created target can use the desktop, or cover RDP,
-Fast User Switching, coordinator crashes, launcher disappearance, and broker restart. Those remain
-end-to-end acceptance gates. The next vertical slice should exercise a broker-created target token
-against an authenticated caller-side lease and prove lease removal on normal exit and every failure
-path.
+The production component rejects SIDs that are not shaped as a Windows logon SID. It grants only
+object-specific GUI rights: `WINSTA_ALL_ACCESS` for the window station and the complete set of
+desktop-specific rights for the desktop. It does not grant `WRITE_DAC`, `WRITE_OWNER`, or another
+standard ownership right to the target logon SID. The coordinator itself opens the objects with
+`READ_CONTROL | WRITE_DAC`, retains those handles for the lease, and retries exact removal during
+destruction if an explicit release failed.
+
+This completes the caller-session ACL lease-owner primitive. It does not yet prove that a
+broker-created target can use the granted masks or cover broker-to-coordinator authentication,
+detached coordinator lifetime, RDP, Fast User Switching, coordinator crashes, launcher
+disappearance, and broker restart. Those remain end-to-end acceptance gates. The next vertical
+slice should add the authenticated broker/coordinator handshake and exercise a broker-created
+target token against the lease, with removal after normal Job completion.

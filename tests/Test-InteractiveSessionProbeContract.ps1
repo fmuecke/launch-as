@@ -56,6 +56,7 @@ foreach ($requiredText in @(
         'desktopLeaseAdded',
         'desktopLeaseRemoved',
         'daclSemanticallyRestored',
+        'independentDaclSemanticallyRestored',
         'probeSucceeded',
         'canaryVisible')) {
     if ($combinedText -notmatch [regex]::Escape($requiredText)) {

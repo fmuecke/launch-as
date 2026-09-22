@@ -5,6 +5,8 @@
 add_library(launch_as_launcher_core STATIC
     BrokerControlClient.cpp
     BrokerControlClient.h
+    InteractiveDesktopAclLease.cpp
+    InteractiveDesktopAclLease.h
     LauncherOptions.cpp
     LauncherOptions.h
     LaunchProcess.cpp
@@ -17,6 +19,8 @@ target_link_libraries(launch_as_launcher_core
     PUBLIC
         launch_as::common
     PRIVATE
+        Advapi32
+        User32
         launch_as::protocol
         launch_as::terminal
 )

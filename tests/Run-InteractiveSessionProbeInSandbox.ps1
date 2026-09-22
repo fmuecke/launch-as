@@ -248,6 +248,7 @@ try {
             'desktopLeaseAdded',
             'desktopLeaseRemoved',
             'daclSemanticallyRestored',
+            'independentDaclSemanticallyRestored',
             'probeSucceeded')) {
         if (-not $aclResult.ContainsKey($key)) {
             throw "The ACL lease probe omitted the required field '$key'."
@@ -261,6 +262,7 @@ try {
         $aclResult['desktopLeaseAdded'] -ne 'true' -or
         $aclResult['desktopLeaseRemoved'] -ne 'true' -or
         $aclResult['daclSemanticallyRestored'] -ne 'true' -or
+        $aclResult['independentDaclSemanticallyRestored'] -ne 'true' -or
         $aclResult['probeSucceeded'] -ne 'true') {
         throw "The standard-caller ACL lease probe failed with exit code '$probeExitCode'.`n$((Get-Content -LiteralPath $aclResultPath) -join [Environment]::NewLine)"
     }
@@ -287,6 +289,7 @@ try {
         "acl.desktopLeaseAdded=$($aclResult['desktopLeaseAdded'])"
         "acl.desktopLeaseRemoved=$($aclResult['desktopLeaseRemoved'])"
         "acl.daclSemanticallyRestored=$($aclResult['daclSemanticallyRestored'])"
+        "acl.independentDaclSemanticallyRestored=$($aclResult['independentDaclSemanticallyRestored'])"
         "acl.probeSucceeded=$($aclResult['probeSucceeded'])"
     ) | Out-File -LiteralPath $sharedResultPath -Encoding utf8
 }

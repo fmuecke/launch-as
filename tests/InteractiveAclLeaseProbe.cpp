@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Project: https://github.com/fmuecke/launch-as
 
-#include <Aclapi.h>
+#include "InteractiveDesktopAclLease.h"
+
 #include <Sddl.h>
 #include <Windows.h>
-#include <algorithm>
-#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -15,272 +14,6 @@
 
 namespace
 {
-
-struct LeaseResult final
-{
-    DWORD readError = ERROR_INVALID_DATA;
-    DWORD addError = ERROR_INVALID_DATA;
-    DWORD verifyAddError = ERROR_INVALID_DATA;
-    DWORD removeError = ERROR_INVALID_DATA;
-    DWORD verifyRemoveError = ERROR_INVALID_DATA;
-    bool added = false;
-    bool removed = false;
-    bool restored = false;
-};
-
-[[nodiscard]] DWORD ReadSecurityDescriptor(HANDLE object, std::vector<BYTE>& descriptor)
-{
-    descriptor.clear();
-    DWORD required = 0;
-    SECURITY_INFORMATION information = DACL_SECURITY_INFORMATION;
-    GetUserObjectSecurity(object, &information, nullptr, 0, &required);
-    const DWORD sizeError = GetLastError();
-    if (sizeError != ERROR_INSUFFICIENT_BUFFER || required == 0)
-    {
-        return sizeError == ERROR_SUCCESS ? ERROR_INVALID_SECURITY_DESCR : sizeError;
-    }
-    descriptor.resize(required);
-    if (!GetUserObjectSecurity(object, &information, descriptor.data(), required, &required))
-    {
-        return GetLastError();
-    }
-    return ERROR_SUCCESS;
-}
-
-[[nodiscard]] DWORD GetDacl(std::vector<BYTE>& descriptor, PACL& dacl)
-{
-    BOOL present = FALSE;
-    BOOL defaulted = FALSE;
-    if (!GetSecurityDescriptorDacl(descriptor.data(), &present, &dacl, &defaulted))
-    {
-        return GetLastError();
-    }
-    return present && dacl != nullptr ? ERROR_SUCCESS : ERROR_INVALID_SECURITY_DESCR;
-}
-
-[[nodiscard]] DWORD WriteDacl(HANDLE object, PACL dacl)
-{
-    SECURITY_DESCRIPTOR descriptor {};
-    if (!InitializeSecurityDescriptor(&descriptor, SECURITY_DESCRIPTOR_REVISION))
-    {
-        return GetLastError();
-    }
-    if (!SetSecurityDescriptorDacl(&descriptor, TRUE, dacl, FALSE))
-    {
-        return GetLastError();
-    }
-    SECURITY_INFORMATION information = DACL_SECURITY_INFORMATION;
-    if (!SetUserObjectSecurity(object, &information, &descriptor))
-    {
-        return GetLastError();
-    }
-    return ERROR_SUCCESS;
-}
-
-using AceFingerprint = std::vector<BYTE>;
-
-[[nodiscard]] DWORD FingerprintDacl(PACL dacl, std::vector<AceFingerprint>& fingerprints)
-{
-    fingerprints.clear();
-    ACL_SIZE_INFORMATION size {};
-    if (!GetAclInformation(dacl, &size, sizeof(size), AclSizeInformation))
-    {
-        return GetLastError();
-    }
-    for (DWORD index = 0; index < size.AceCount; ++index)
-    {
-        void* rawAce = nullptr;
-        if (!GetAce(dacl, index, &rawAce))
-        {
-            return GetLastError();
-        }
-        const auto* header = static_cast<const ACE_HEADER*>(rawAce);
-        const auto* bytes = static_cast<const BYTE*>(rawAce);
-        fingerprints.emplace_back(bytes, bytes + header->AceSize);
-    }
-    std::sort(fingerprints.begin(), fingerprints.end());
-    return ERROR_SUCCESS;
-}
-
-[[nodiscard]] bool IsExactLeaseAce(const void* rawAce, PSID sid, ACCESS_MASK accessMask) noexcept
-{
-    const auto* header = static_cast<const ACE_HEADER*>(rawAce);
-    if (header->AceType != ACCESS_ALLOWED_ACE_TYPE || header->AceFlags != 0)
-    {
-        return false;
-    }
-    const auto* ace = static_cast<const ACCESS_ALLOWED_ACE*>(rawAce);
-    auto* aceSid = reinterpret_cast<PSID>(const_cast<DWORD*>(&ace->SidStart));
-    return ace->Mask == accessMask && EqualSid(aceSid, sid) != FALSE;
-}
-
-[[nodiscard]] DWORD CountLeaseAces(PACL dacl, PSID sid, ACCESS_MASK accessMask, DWORD& count)
-{
-    count = 0;
-    ACL_SIZE_INFORMATION size {};
-    if (!GetAclInformation(dacl, &size, sizeof(size), AclSizeInformation))
-    {
-        return GetLastError();
-    }
-    for (DWORD index = 0; index < size.AceCount; ++index)
-    {
-        void* rawAce = nullptr;
-        if (!GetAce(dacl, index, &rawAce))
-        {
-            return GetLastError();
-        }
-        if (IsExactLeaseAce(rawAce, sid, accessMask))
-        {
-            ++count;
-        }
-    }
-    return ERROR_SUCCESS;
-}
-
-[[nodiscard]] DWORD BuildDaclWithoutLease(
-    PACL current, PSID sid, ACCESS_MASK accessMask, std::vector<BYTE>& storage)
-{
-    ACL_SIZE_INFORMATION size {};
-    if (!GetAclInformation(current, &size, sizeof(size), AclSizeInformation))
-    {
-        return GetLastError();
-    }
-    DWORD leaseCount = 0;
-    DWORD leaseBytes = 0;
-    for (DWORD index = 0; index < size.AceCount; ++index)
-    {
-        void* rawAce = nullptr;
-        if (!GetAce(current, index, &rawAce))
-        {
-            return GetLastError();
-        }
-        const auto* header = static_cast<const ACE_HEADER*>(rawAce);
-        if (IsExactLeaseAce(rawAce, sid, accessMask))
-        {
-            ++leaseCount;
-            leaseBytes += header->AceSize;
-        }
-    }
-    if (leaseCount != 1 || current->AclSize <= leaseBytes)
-    {
-        return ERROR_INVALID_DATA;
-    }
-
-    storage.assign(current->AclSize - leaseBytes, BYTE {});
-    auto* replacement = reinterpret_cast<PACL>(storage.data());
-    if (!InitializeAcl(replacement, static_cast<DWORD>(storage.size()), current->AclRevision))
-    {
-        return GetLastError();
-    }
-    for (DWORD index = 0; index < size.AceCount; ++index)
-    {
-        void* rawAce = nullptr;
-        if (!GetAce(current, index, &rawAce))
-        {
-            return GetLastError();
-        }
-        const auto* header = static_cast<const ACE_HEADER*>(rawAce);
-        if (!IsExactLeaseAce(rawAce, sid, accessMask) &&
-            !AddAce(replacement, current->AclRevision, MAXDWORD, rawAce, header->AceSize))
-        {
-            return GetLastError();
-        }
-    }
-    return ERROR_SUCCESS;
-}
-
-void ExerciseLease(HANDLE object, PSID sid, ACCESS_MASK accessMask, LeaseResult& result)
-{
-    std::vector<BYTE> originalDescriptor;
-    result.readError = ReadSecurityDescriptor(object, originalDescriptor);
-    PACL originalDacl = nullptr;
-    if (result.readError != ERROR_SUCCESS ||
-        (result.readError = GetDacl(originalDescriptor, originalDacl)) != ERROR_SUCCESS)
-    {
-        return;
-    }
-    std::vector<AceFingerprint> originalFingerprint;
-    result.readError = FingerprintDacl(originalDacl, originalFingerprint);
-    if (result.readError != ERROR_SUCCESS)
-    {
-        return;
-    }
-
-    EXPLICIT_ACCESSW access {};
-    access.grfAccessPermissions = accessMask;
-    access.grfAccessMode = GRANT_ACCESS;
-    access.grfInheritance = NO_INHERITANCE;
-    access.Trustee.TrusteeForm = TRUSTEE_IS_SID;
-    access.Trustee.TrusteeType = TRUSTEE_IS_USER;
-    access.Trustee.ptstrName = reinterpret_cast<LPWSTR>(sid);
-    PACL updatedDacl = nullptr;
-    result.addError = SetEntriesInAclW(1, &access, originalDacl, &updatedDacl);
-    if (result.addError != ERROR_SUCCESS)
-    {
-        return;
-    }
-    result.addError = WriteDacl(object, updatedDacl);
-    LocalFree(updatedDacl);
-    if (result.addError != ERROR_SUCCESS)
-    {
-        return;
-    }
-
-    std::vector<BYTE> leasedDescriptor;
-    result.verifyAddError = ReadSecurityDescriptor(object, leasedDescriptor);
-    PACL leasedDacl = nullptr;
-    DWORD leaseCount = 0;
-    if (result.verifyAddError == ERROR_SUCCESS)
-    {
-        result.verifyAddError = GetDacl(leasedDescriptor, leasedDacl);
-    }
-    if (result.verifyAddError == ERROR_SUCCESS)
-    {
-        result.verifyAddError = CountLeaseAces(leasedDacl, sid, accessMask, leaseCount);
-    }
-    result.added = result.verifyAddError == ERROR_SUCCESS && leaseCount == 1;
-
-    std::vector<BYTE> cleanupDescriptor;
-    result.removeError = ReadSecurityDescriptor(object, cleanupDescriptor);
-    PACL cleanupDacl = nullptr;
-    if (result.removeError == ERROR_SUCCESS)
-    {
-        result.removeError = GetDacl(cleanupDescriptor, cleanupDacl);
-    }
-    std::vector<BYTE> withoutLease;
-    if (result.removeError == ERROR_SUCCESS)
-    {
-        result.removeError = BuildDaclWithoutLease(cleanupDacl, sid, accessMask, withoutLease);
-    }
-    if (result.removeError == ERROR_SUCCESS)
-    {
-        result.removeError = WriteDacl(object, reinterpret_cast<PACL>(withoutLease.data()));
-    }
-    if (result.removeError != ERROR_SUCCESS)
-    {
-        return;
-    }
-
-    std::vector<BYTE> finalDescriptor;
-    result.verifyRemoveError = ReadSecurityDescriptor(object, finalDescriptor);
-    PACL finalDacl = nullptr;
-    DWORD finalLeaseCount = 0;
-    std::vector<AceFingerprint> finalFingerprint;
-    if (result.verifyRemoveError == ERROR_SUCCESS)
-    {
-        result.verifyRemoveError = GetDacl(finalDescriptor, finalDacl);
-    }
-    if (result.verifyRemoveError == ERROR_SUCCESS)
-    {
-        result.verifyRemoveError = CountLeaseAces(finalDacl, sid, accessMask, finalLeaseCount);
-    }
-    if (result.verifyRemoveError == ERROR_SUCCESS)
-    {
-        result.verifyRemoveError = FingerprintDacl(finalDacl, finalFingerprint);
-    }
-    result.removed = result.verifyRemoveError == ERROR_SUCCESS && finalLeaseCount == 0;
-    result.restored = result.removed && originalFingerprint == finalFingerprint;
-}
 
 [[nodiscard]] std::wstring ReadObjectName(HANDLE object)
 {
@@ -326,6 +59,33 @@ void ExerciseLease(HANDLE object, PSID sid, ACCESS_MASK accessMask, LeaseResult&
     return result;
 }
 
+[[nodiscard]] DWORD ReadDaclSddl(HANDLE object, std::wstring& value)
+{
+    value.clear();
+    DWORD required = 0;
+    SECURITY_INFORMATION information = DACL_SECURITY_INFORMATION;
+    GetUserObjectSecurity(object, &information, nullptr, 0, &required);
+    const DWORD sizeError = GetLastError();
+    if (sizeError != ERROR_INSUFFICIENT_BUFFER || required == 0)
+    {
+        return sizeError == ERROR_SUCCESS ? ERROR_INVALID_SECURITY_DESCR : sizeError;
+    }
+    std::vector<BYTE> descriptor(required);
+    if (!GetUserObjectSecurity(object, &information, descriptor.data(), required, &required))
+    {
+        return GetLastError();
+    }
+    LPWSTR rawSddl = nullptr;
+    if (!ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            descriptor.data(), SDDL_REVISION_1, DACL_SECURITY_INFORMATION, &rawSddl, nullptr))
+    {
+        return GetLastError();
+    }
+    value = rawSddl;
+    LocalFree(rawSddl);
+    return ERROR_SUCCESS;
+}
+
 [[nodiscard]] std::string NarrowAscii(std::wstring_view value)
 {
     std::string result;
@@ -337,16 +97,18 @@ void ExerciseLease(HANDLE object, PSID sid, ACCESS_MASK accessMask, LeaseResult&
     return result;
 }
 
-[[nodiscard]] bool LeaseSucceeded(const LeaseResult& result) noexcept
+[[nodiscard]] bool LeaseSucceeded(const launch_as::InteractiveObjectAclLeaseStatus& result) noexcept
 {
-    return result.readError == ERROR_SUCCESS && result.addError == ERROR_SUCCESS &&
-           result.verifyAddError == ERROR_SUCCESS && result.removeError == ERROR_SUCCESS &&
-           result.verifyRemoveError == ERROR_SUCCESS && result.added && result.removed &&
-           result.restored;
+    return result.openError == ERROR_SUCCESS && result.readError == ERROR_SUCCESS &&
+           result.addError == ERROR_SUCCESS && result.verifyAddError == ERROR_SUCCESS &&
+           result.removeError == ERROR_SUCCESS && result.verifyRemoveError == ERROR_SUCCESS &&
+           result.added && result.removed && result.restored;
 }
 
-void WriteLease(std::ofstream& output, std::string_view name, const LeaseResult& result)
+void WriteLease(std::ofstream& output, std::string_view name,
+    const launch_as::InteractiveObjectAclLeaseStatus& result)
 {
+    output << "open" << name << "Error=" << result.openError << '\n';
     output << name << "ReadError=" << result.readError << '\n';
     output << name << "AddError=" << result.addError << '\n';
     output << name << "VerifyAddError=" << result.verifyAddError << '\n';
@@ -417,15 +179,20 @@ int wmain(int argumentCount, wchar_t* arguments[])
     const std::wstring processWindowStationName =
         processWindowStation != nullptr ? ReadObjectName(processWindowStation) : std::wstring {};
 
-    constexpr ACCESS_MASK windowStationMask = WINSTA_ENUMDESKTOPS | WINSTA_READATTRIBUTES;
-    constexpr ACCESS_MASK desktopMask = DESKTOP_ENUMERATE | DESKTOP_READOBJECTS;
-    HWINSTA windowStation = OpenWindowStationW(L"WinSta0", FALSE, READ_CONTROL | WRITE_DAC);
-    const DWORD openWindowStationError = windowStation != nullptr ? ERROR_SUCCESS : GetLastError();
-    HDESK desktop = OpenDesktopW(L"Default",
-        0,
-        FALSE,
-        READ_CONTROL | WRITE_DAC | DESKTOP_READOBJECTS | DESKTOP_WRITEOBJECTS);
-    const DWORD openDesktopError = desktop != nullptr ? ERROR_SUCCESS : GetLastError();
+    HWINSTA snapshotWindowStation = OpenWindowStationW(L"WinSta0", FALSE, READ_CONTROL);
+    const DWORD snapshotWindowStationError =
+        snapshotWindowStation != nullptr ? ERROR_SUCCESS : GetLastError();
+    HDESK snapshotDesktop = OpenDesktopW(L"Default", 0, FALSE, READ_CONTROL);
+    const DWORD snapshotDesktopError = snapshotDesktop != nullptr ? ERROR_SUCCESS : GetLastError();
+    std::wstring originalWindowStationDacl;
+    std::wstring originalDesktopDacl;
+    const DWORD originalWindowStationDaclError =
+        snapshotWindowStation != nullptr
+            ? ReadDaclSddl(snapshotWindowStation, originalWindowStationDacl)
+            : snapshotWindowStationError;
+    const DWORD originalDesktopDaclError = snapshotDesktop != nullptr
+                                               ? ReadDaclSddl(snapshotDesktop, originalDesktopDacl)
+                                               : snapshotDesktopError;
 
     const DWORD tick = static_cast<DWORD>(GetTickCount64());
     const std::wstring leaseSidText = L"S-1-5-5-" + std::to_wstring(GetCurrentProcessId()) + L"-" +
@@ -434,29 +201,33 @@ int wmain(int argumentCount, wchar_t* arguments[])
     const BOOL convertedSid = ConvertStringSidToSidW(leaseSidText.c_str(), &leaseSid);
     const DWORD sidError = convertedSid ? ERROR_SUCCESS : GetLastError();
 
-    LeaseResult windowStationLease;
-    LeaseResult desktopLease;
-    if (leaseSid != nullptr && windowStation != nullptr)
+    launch_as::InteractiveDesktopAclLease lease;
+    const DWORD acquireError = leaseSid != nullptr ? lease.Acquire(leaseSid) : ERROR_INVALID_SID;
+    const DWORD releaseError = acquireError == ERROR_SUCCESS ? lease.Release() : acquireError;
+    std::wstring finalWindowStationDacl;
+    std::wstring finalDesktopDacl;
+    const DWORD finalWindowStationDaclError =
+        snapshotWindowStation != nullptr
+            ? ReadDaclSddl(snapshotWindowStation, finalWindowStationDacl)
+            : snapshotWindowStationError;
+    const DWORD finalDesktopDaclError = snapshotDesktop != nullptr
+                                            ? ReadDaclSddl(snapshotDesktop, finalDesktopDacl)
+                                            : snapshotDesktopError;
+    if (snapshotDesktop != nullptr)
     {
-        ExerciseLease(windowStation, leaseSid, windowStationMask, windowStationLease);
+        CloseDesktop(snapshotDesktop);
     }
-    if (leaseSid != nullptr && desktop != nullptr)
+    if (snapshotWindowStation != nullptr)
     {
-        ExerciseLease(desktop, leaseSid, desktopMask, desktopLease);
+        CloseWindowStation(snapshotWindowStation);
     }
     if (leaseSid != nullptr)
     {
         LocalFree(leaseSid);
     }
-    if (desktop != nullptr)
-    {
-        CloseDesktop(desktop);
-    }
-    if (windowStation != nullptr)
-    {
-        CloseWindowStation(windowStation);
-    }
 
+    const auto& windowStationLease = lease.windowStationStatus();
+    const auto& desktopLease = lease.desktopStatus();
     std::ofstream output(std::filesystem::path(arguments[1]), std::ios::binary | std::ios::trunc);
     if (!output)
     {
@@ -473,23 +244,31 @@ int wmain(int argumentCount, wchar_t* arguments[])
     output << "administratorError=" << administratorError << '\n';
     output << "callerElevated=" << (elevation.TokenIsElevated != 0 ? "true" : "false") << '\n';
     output << "callerIsAdministrator=" << (isAdministrator ? "true" : "false") << '\n';
-    output << "openWindowStationError=" << openWindowStationError << '\n';
-    output << "openDesktopError=" << openDesktopError << '\n';
     output << "leaseSid=" << NarrowAscii(leaseSidText) << '\n';
     output << "sidError=" << sidError << '\n';
+    output << "acquireError=" << acquireError << '\n';
+    output << "releaseError=" << releaseError << '\n';
     WriteLease(output, "windowStation", windowStationLease);
     WriteLease(output, "desktop", desktopLease);
     const bool restored = windowStationLease.restored && desktopLease.restored;
     output << "daclSemanticallyRestored=" << (restored ? "true" : "false") << '\n';
+    const bool independentlyRestored = originalWindowStationDaclError == ERROR_SUCCESS &&
+                                       originalDesktopDaclError == ERROR_SUCCESS &&
+                                       finalWindowStationDaclError == ERROR_SUCCESS &&
+                                       finalDesktopDaclError == ERROR_SUCCESS &&
+                                       originalWindowStationDacl == finalWindowStationDacl &&
+                                       originalDesktopDacl == finalDesktopDacl;
+    output << "independentDaclSemanticallyRestored=" << (independentlyRestored ? "true" : "false")
+           << '\n';
 
-    const bool success = sessionError == ERROR_SUCCESS && processSessionId != 0 &&
-                         _wcsicmp(processWindowStationName.c_str(), L"WinSta0") == 0 &&
-                         tokenError == ERROR_SUCCESS && tokenUserError == ERROR_SUCCESS &&
-                         !tokenUserSid.empty() && elevationError == ERROR_SUCCESS &&
-                         administratorError == ERROR_SUCCESS && elevation.TokenIsElevated == 0 &&
-                         !isAdministrator && openWindowStationError == ERROR_SUCCESS &&
-                         openDesktopError == ERROR_SUCCESS && sidError == ERROR_SUCCESS &&
-                         LeaseSucceeded(windowStationLease) && LeaseSucceeded(desktopLease);
+    const bool success =
+        sessionError == ERROR_SUCCESS && processSessionId != 0 &&
+        _wcsicmp(processWindowStationName.c_str(), L"WinSta0") == 0 &&
+        tokenError == ERROR_SUCCESS && tokenUserError == ERROR_SUCCESS && !tokenUserSid.empty() &&
+        elevationError == ERROR_SUCCESS && administratorError == ERROR_SUCCESS &&
+        elevation.TokenIsElevated == 0 && !isAdministrator && sidError == ERROR_SUCCESS &&
+        acquireError == ERROR_SUCCESS && releaseError == ERROR_SUCCESS && independentlyRestored &&
+        LeaseSucceeded(windowStationLease) && LeaseSucceeded(desktopLease);
     output << "probeSucceeded=" << (success ? "true" : "false") << '\n';
     output.flush();
     const bool outputSucceeded = output.good();

@@ -198,6 +198,11 @@ coordinator may therefore hold the ACL lease. It receives only a nonce, desktop 
 logon SID. The detailed alternatives, evidence boundary, and retained-run path are recorded in
 [Interactive mode session coordination](discovery/Spike%20-%20interactive%20mode%20session%20coordination.md).
 
+The first production slice implements the caller-owned `InteractiveDesktopAclLease` primitive and
+verifies it as a non-elevated standard account in a fresh interactive Windows Sandbox guest. The
+broker/coordinator handshake, detached helper lifetime, and broker-created GUI child are not part
+of that slice and remain unsupported at the public CLI/protocol seam.
+
 #### 7.2.2 No normal-user token helper
 
 Do not move GUI or terminal plumbing into a helper running as the interactive user if that requires

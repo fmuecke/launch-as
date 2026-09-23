@@ -174,8 +174,39 @@ returned zero, and the independent before/after DACL comparison matched. The ret
 is `out/windows-sandbox-interactive-session-probe/b5c19f51a91442908abcdbd6f94bf186`.
 
 This proves normal-completion behavior for the internal broker launch primitive in one connected
-Windows Sandbox session. It does not wire interactive mode into the installed broker request or
-public CLI, and it does not yet prove detached coordinator lifetime, RDP, Fast User Switching,
-coordinator crashes, launcher disappearance, or broker restart. The next slice should derive the
-session and caller logon SID only from the installed broker's authenticated pipe context, then wire
-the internal launch primitive to a still-private interactive request path before exposing the CLI.
+Windows Sandbox session. At this point it did not wire interactive mode into the installed broker
+request or public CLI, and it did not prove detached coordinator lifetime, RDP, Fast User
+Switching, coordinator crashes, launcher disappearance, or broker restart.
+
+## Private broker-request slice
+
+The fourth internal slice wires the lease and launch primitives through a still-private production
+broker request. An interactive request must contain exactly a lease-pipe name and nonce in its
+`interactive` object. Session id, caller SID, and caller logon SID are not request fields; unknown
+fields are rejected. `BrokerPipeServer` obtains the session id and logon SID from the impersonated,
+authenticated pipe caller, and `BrokerApplication` uses only that captured identity when assigning
+the target token to a session and acquiring the lease.
+
+Interactive requests have detached control-connection lifetime: closing the initiating control
+pipe does not terminate the target. The broker worker retains the kill-on-close Job and waits for
+the complete process tree. On normal completion, service stop, or another worker teardown path it
+terminates or confirms the Job tree before `BrokerApplication::FinishSession` releases the desktop
+lease and session admission slot. The lease remains broker-owned and keyed by request id; the
+caller-side coordinator never receives the managed-account password, target token, or target
+process handle.
+
+Evidence is deliberately split at the boundary it exercises:
+
+- Focused protocol and broker-pipe tests prove the exact private request shape, rejection of
+  client-supplied identity, dispatch with the authenticated pipe caller's session/logon SID, and
+  survival of control-pipe disconnect until a delayed Job tree exits.
+- A fresh interactive Windows Sandbox run exercises `BrokerApplication`, the production account
+  provisioning/logon path, the real caller-session ACL coordinator, the production GUI launch,
+  Job-before-release ordering, and final DACL restoration. The retained passing run is
+  `out/windows-sandbox-interactive-session-probe/51810e492bb9409d9470c501f8dd953c`.
+
+These results do not yet form one installed-service end-to-end test: the Sandbox probe enters at
+the application seam while the pipe path is proven in focused tests. The public CLI also does not
+yet create or retain the coordinator and emits only console requests. That public coordinator/CLI
+path plus installed interactive acceptance is the next feature slice. Crash recovery, RDP, Fast
+User Switching, launcher disappearance, and broker restart remain additional acceptance work.

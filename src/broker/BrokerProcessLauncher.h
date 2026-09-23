@@ -59,6 +59,7 @@ class BrokerChildProcess final
         InteractiveDesktopLeaseConnection& lease);
     friend DWORD LaunchFixedBrokerProbe(HANDLE token, BrokerChildProcess& child);
 #ifdef LAUNCH_AS_TESTING
+    friend DWORD LaunchBrokerChildForTesting(std::wstring_view command, BrokerChildProcess& child);
     friend DWORD LaunchQuickBrokerChildForTesting(BrokerChildProcess& child);
 #endif
 };
@@ -81,6 +82,7 @@ class BrokerChildProcess final
 #ifdef LAUNCH_AS_TESTING
 void SetBrokerJobQueryFailureForTesting(bool fail) noexcept;
 [[nodiscard]] DWORD LaunchQuickBrokerChildForTesting(BrokerChildProcess& child);
+[[nodiscard]] DWORD LaunchDelayedBrokerChildForTesting(BrokerChildProcess& child);
 #endif
 
 } // namespace launch_as::broker

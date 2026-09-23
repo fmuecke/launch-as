@@ -296,7 +296,8 @@ void CloseHandleIfPresent(HANDLE& handle) noexcept
 #ifdef LAUNCH_AS_TESTING
 void SetBrokerJobQueryFailureForTesting(bool fail) noexcept { failBrokerJobQueryForTesting = fail; }
 
-DWORD LaunchQuickBrokerChildForTesting(BrokerChildProcess& child)
+[[nodiscard]] DWORD LaunchBrokerChildForTesting(
+    std::wstring_view command, BrokerChildProcess& child)
 {
     const DWORD jobError = CreateBrokerJob(child);
     if (jobError != ERROR_SUCCESS)
@@ -310,7 +311,7 @@ DWORD LaunchQuickBrokerChildForTesting(BrokerChildProcess& child)
         child.Reset();
         return executableError;
     }
-    std::wstring commandLine = L"\"" + executablePath + L"\" /d /c exit 0";
+    std::wstring commandLine = L"\"" + executablePath + L"\" /d /c " + std::wstring(command);
     std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
     mutableCommandLine.push_back(L'\0');
     STARTUPINFOW startupInfo {};
@@ -348,6 +349,16 @@ DWORD LaunchQuickBrokerChildForTesting(BrokerChildProcess& child)
         static_cast<void>(child.TerminateAndWaitForExit());
     }
     return resumeError;
+}
+
+DWORD LaunchQuickBrokerChildForTesting(BrokerChildProcess& child)
+{
+    return LaunchBrokerChildForTesting(L"exit 0", child);
+}
+
+DWORD LaunchDelayedBrokerChildForTesting(BrokerChildProcess& child)
+{
+    return LaunchBrokerChildForTesting(L"ping -n 2 127.0.0.1 >nul", child);
 }
 #endif
 

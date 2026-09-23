@@ -326,18 +326,20 @@ try {
     }
     $handshakeReady = Read-ProbeResult -Path $handshakeReadyPath
     if ($handshakeReady['callerSessionId'] -ne [string] $callerSessionId -or
+        [string]::IsNullOrWhiteSpace($handshakeReady['callerUserSid']) -or
         [string]::IsNullOrWhiteSpace($handshakeReady['callerLogonSid'])) {
         throw "The standard-caller lease coordinator reported an invalid identity.`n$((Get-Content -LiteralPath $handshakeReadyPath) -join [Environment]::NewLine)"
     }
 
     $handshakeAction = New-ScheduledTaskAction `
         -Execute $handshakeProbePath `
-        -Argument ('--broker-target "{0}" "{1}" "{2}" "{3}" "{4}" "{5}" "{6}" "{7}" "{8}"' -f `
+        -Argument ('--broker-target "{0}" "{1}" "{2}" "{3}" "{4}" "{5}" "{6}" "{7}" "{8}" "{9}"' -f `
             $handshakePipeName,
             $handshakeId,
             $handshakeClientResultPath,
             $handshakeReady['callerSessionId'],
             $handshakeReady['callerLogonSid'],
+            $handshakeReady['callerUserSid'],
             $targetProbePath,
             $workDirectory,
             $targetResultPath,

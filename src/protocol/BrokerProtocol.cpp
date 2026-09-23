@@ -315,6 +315,13 @@ class JsonReader final
            value.find_first_of(L"\\/", prefix.size()) == std::wstring::npos;
 }
 
+[[nodiscard]] bool IsInteractiveLeasePipeName(const std::wstring& value)
+{
+    constexpr std::wstring_view prefix = L"\\\\.\\pipe\\launch-as-interactive-";
+    return value.size() > prefix.size() && value.starts_with(prefix) && value.size() <= 256 &&
+           value.find_first_of(L"\\/", prefix.size()) == std::wstring_view::npos;
+}
+
 [[nodiscard]] bool ReadArguments(JsonReader& reader, std::vector<std::wstring>& arguments)
 {
     if (!reader.Consume('['))
@@ -452,6 +459,48 @@ class JsonReader final
     }
 }
 
+[[nodiscard]] bool ReadInteractiveLaunch(JsonReader& reader, InteractiveLaunchRequest& interactive)
+{
+    if (!reader.Consume('{'))
+    {
+        return false;
+    }
+    bool leasePipe = false;
+    bool nonce = false;
+    for (;;)
+    {
+        std::wstring name;
+        if (!reader.String(name) || !reader.Consume(':'))
+        {
+            return false;
+        }
+        if (name == L"leasePipe" && !leasePipe)
+        {
+            leasePipe = reader.String(interactive.leasePipe);
+        }
+        else if (name == L"nonce" && !nonce)
+        {
+            nonce = reader.String(interactive.nonce);
+        }
+        else
+        {
+            return false;
+        }
+        if (!(leasePipe || name != L"leasePipe") || !(nonce || name != L"nonce"))
+        {
+            return false;
+        }
+        if (reader.Consume('}'))
+        {
+            return leasePipe && nonce;
+        }
+        if (!reader.Consume(','))
+        {
+            return false;
+        }
+    }
+}
+
 template <typename ParseAdditionalField>
 [[nodiscard]] bool ParseResponse(std::string_view response, std::wstring_view requestId,
     std::wstring_view expectedStatus, std::wstring_view expectedReason,
@@ -556,6 +605,7 @@ std::wstring_view RequestOperationName(RequestOperation operation) noexcept
     switch (operation)
     {
     case RequestOperation::ConsoleLaunch:
+    case RequestOperation::InteractiveLaunch:
         return L"launch";
     case RequestOperation::Create:
         return L"create";
@@ -582,7 +632,8 @@ bool IsValidProfileId(std::wstring_view value) noexcept
 
 bool IsManagementOperation(RequestOperation operation) noexcept
 {
-    return operation != RequestOperation::ConsoleLaunch;
+    return operation != RequestOperation::ConsoleLaunch &&
+           operation != RequestOperation::InteractiveLaunch;
 }
 
 std::string_view RequestOperationSuccessReason(RequestOperation operation) noexcept
@@ -683,6 +734,8 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
     bool workingDirectorySeen = false;
     bool console = false;
     bool consoleSeen = false;
+    bool interactive = false;
+    bool interactiveSeen = false;
     bool confirmed = false;
     bool confirmedSeen = false;
     bool forceSeen = false;
@@ -752,6 +805,11 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
             consoleSeen = true;
             console = ReadConsole(reader, request.console);
         }
+        else if (name == L"interactive" && !interactiveSeen)
+        {
+            interactiveSeen = true;
+            interactive = ReadInteractiveLaunch(reader, request.interactive);
+        }
         else if (name == L"confirmed" && !confirmedSeen)
         {
             confirmedSeen = true;
@@ -789,7 +847,7 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
     if (operationName == L"list")
     {
         if (profileSeen || modeSeen || argumentsSeen || workingDirectorySeen || consoleSeen ||
-            confirmedSeen || forceSeen)
+            interactiveSeen || confirmedSeen || forceSeen)
         {
             return ParseResult::InvalidRequest;
         }
@@ -802,8 +860,8 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
     }
     if (operationName == L"create")
     {
-        if (modeSeen || argumentsSeen || workingDirectorySeen || consoleSeen || !confirmedSeen ||
-            !confirmed)
+        if (modeSeen || argumentsSeen || workingDirectorySeen || consoleSeen || interactiveSeen ||
+            !confirmedSeen || !confirmed)
         {
             return ParseResult::InvalidRequest;
         }
@@ -812,8 +870,8 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
     }
     if (operationName == L"takeover" || operationName == L"forget" || operationName == L"delete")
     {
-        if (modeSeen || argumentsSeen || workingDirectorySeen || consoleSeen || !confirmedSeen ||
-            !confirmed)
+        if (modeSeen || argumentsSeen || workingDirectorySeen || consoleSeen || interactiveSeen ||
+            !confirmedSeen || !confirmed)
         {
             return ParseResult::InvalidRequest;
         }
@@ -833,14 +891,18 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
     }
     if (launchMode == LaunchMode::Interactive)
     {
-        if (!arguments || !workingDirectory || consoleSeen)
+        if (!arguments || !workingDirectory || consoleSeen || !interactive ||
+            !IsInteractiveLeasePipeName(request.interactive.leasePipe) ||
+            !IsRequestId(request.interactive.nonce))
         {
             return ParseResult::InvalidRequest;
         }
-        return ParseResult::ModeNotSupported;
+        request.operation = RequestOperation::InteractiveLaunch;
+        return ParseResult::Success;
     }
     if (launchMode != LaunchMode::Console || !arguments || !workingDirectory || !console ||
-        !IsConsolePipeName(request.console.pipeIn) || !IsConsolePipeName(request.console.pipeOut) ||
+        interactiveSeen || !IsConsolePipeName(request.console.pipeIn) ||
+        !IsConsolePipeName(request.console.pipeOut) ||
         !IsConsolePipeName(request.console.pipeResize) ||
         request.console.pipeIn == request.console.pipeOut ||
         request.console.pipeIn == request.console.pipeResize ||

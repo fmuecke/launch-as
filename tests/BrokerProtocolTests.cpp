@@ -45,7 +45,11 @@ constexpr char InteractiveRequest[] = R"json({
   "profileId": "LaunchAsUser",
   "mode": "interactive",
   "arguments": ["--resume"],
-  "workingDirectory": "C:\\dev\\LaunchAsUser\\repo"
+  "workingDirectory": "C:\\dev\\LaunchAsUser\\repo",
+  "interactive": {
+    "leasePipe": "\\\\.\\pipe\\launch-as-interactive-123e4567e89b12d3a456426614174000",
+    "nonce": "6f9619ff-8b86-d011-b42d-00c04fc964ff"
+  }
 })json";
 
 constexpr char ListRequest[] = R"json({
@@ -265,9 +269,21 @@ int wmain()
     }
 
     if (!Expect(launch_as::broker::ParseBrokerRequest(InteractiveRequest, request) ==
-                        launch_as::broker::ParseResult::ModeNotSupported &&
-                    request.requestId == L"123e4567-e89b-12d3-a456-426614174000",
-            L"Interactive mode did not produce the supported-mode rejection."))
+                        launch_as::broker::ParseResult::Success &&
+                    request.operation == launch_as::broker::RequestOperation::InteractiveLaunch &&
+                    request.interactive.leasePipe == L"\\\\.\\pipe\\launch-as-interactive-"
+                                                     L"123e4567e89b12d3a456426614174000" &&
+                    request.interactive.nonce == InteractiveLeaseNonce,
+            L"A valid private interactive broker request was rejected."))
+    {
+        return 1;
+    }
+
+    std::string clientSuppliedIdentity(InteractiveRequest);
+    clientSuppliedIdentity.insert(clientSuppliedIdentity.find("\"leasePipe\""), "\"sessionId\":1,");
+    if (!Expect(launch_as::broker::ParseBrokerRequest(clientSuppliedIdentity, request) ==
+                    launch_as::broker::ParseResult::InvalidRequest,
+            L"An interactive request was allowed to supply caller identity."))
     {
         return 1;
     }

@@ -92,7 +92,7 @@ void FinishProfileSession(void* context, const BrokerRequest& request, bool proc
     auto* application = static_cast<BrokerApplication*>(context);
     if (application != nullptr)
     {
-        application->FinishSession(request, processTreeExited);
+        static_cast<void>(application->FinishSession(request, processTreeExited));
     }
 }
 

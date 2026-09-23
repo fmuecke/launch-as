@@ -32,9 +32,16 @@ struct ConsoleRequest
     bool inheritCursor = false;
 };
 
+struct InteractiveLaunchRequest
+{
+    std::wstring leasePipe;
+    std::wstring nonce;
+};
+
 enum class RequestOperation
 {
     ConsoleLaunch,
+    InteractiveLaunch,
     Create,
     TakeOver,
     List,
@@ -59,6 +66,7 @@ struct BrokerRequest
     std::vector<std::wstring> arguments;
     std::wstring workingDirectory;
     ConsoleRequest console;
+    InteractiveLaunchRequest interactive;
 };
 
 enum class InteractiveLeaseOperation

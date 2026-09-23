@@ -2,10 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Project: https://github.com/fmuecke/launch-as
 
-#include "BrokerAccountProvisioner.h"
-#include "BrokerLogonToken.h"
-#include "BrokerPassword.h"
+#include "BrokerApplication.h"
 #include "BrokerProcessLauncher.h"
+#include "BrokerRegistration.h"
 #include "InteractiveDesktopLeaseClient.h"
 #include "InteractiveDesktopLeaseCoordinator.h"
 
@@ -75,6 +74,37 @@ namespace
     }
     const auto* user = reinterpret_cast<const TOKEN_USER*>(userBuffer.data());
     return IsValidSid(user->User.Sid) && EqualSid(user->User.Sid, systemSid.data()) != FALSE;
+}
+
+[[nodiscard]] DWORD ReadTokenUserSid(HANDLE token, std::vector<BYTE>& userSid)
+{
+    userSid.clear();
+    DWORD required = 0;
+    GetTokenInformation(token, TokenUser, nullptr, 0, &required);
+    const DWORD sizeError = GetLastError();
+    if (sizeError != ERROR_INSUFFICIENT_BUFFER || required == 0)
+    {
+        return sizeError;
+    }
+    std::vector<BYTE> storage(required);
+    if (!GetTokenInformation(token, TokenUser, storage.data(), required, &required))
+    {
+        return GetLastError();
+    }
+    const auto* user = reinterpret_cast<const TOKEN_USER*>(storage.data());
+    if (!IsValidSid(user->User.Sid))
+    {
+        return ERROR_INVALID_SID;
+    }
+    const DWORD sidBytes = GetLengthSid(user->User.Sid);
+    userSid.resize(sidBytes);
+    if (!CopySid(sidBytes, userSid.data(), user->User.Sid))
+    {
+        const DWORD copyError = GetLastError();
+        userSid.clear();
+        return copyError;
+    }
+    return ERROR_SUCCESS;
 }
 
 [[nodiscard]] DWORD SidToString(PSID sid, std::wstring& value)
@@ -187,6 +217,9 @@ BOOL CALLBACK IsWindowWithTitleVisible(HWND window, LPARAM context)
     const DWORD callerLogonSidError =
         openedCallerToken ? launch_as::broker::GetTokenLogonSid(callerToken, callerLogonSid)
                           : callerTokenError;
+    std::vector<BYTE> callerUserSid;
+    const DWORD callerUserSidError =
+        openedCallerToken ? ReadTokenUserSid(callerToken, callerUserSid) : callerTokenError;
     if (callerToken != nullptr)
     {
         CloseHandle(callerToken);
@@ -196,6 +229,10 @@ BOOL CALLBACK IsWindowWithTitleVisible(HWND window, LPARAM context)
         callerLogonSidError == ERROR_SUCCESS
             ? SidToString(callerLogonSid.data(), callerLogonSidText)
             : callerLogonSidError;
+    std::wstring callerUserSidText;
+    const DWORD callerUserSidTextError = callerUserSidError == ERROR_SUCCESS
+                                             ? SidToString(callerUserSid.data(), callerUserSidText)
+                                             : callerUserSidError;
     HWINSTA windowStation = OpenWindowStationW(L"WinSta0", FALSE, READ_CONTROL);
     const DWORD windowStationError = windowStation != nullptr ? ERROR_SUCCESS : GetLastError();
     HDESK desktop = OpenDesktopW(L"Default", 0, FALSE, READ_CONTROL);
@@ -218,11 +255,14 @@ BOOL CALLBACK IsWindowWithTitleVisible(HWND window, LPARAM context)
         std::ofstream ready(readyPath, std::ios::binary | std::ios::trunc);
         ready << "READY\n";
         ready << "callerSessionId=" << callerSessionId << '\n';
+        ready << "callerUserSid=" << NarrowAscii(callerUserSidText) << '\n';
         ready << "callerLogonSid=" << NarrowAscii(callerLogonSidText) << '\n';
         ready << "sessionError=" << sessionError << '\n';
         ready << "callerTokenError=" << callerTokenError << '\n';
         ready << "callerLogonSidError=" << callerLogonSidError << '\n';
         ready << "callerLogonSidTextError=" << callerLogonSidTextError << '\n';
+        ready << "callerUserSidError=" << callerUserSidError << '\n';
+        ready << "callerUserSidTextError=" << callerUserSidTextError << '\n';
         ready.close();
         const BOOL connected = ConnectNamedPipe(pipe, nullptr);
         connectError = connected ? ERROR_SUCCESS : GetLastError();
@@ -290,9 +330,10 @@ BOOL CALLBACK IsWindowWithTitleVisible(HWND window, LPARAM context)
     result << "serveError=" << serveError << '\n';
     result << "targetWindowVisible=" << (targetWindowVisible ? "true" : "false") << '\n';
     result << "independentDaclSemanticallyRestored=" << (restored ? "true" : "false") << '\n';
-    const bool identityReady = sessionRead && callerTokenError == ERROR_SUCCESS &&
-                               callerLogonSidError == ERROR_SUCCESS &&
-                               callerLogonSidTextError == ERROR_SUCCESS;
+    const bool identityReady =
+        sessionRead && callerTokenError == ERROR_SUCCESS && callerLogonSidError == ERROR_SUCCESS &&
+        callerLogonSidTextError == ERROR_SUCCESS && callerUserSidError == ERROR_SUCCESS &&
+        callerUserSidTextError == ERROR_SUCCESS;
     const bool success = identityReady && createPipeError == ERROR_SUCCESS &&
                          connectError == ERROR_SUCCESS && serveError == ERROR_SUCCESS &&
                          targetWindowVisible && restored;
@@ -345,9 +386,9 @@ BOOL CALLBACK IsWindowWithTitleVisible(HWND window, LPARAM context)
 
 [[nodiscard]] DWORD RunBrokerTarget(std::wstring_view pipeName, std::wstring_view nonce,
     const std::filesystem::path& resultPath, DWORD callerSessionId,
-    std::wstring_view callerLogonSidText, const std::filesystem::path& targetExecutable,
-    const std::filesystem::path& workingDirectory, const std::filesystem::path& targetResultPath,
-    std::wstring_view targetWindowTitle)
+    std::wstring_view callerLogonSidText, std::wstring_view callerUserSidText,
+    const std::filesystem::path& targetExecutable, const std::filesystem::path& workingDirectory,
+    const std::filesystem::path& targetResultPath, std::wstring_view targetWindowTitle)
 {
     HANDLE processToken = nullptr;
     const BOOL openedProcessToken =
@@ -360,29 +401,21 @@ BOOL CALLBACK IsWindowWithTitleVisible(HWND window, LPARAM context)
     }
 
     std::vector<BYTE> callerLogonSid;
-    const DWORD callerSidError = ParseSid(callerLogonSidText, callerLogonSid);
+    const DWORD callerLogonSidError = ParseSid(callerLogonSidText, callerLogonSid);
+    std::vector<BYTE> callerUserSid;
+    const DWORD callerUserSidError = ParseSid(callerUserSidText, callerUserSid);
     const std::wstring accountName = L"LasGui" + std::to_wstring(GetCurrentProcessId());
-    launch_as::broker::SecurePassword password;
-    const DWORD passwordError = launch_as::broker::GenerateBrokerPassword(password);
-    const DWORD accountCreateError =
-        passwordError == ERROR_SUCCESS
-            ? launch_as::broker::CreateBrokerManagedLocalAccount(accountName, password)
-            : passwordError;
+    const std::filesystem::path enrollmentDirectory =
+        workingDirectory / (L"interactive-enrollment-" + std::to_wstring(GetCurrentProcessId()));
+    std::error_code directoryError;
+    std::filesystem::create_directories(enrollmentDirectory, directoryError);
+    launch_as::broker::RegistrationService registration(enrollmentDirectory.native());
+    const DWORD enrollmentDirectoryError =
+        directoryError ? static_cast<DWORD>(directoryError.value()) : ERROR_SUCCESS;
+    const DWORD accountCreateError = enrollmentDirectoryError == ERROR_SUCCESS
+                                         ? registration.Create(accountName)
+                                         : enrollmentDirectoryError;
     const bool accountCreated = accountCreateError == ERROR_SUCCESS;
-    launch_as::broker::BrokerLogonToken token;
-    const DWORD logonError =
-        accountCreated ? launch_as::broker::LogOnBrokerAccount(accountName, password, token)
-                       : accountCreateError;
-    std::vector<BYTE> targetLogonSid;
-    const DWORD targetLogonSidError =
-        logonError == ERROR_SUCCESS
-            ? launch_as::broker::GetTokenLogonSid(token.get(), targetLogonSid)
-            : logonError;
-    std::wstring targetLogonSidText;
-    const DWORD targetLogonSidTextError =
-        targetLogonSidError == ERROR_SUCCESS
-            ? SidToString(targetLogonSid.data(), targetLogonSidText)
-            : targetLogonSidError;
 
     std::vector<std::wstring> targetArguments {
         targetExecutable.native(),
@@ -391,48 +424,62 @@ BOOL CALLBACK IsWindowWithTitleVisible(HWND window, LPARAM context)
         L"4000"
     };
     launch_as::broker::BrokerChildProcess child;
-    launch_as::broker::InteractiveDesktopLeaseConnection lease;
-    const DWORD launchError =
-        targetLogonSidTextError == ERROR_SUCCESS && callerSidError == ERROR_SUCCESS
-            ? launch_as::broker::LaunchBrokerInteractiveProcess(token.get(),
-                  accountName,
-                  targetArguments,
-                  workingDirectory.native(),
-                  callerSessionId,
-                  pipeName,
-                  nonce,
-                  callerLogonSid,
-                  child,
-                  lease)
-            : (targetLogonSidTextError != ERROR_SUCCESS ? targetLogonSidTextError : callerSidError);
-    const bool connectionHeld = static_cast<bool>(lease);
-    const DWORD resumeError = launchError == ERROR_SUCCESS ? child.Resume() : launchError;
-    DWORD waitError = resumeError;
+    launch_as::broker::BrokerRequest request;
+    request.operation = launch_as::broker::RequestOperation::InteractiveLaunch;
+    request.requestId = nonce;
+    request.profileId = accountName;
+    request.arguments = targetArguments;
+    request.workingDirectory = workingDirectory.native();
+    request.interactive.leasePipe = pipeName;
+    request.interactive.nonce = nonce;
+    launch_as::broker::BrokerCallerIdentity caller;
+    caller.userSid = callerUserSid;
+    caller.logonSid = callerLogonSid;
+    caller.sessionId = callerSessionId;
+    caller.isElevated = false;
+
+    DWORD launchError = accountCreateError;
+    DWORD waitError = accountCreateError;
+    DWORD releaseError = accountCreateError;
     DWORD targetExitCode = ERROR_CANCELLED;
-    if (resumeError == ERROR_SUCCESS)
+    bool jobTreeExitedBeforeRelease = false;
     {
-        const DWORD waitResult = WaitForSingleObject(child.process(), 15'000);
-        if (waitResult == WAIT_OBJECT_0)
+        launch_as::broker::BrokerApplication application(
+            enrollmentDirectory.native(), callerUserSid);
+        if (accountCreated && callerLogonSidError == ERROR_SUCCESS &&
+            callerUserSidError == ERROR_SUCCESS)
         {
-            waitError = ERROR_SUCCESS;
-            if (!GetExitCodeProcess(child.process(), &targetExitCode))
+            launchError = application.Launch(request, caller, child);
+            waitError = launchError;
+        }
+        if (launchError == ERROR_SUCCESS)
+        {
+            const DWORD waitResult = WaitForSingleObject(child.process(), 15'000);
+            if (waitResult == WAIT_OBJECT_0)
+            {
+                waitError = ERROR_SUCCESS;
+                if (!GetExitCodeProcess(child.process(), &targetExitCode))
+                {
+                    waitError = GetLastError();
+                }
+            }
+            else if (waitResult == WAIT_TIMEOUT)
+            {
+                waitError = ERROR_TIMEOUT;
+            }
+            else
             {
                 waitError = GetLastError();
             }
         }
-        else if (waitResult == WAIT_TIMEOUT)
+        jobTreeExitedBeforeRelease =
+            waitError == ERROR_SUCCESS && child.WaitForProcessTreeExit(5'000);
+        if (launchError == ERROR_SUCCESS)
         {
-            waitError = ERROR_TIMEOUT;
-        }
-        else
-        {
-            waitError = GetLastError();
+            releaseError = application.FinishSession(request, jobTreeExitedBeforeRelease);
         }
     }
-    const bool jobTreeExited = waitError == ERROR_SUCCESS && child.WaitForProcessTreeExit(5'000);
-    const bool jobTreeExitedBeforeRelease = jobTreeExited;
-    const DWORD releaseError =
-        connectionHeld ? launch_as::broker::ReleaseInteractiveDesktopLease(lease) : launchError;
+    const bool connectionHeld = launchError == ERROR_SUCCESS;
     const bool childCleanupSucceeded = child.TerminateAndWaitForExit();
 
     const std::map<std::string, std::string> targetResult = ReadProbeResult(targetResultPath);
@@ -445,15 +492,20 @@ BOOL CALLBACK IsWindowWithTitleVisible(HWND window, LPARAM context)
         targetValue("processSessionId") == std::to_string(callerSessionId);
     const bool windowStationIsWinSta0 = targetValue("processWindowStation") == "WinSta0";
     const bool desktopIsDefault = targetValue("threadDesktop") == "Default";
-    const bool logonSidMatchesLease =
-        targetValue("tokenLogonSid") == NarrowAscii(targetLogonSidText);
+    std::vector<BYTE> targetLogonSid;
+    std::wstring targetLogonSidText;
+    for (const char character : targetValue("tokenLogonSid"))
+    {
+        targetLogonSidText.push_back(static_cast<unsigned char>(character));
+    }
+    const DWORD targetLogonSidError = ParseSid(targetLogonSidText, targetLogonSid);
+    const DWORD targetLogonSidTextError = targetLogonSidError;
+    const bool logonSidMatchesLease = targetLogonSidError == ERROR_SUCCESS;
     const bool windowCreated = targetValue("windowCreated") == "true";
     const bool targetProbeSucceeded = targetValue("probeSucceeded") == "true";
 
-    token.Reset();
-    password.Clear();
-    const NET_API_STATUS accountDeleteError =
-        accountCreated ? NetUserDel(nullptr, accountName.c_str()) : accountCreateError;
+    const DWORD accountDeleteError =
+        accountCreated ? registration.Delete(accountName) : accountCreateError;
 
     std::ofstream result(resultPath, std::ios::binary | std::ios::trunc);
     if (!result)
@@ -462,15 +514,14 @@ BOOL CALLBACK IsWindowWithTitleVisible(HWND window, LPARAM context)
     }
     result << "processTokenError=" << processTokenError << '\n';
     result << "clientIsLocalSystem=" << (isLocalSystem ? "true" : "false") << '\n';
-    result << "callerSidError=" << callerSidError << '\n';
-    result << "passwordError=" << passwordError << '\n';
+    result << "callerSidError=" << callerLogonSidError << '\n';
+    result << "callerUserSidError=" << callerUserSidError << '\n';
+    result << "enrollmentDirectoryError=" << enrollmentDirectoryError << '\n';
     result << "accountCreateError=" << accountCreateError << '\n';
-    result << "logonError=" << logonError << '\n';
     result << "targetLogonSidError=" << targetLogonSidError << '\n';
     result << "targetLogonSidTextError=" << targetLogonSidTextError << '\n';
     result << "connectionHeldAfterAcquire=" << (connectionHeld ? "true" : "false") << '\n';
     result << "acquireError=" << launchError << '\n';
-    result << "resumeError=" << resumeError << '\n';
     result << "waitError=" << waitError << '\n';
     result << "targetExitCode=" << targetExitCode << '\n';
     result << "jobTreeExitedBeforeRelease=" << (jobTreeExitedBeforeRelease ? "true" : "false")
@@ -484,14 +535,14 @@ BOOL CALLBACK IsWindowWithTitleVisible(HWND window, LPARAM context)
     result << "logonSidMatchesLease=" << (logonSidMatchesLease ? "true" : "false") << '\n';
     result << "windowCreated=" << (windowCreated ? "true" : "false") << '\n';
     const bool success =
-        processTokenError == ERROR_SUCCESS && isLocalSystem && callerSidError == ERROR_SUCCESS &&
-        passwordError == ERROR_SUCCESS && accountCreateError == NERR_Success &&
-        logonError == ERROR_SUCCESS && targetLogonSidError == ERROR_SUCCESS &&
+        processTokenError == ERROR_SUCCESS && isLocalSystem &&
+        callerLogonSidError == ERROR_SUCCESS && callerUserSidError == ERROR_SUCCESS &&
+        accountCreateError == ERROR_SUCCESS && targetLogonSidError == ERROR_SUCCESS &&
         targetLogonSidTextError == ERROR_SUCCESS && connectionHeld &&
-        launchError == ERROR_SUCCESS && resumeError == ERROR_SUCCESS &&
-        waitError == ERROR_SUCCESS && targetExitCode == ERROR_SUCCESS &&
-        jobTreeExitedBeforeRelease && releaseError == ERROR_SUCCESS && childCleanupSucceeded &&
-        accountDeleteError == NERR_Success && sessionIdMatchesCaller && windowStationIsWinSta0 &&
+        launchError == ERROR_SUCCESS && waitError == ERROR_SUCCESS &&
+        targetExitCode == ERROR_SUCCESS && jobTreeExitedBeforeRelease &&
+        releaseError == ERROR_SUCCESS && childCleanupSucceeded &&
+        accountDeleteError == ERROR_SUCCESS && sessionIdMatchesCaller && windowStationIsWinSta0 &&
         desktopIsDefault && logonSidMatchesLease && windowCreated && targetProbeSucceeded;
     result << "probeSucceeded=" << (success ? "true" : "false") << '\n';
     result.flush();
@@ -516,7 +567,7 @@ int wmain(int argumentCount, wchar_t* arguments[])
         return static_cast<int>(
             RunCoordinator(arguments[2], arguments[3], arguments[4], arguments[5], arguments[6]));
     }
-    if (argumentCount == 11 && std::wstring_view(arguments[1]) == L"--broker-target")
+    if (argumentCount == 12 && std::wstring_view(arguments[1]) == L"--broker-target")
     {
         wchar_t* sessionEnd = nullptr;
         const unsigned long callerSessionId = wcstoul(arguments[5], &sessionEnd, 10);
@@ -532,7 +583,8 @@ int wmain(int argumentCount, wchar_t* arguments[])
             arguments[7],
             arguments[8],
             arguments[9],
-            arguments[10]));
+            arguments[10],
+            arguments[11]));
     }
     return ERROR_INVALID_PARAMETER;
 }

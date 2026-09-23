@@ -193,7 +193,8 @@ DWORD BrokerApplication::Launch(
             child.processId());
         return result;
     };
-    if (request.operation != RequestOperation::ConsoleLaunch ||
+    if ((request.operation != RequestOperation::ConsoleLaunch &&
+            request.operation != RequestOperation::InteractiveLaunch) ||
         !IsAuthorizedCaller(authorizedCallerSid_, caller.userSid))
     {
         return complete(ERROR_ACCESS_DENIED);
@@ -226,6 +227,41 @@ DWORD BrokerApplication::Launch(
     if (logonError != ERROR_SUCCESS)
     {
         return complete(logonError);
+    }
+    if (request.operation == RequestOperation::InteractiveLaunch)
+    {
+        InteractiveDesktopLeaseConnection lease;
+        const DWORD launchError = LaunchBrokerInteractiveProcess(token.get(),
+            request.profileId,
+            request.arguments,
+            request.workingDirectory,
+            caller.sessionId,
+            request.interactive.leasePipe,
+            request.interactive.nonce,
+            caller.logonSid,
+            child,
+            lease);
+        if (launchError != ERROR_SUCCESS)
+        {
+            return complete(launchError);
+        }
+        const DWORD resumeError = child.Resume();
+        if (resumeError != ERROR_SUCCESS)
+        {
+            static_cast<void>(child.TerminateAndWaitForExit());
+            return complete(resumeError);
+        }
+        {
+            std::lock_guard leaseLock(leaseMutex_);
+            const auto [ignored, inserted] =
+                interactiveLeasesByRequest_.emplace(request.requestId, std::move(lease));
+            if (!inserted)
+            {
+                static_cast<void>(child.TerminateAndWaitForExit());
+                return complete(ERROR_ALREADY_EXISTS);
+            }
+        }
+        return complete(ERROR_SUCCESS);
     }
     std::vector<std::wstring> conhostArguments {
         L"--internal-pseudoconsole-host",
@@ -267,19 +303,44 @@ DWORD BrokerApplication::Launch(
     return complete(resumeError);
 }
 
-void BrokerApplication::FinishSession(const BrokerRequest& request, bool processTreeExited)
+DWORD BrokerApplication::FinishSession(const BrokerRequest& request, bool processTreeExited)
 {
-    ReleaseSession(request.profileId);
-    if (!processTreeExited)
+    DWORD leaseError = ERROR_SUCCESS;
+    if (request.operation == RequestOperation::InteractiveLaunch)
     {
-        const std::array<std::wstring, 3> fields {
+        InteractiveDesktopLeaseConnection lease;
+        {
+            std::lock_guard leaseLock(leaseMutex_);
+            const auto existing = interactiveLeasesByRequest_.find(request.requestId);
+            if (existing == interactiveLeasesByRequest_.end())
+            {
+                leaseError = ERROR_NOT_FOUND;
+            }
+            else
+            {
+                lease = std::move(existing->second);
+                interactiveLeasesByRequest_.erase(existing);
+            }
+        }
+        if (leaseError == ERROR_SUCCESS)
+        {
+            leaseError = ReleaseInteractiveDesktopLease(lease);
+        }
+    }
+    ReleaseSession(request.profileId);
+    if (!processTreeExited || leaseError != ERROR_SUCCESS)
+    {
+        const std::array<std::wstring, 4> fields {
             L"operation=launch",
             AuditProfileId(L"profileId", request.profileId),
-            L"reason=process_tree_not_confirmed",
+            L"reason=" + std::wstring(!processTreeExited ? L"process_tree_not_confirmed"
+                                                         : L"lease_release_failed"),
+            L"win32Error=" + std::to_wstring(leaseError),
         };
         static_cast<void>(WriteBrokerAuditEvent(
             EVENTLOG_ERROR_TYPE, BrokerAuditEvent::SessionTeardownFailed, fields));
     }
+    return leaseError;
 }
 
 } // namespace launch_as::broker

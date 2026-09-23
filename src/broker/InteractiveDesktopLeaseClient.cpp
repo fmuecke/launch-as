@@ -10,6 +10,7 @@
 #include <Windows.h>
 #include <array>
 #include <string>
+#include <utility>
 
 namespace launch_as::broker
 {
@@ -98,6 +99,24 @@ constexpr DWORD ConnectTimeoutMilliseconds = 5'000;
 } // namespace
 
 InteractiveDesktopLeaseConnection::~InteractiveDesktopLeaseConnection() { Reset(); }
+
+InteractiveDesktopLeaseConnection::InteractiveDesktopLeaseConnection(
+    InteractiveDesktopLeaseConnection&& other) noexcept
+    : pipe_(std::exchange(other.pipe_, nullptr)), nonce_(std::move(other.nonce_))
+{
+}
+
+InteractiveDesktopLeaseConnection& InteractiveDesktopLeaseConnection::operator=(
+    InteractiveDesktopLeaseConnection&& other) noexcept
+{
+    if (this != &other)
+    {
+        Reset();
+        pipe_ = std::exchange(other.pipe_, nullptr);
+        nonce_ = std::move(other.nonce_);
+    }
+    return *this;
+}
 
 InteractiveDesktopLeaseConnection::operator bool() const noexcept { return pipe_ != nullptr; }
 

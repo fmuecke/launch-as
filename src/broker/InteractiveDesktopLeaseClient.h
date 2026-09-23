@@ -19,6 +19,9 @@ class InteractiveDesktopLeaseConnection final
 
     InteractiveDesktopLeaseConnection(const InteractiveDesktopLeaseConnection&) = delete;
     InteractiveDesktopLeaseConnection& operator=(const InteractiveDesktopLeaseConnection&) = delete;
+    InteractiveDesktopLeaseConnection(InteractiveDesktopLeaseConnection&& other) noexcept;
+    InteractiveDesktopLeaseConnection& operator=(
+        InteractiveDesktopLeaseConnection&& other) noexcept;
 
     [[nodiscard]] explicit operator bool() const noexcept;
     void Reset() noexcept;

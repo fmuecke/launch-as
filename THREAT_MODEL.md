@@ -5,12 +5,17 @@
 Assessment date: 2026-09-15. Source baseline:
 `45209b376a59c673592e80002202513c77917304`.
 
+Interactive-path update: 2026-09-23, working tree based on
+`15d7274df612b8153527e285ce616bf7229668e0`.
+
 ## 1. Assessment summary
 
-`launch-as` reduces the damage a console workload can cause by running it under a managed local
+`launch-as` reduces the damage a workload can cause by running it under a managed local
 account, with an independent logon session and reduced token privileges. A LocalSystem broker
-owns password generation, logon, and process creation. The interactive client receives terminal
-I/O and status, without receiving the account password or a reusable primary token.
+owns password generation, logon, and process creation. The public client currently receives
+console terminal I/O and status, without receiving the account password or a reusable primary
+token. A private interactive-development path can place a GUI target on the caller's shared
+desktop while preserving broker ownership of those secrets and handles.
 
 The central security claim is conditional: the workload should not gain access to the caller's
 processes through the caller's logon SID, or to the caller's interactive desktop through launcher
@@ -22,10 +27,11 @@ AppContainer, filesystem allow-list, network isolation, or isolation between wor
 one managed account. The privileged broker is part of the trusted computing base: a broker
 compromise can compromise the host.
 
-**Assessment status:** source-based assessment, with deployment assumptions and open validation
-items below. No build, test suite, installed-service acceptance, elevated probe, or exploit
-reproduction was run for this document. Existing tests are evidence of intended coverage, not
-fresh evidence that a deployed installation satisfies this model.
+**Assessment status:** the original assessment was source-based, with deployment assumptions and
+open validation items below. The interactive-path update passed the 41-test host suite plus a
+fresh elevated, interactive Windows Sandbox probe at the application seam. Focused tests cover the
+private control-pipe contract separately. This is not installed-service end-to-end interactive
+acceptance, and it does not establish that a deployed installation satisfies the full model.
 
 ## 2. Scope and assumptions
 
@@ -36,11 +42,13 @@ fresh evidence that a deployed installation satisfies this model.
 - Local control and terminal pipes, request parsing, caller authorization, account management,
   password handling, token validation, profile loading, ConPTY, and job teardown.
 - Protected installation files and `%ProgramData%\launch-as` configuration.
-- A hostile console program, including its dependencies, scripts, descendants, and terminal output.
+- A hostile console or GUI program, including its dependencies, scripts, descendants, terminal
+  output, and windows.
 
 The [broker specification](launch-as-broker-spec.md) contains future design work as well as the
-current contract. This assessment follows the source where they differ. GUI mode and proposed
-profile-specific executable policies are not implemented controls.
+current contract. This assessment follows the source where they differ. The private GUI request
+path is implemented but is not exposed by the public CLI and has not passed one installed-service
+end-to-end acceptance test. Proposed profile-specific executable policies are not implemented.
 
 ### Required deployment assumptions
 
@@ -128,8 +136,10 @@ The important boundaries are:
   protocol intent flag, not an independent security boundary.
 
 [BrokerProtocol.cpp](src/BrokerProtocol.cpp) uses a versioned, bounded parser: 64 KiB messages,
-at most 64 arguments, validated identifiers and terminal pipe names, and rejection of unsupported
-interactive mode. Request IDs correlate responses; they do not authenticate the server.
+at most 64 arguments, and validated identifiers and pipe names. The private interactive object
+accepts only a lease pipe and nonce; attempts to supply session or SID identity are rejected as
+unknown fields. The broker instead supplies caller session and logon SID from pipe-client
+impersonation. Request IDs correlate responses; they do not authenticate the server.
 
 ### Account ownership, secrets, and token creation
 
@@ -174,6 +184,14 @@ writers. It does not contain a primary token or the broker control pipe. The dep
 [console host](src/PseudoConsoleHost.cpp) opens terminal pipes by name and starts the requested
 executable without general handle inheritance.
 
+The private interactive path assigns the restricted target token to the authenticated caller's
+captured session, acquires a nonce-bound lease for the target token's own logon SID, and creates the
+target suspended on `WinSta0\\Default`. The broker, not the coordinator, retains the target token,
+process, profile, Job, and lease connection. The temporary ACEs include `READ_CONTROL` and the
+minimum object-specific GUI rights demonstrated by the live probe, but omit `WRITE_DAC`,
+`WRITE_OWNER`, and `DELETE`. Shared-desktop UI interaction is explicitly accepted in this mode;
+the independent target logon SID is intended to keep the caller-process surface closed.
+
 The independent token removes the intended path through the caller's logon-SID default ACEs.
 It does not prove denial against processes with permissive custom DACLs, account/group grants,
 or other accessible IPC endpoints. Noninteractive placement must likewise be validated by actual
@@ -192,6 +210,12 @@ Each console session has a kill-on-close job. Control disconnect, service stop, 
 drive job termination. The implementation admits four sessions globally, two per account, and
 eight pipe workers, with bounded request I/O waits. These bounds limit broker admission, not
 workload CPU, memory, disk, process count, network use, or repeated launch frequency.
+
+For a private interactive launch, control disconnect does not end the session. The broker worker
+owns the detached Job until the complete tree exits; service stop or another teardown path
+terminates and waits for the Job before releasing the desktop lease. This normal ordering is
+covered by focused worker tests and a fresh live Sandbox application-seam probe. Coordinator or
+broker crash recovery and one installed-service end-to-end acceptance test remain open.
 
 Jobs cover associated processes. Work delegated to another service or mechanism outside the job
 is not automatically contained; Microsoft explicitly documents exceptions to child association.
@@ -317,7 +341,7 @@ installation for destructive, elevated, network-redirection, and failure-injecti
 | Protocol and caller authorization | `BrokerProtocolTests`, `BrokerPipeTests`, `BrokerCallerPolicyTests`, `BrokerCommandTests` | Unrelated-account and managed-account direct clients denied; spoofed identities rejected; management denied without actual elevation; stopped-service fake-server test. |
 | Account, password, and token | `BrokerPasswordTests`, `BrokerEnrollmentStoreTests`, `BrokerAccountProvisioningTests` | SID replacement, record/key tampering, direct powerful privilege and privileged-group cases; secret absence from IPC/logs; inspect complete minted token. |
 | Installation and storage | `BrokerDataDirectoryTests`, `BrokerServiceInstallerTests`, setup contract tests | Actual file/directory owners and ACLs, service change rights, policy/key read/write denial, reparse/ownership cases, partial update recovery. |
-| Process and UI separation | `BrokerProcessLauncherTests`, `BrokerChildIdentityProbeTests`; `Invoke-BrokerProbeAcceptanceTest.ps1` | Distinct logon SID, caller's logon SID absent from child `TokenGroups`, denied `PROCESS_VM_READ`/`PROCESS_TERMINATE` against controlled caller targets; probe interactive desktop/window-station access and private-file canaries. |
+| Process and UI separation | `BrokerProcessLauncherTests`, `BrokerChildIdentityProbeTests`, `InteractiveLeaseHandshakeProbe`; `Invoke-BrokerProbeAcceptanceTest.ps1`, fresh interactive Sandbox probe | Console: distinct logon SID, caller's logon SID absent from child `TokenGroups`, and denied `PROCESS_VM_READ`/`PROCESS_TERMINATE` against controlled caller targets. Interactive: combine installed control-pipe dispatch with real GUI launch/lease cleanup in one test; add crash, RDP, Fast User Switching, launcher-disappearance, and broker-restart cases. |
 | Terminal and disconnect | `BrokerTerminalBridgeTests`, `TerminalDisconnectTests`; `Invoke-BrokerConsoleAcceptanceTest.ps1` | Installed exit-code/resize behavior, abrupt client death, service stop, descendants, inherited-handle audit, terminal connection races. |
 | Concurrency and profile lifetime | `Invoke-BrokerSameAccountConcurrencyTest.ps1` | Two-account overlap, fifth global launch rejection, independent teardown, held profile handles, unconfirmed termination, management during draining. |
 | Host-resource exposure | Deployment-specific probes | Managed-account filesystem and local-service access, outbound/loopback connectivity, same-account interference, indirect process creation, persistence and resource exhaustion. |
@@ -344,6 +368,7 @@ Sandbox token, or redirected-stdin launch does not substitute for that environme
 - Treat terminal output, shared writable files, and same-account peers as untrusted.
 - Reassess this model after changes to IPC, install paths, account ownership, token creation,
   inherited handles, profiles, networking, or session lifetime.
-- Any future GUI mode requires a separate assessment of authenticated session selection,
-  window-station/desktop ACLs, RDP/session switching, and cleanup. Console evidence does not
-  establish shared-desktop safety.
+- Before public GUI mode, complete the separate assessment of authenticated session selection,
+  window-station/desktop ACLs, RDP/session switching, crash cleanup, and installed end-to-end
+  behavior. Console evidence and the current split private-path evidence do not establish the full
+  shared-desktop contract.

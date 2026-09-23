@@ -215,10 +215,19 @@ window station, desktop, independent logon SID, visible window, Job-before-relea
 independent final-DACL equality. The retained evidence is
 `out/windows-sandbox-interactive-session-probe/b5c19f51a91442908abcdbd6f94bf186`.
 
-The channel and launch primitive are still not wired into the installed broker request path.
-Authenticated pipe-derived caller identity, detached helper lifetime, failure/crash acceptance,
-RDP, and Fast User Switching remain unsupported. The public CLI/protocol therefore continues to
-reject interactive launches until those boundaries are implemented and accepted.
+The fourth internal slice wires those primitives through a private production broker request.
+`BrokerPipeServer` derives the caller session and logon SID from its authenticated pipe context;
+the request cannot supply either identity. The interactive worker ignores control-pipe disconnect,
+retains the Job until its complete process tree exits or is terminated during service teardown,
+and only then asks `BrokerApplication` to release the lease and session slot. Focused tests prove
+the request/dispatch and detached lifetime. A fresh Sandbox probe proves the complementary live
+`BrokerApplication` launch and release path, but enters below the installed control pipe. The two
+results are not yet one installed-service end-to-end acceptance test.
+
+The public CLI still emits only console requests and does not create or retain a caller-session
+coordinator. That public coordinator/CLI path and installed interactive acceptance are the next
+feature slice. Failure/crash recovery, RDP, Fast User Switching, launcher disappearance, and
+broker restart remain additional acceptance work.
 
 #### 7.2.2 No normal-user token helper
 
@@ -269,11 +278,21 @@ Impersonation failure is a **hard failure** (otherwise the request would proceed
 }
 ```
 
-`mode:"console"` is the only supported launch mode in Phase 1. A structurally valid
-`mode:"interactive"` request carries no `console` block and receives
-`reasonCode:"mode_not_supported"` with `ERROR_NOT_SUPPORTED`; it is not dispatched to a launch
-handler. A missing or unknown mode is `invalid_request`. This keeps the explicit switch while
-making GUI opt-in when its later phase is implemented.
+`mode:"console"` is the only mode emitted by the public Phase-1 client. The private interactive
+development contract replaces `console` with this exact object:
+
+```json
+"interactive": {
+  "leasePipe": "\\\\.\\pipe\\launch-as-interactive-<random>",
+  "nonce": "uuid"
+}
+```
+
+The private request contains no session id, caller SID, or caller logon SID. Unknown or duplicate
+fields, a missing lease field, a malformed lease-pipe name, or a malformed nonce make the request
+invalid. The broker derives caller identity from the authenticated control-pipe context and
+dispatches the request as an interactive launch. A missing or unknown mode is also
+`invalid_request`. No public CLI contract exposes this request yet.
 
 ### 8.2 Response (broker → client)
 
@@ -454,14 +473,16 @@ Never log: passwords, internal account-configuration records, full sensitive com
 
 ## 16. Failure behaviour (fail closed)
 
-Phase 1 fails closed when caller identity cannot be captured or authorised, the request is malformed or
-uses an unsupported mode, the account configuration does not match, password reset or `LogonUser` fails,
-the resulting token is administrative or has the wrong account SID, child logon-SID validation fails,
-or the terminal/job setup fails. Responses return a stable reason code and Win32 error without
-sensitive internals.
+Phase 1 fails closed when caller identity cannot be captured or authorised, the request is malformed
+or uses an unsupported mode, the account configuration does not match, password reset or
+`LogonUser` fails, the resulting token is administrative or has the wrong account SID, child
+logon-SID validation fails, or the terminal/job setup fails. Private interactive requests also fail
+closed for invalid caller session/logon identity, unavailable desktop-lease access, target session
+or logon-SID mismatch, and lease release failure. Responses return a stable reason code and Win32
+error without sensitive internals.
 
-The future GUI/policy phase must additionally fail closed for disabled profiles, config-integrity
-failures, canonical-path/ACL policy failures, ambiguous sessions, unavailable desktop access, and
+The future public GUI/policy phase must additionally fail closed for disabled profiles,
+config-integrity failures, canonical-path/ACL policy failures, ambiguous or changed sessions, and
 all future handle-validation checks.
 
 ---
@@ -579,10 +600,10 @@ pre-broker launcher design; Credential Manager, `register`, `--credential-mode`,
   message-mode control pipe. The pipe rejects remote clients. Its DACL admits the authorised
   caller, but the service also impersonates the pipe client, captures its SID/session/integrity,
   immediately reverts, and cross-checks the client-process SID before authorising the request.
-- Phase 1 supports only explicit `mode:"console"`. `mode:"interactive"` is recognised but
-  rejected with `mode_not_supported` / `ERROR_NOT_SUPPORTED` (50); missing or unknown modes are
-  invalid requests. No Phase-1 process is placed on `WinSta0\\Default` or given access to the
-  caller's interactive window station or desktop.
+- The public Phase-1 client supports only explicit `mode:"console"` and exposes no mode option.
+  The broker also accepts the private interactive-development request described in §8.1, using
+  only its authenticated pipe caller's captured session and logon SID. Console requests never
+  place a process on `WinSta0\\Default` or grant access to the caller's interactive objects.
 - The `LocalSystem` service resets a broker-generated password for the SID-pinned managed local
   account, calls `LogonUserW(LOGON32_LOGON_INTERACTIVE)`, clears the password buffer, loads the
   user profile/environment, and creates the console host suspended with `CreateProcessAsUserW`.
@@ -602,6 +623,11 @@ pre-broker launcher design; Credential Manager, `register`, `--credential-mode`,
   concurrency and independent disconnect teardown are acceptance-tested; account-scoped profile
   leasing and cross-account lifecycle acceptance remain required before the full contract is
   complete.
+- A private interactive launch also assigns the target to a kill-on-close Job before resume, but
+  its control connection is not the lifetime switch. The broker owns the detached Job and desktop
+  lease until the complete process tree exits or service teardown terminates it; only afterward is
+  the lease released. Focused pipe tests and a live Sandbox application-seam probe cover the two
+  halves. An installed-service end-to-end interactive test and public coordinator/CLI remain open.
 - After terminal output finishes, the broker reports the launched command's exit code over the
   control connection and `launch-as.exe` returns it unchanged. Launcher-originated failures use
   the documented Win32-style outcomes (notably `1` for general failure and `87` for usage); child

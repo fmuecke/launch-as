@@ -125,6 +125,18 @@ void BeginOverlappedOperation(OVERLAPPED& overlapped, HANDLE event)
     return wait == WAIT_OBJECT_0 + 1;
 }
 
+[[nodiscard]] bool WaitForDetachedProcessTree(HANDLE stopEvent, const BrokerChildProcess& child)
+{
+    while (WaitForSingleObject(stopEvent, 0) == WAIT_TIMEOUT)
+    {
+        if (child.WaitForProcessTreeExit(50))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 void WaitForControlConnectionClose(HANDLE pipe, HANDLE stopEvent)
 {
     UniqueHandle operationEvent(CreateEventW(nullptr, TRUE, FALSE, nullptr));
@@ -359,7 +371,11 @@ void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
     bool waitForControlClose = false;
     if (WriteResponse(pipe, stopEvent, response) && child)
     {
-        if (WaitForBrokerChildExit(pipe, stopEvent, child.process()))
+        if (request.operation == RequestOperation::InteractiveLaunch)
+        {
+            static_cast<void>(WaitForDetachedProcessTree(stopEvent, child));
+        }
+        else if (WaitForBrokerChildExit(pipe, stopEvent, child.process()))
         {
             DWORD exitCode = 0;
             if (GetExitCodeProcess(child.process(), &exitCode))

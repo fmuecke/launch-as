@@ -8,6 +8,7 @@
 #include "BrokerProcessLauncher.h"
 #include "BrokerProtocol.h"
 #include "BrokerRegistration.h"
+#include "InteractiveDesktopLeaseClient.h"
 
 #include <Windows.h>
 #include <map>
@@ -32,7 +33,7 @@ class BrokerApplication final
         std::vector<std::wstring>& accounts);
     [[nodiscard]] DWORD Launch(const BrokerRequest& request, const BrokerCallerIdentity& caller,
         BrokerChildProcess& child);
-    void FinishSession(const BrokerRequest& request, bool processTreeExited);
+    [[nodiscard]] DWORD FinishSession(const BrokerRequest& request, bool processTreeExited);
 
   private:
     struct AccountNameLess
@@ -49,7 +50,9 @@ class BrokerApplication final
     RegistrationService registration_;
     std::mutex launchMutex_;
     std::mutex sessionMutex_;
+    std::mutex leaseMutex_;
     std::map<std::wstring, std::size_t, AccountNameLess> sessionsByAccount_;
+    std::map<std::wstring, InteractiveDesktopLeaseConnection> interactiveLeasesByRequest_;
     std::size_t sessionCount_ = 0;
 };
 

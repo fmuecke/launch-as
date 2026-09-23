@@ -25,6 +25,7 @@ struct LaunchCapture
     launch_as::broker::BrokerRequest request;
     std::vector<BYTE> callerSid;
     std::vector<BYTE> callerLogonSid;
+    DWORD callerSessionId = MAXDWORD;
 };
 
 struct SessionFinishCapture
@@ -72,6 +73,7 @@ DWORD CaptureLaunchRequest(void* context, const launch_as::broker::BrokerRequest
     capture->request = request;
     capture->callerSid = caller.userSid;
     capture->callerLogonSid = caller.logonSid;
+    capture->callerSessionId = caller.sessionId;
     return ERROR_BUSY;
 }
 
@@ -79,6 +81,12 @@ DWORD LaunchQuickChild(void*, const launch_as::broker::BrokerRequest&,
     const launch_as::broker::BrokerCallerIdentity&, launch_as::broker::BrokerChildProcess& child)
 {
     return launch_as::broker::LaunchQuickBrokerChildForTesting(child);
+}
+
+DWORD LaunchDelayedChild(void*, const launch_as::broker::BrokerRequest&,
+    const launch_as::broker::BrokerCallerIdentity&, launch_as::broker::BrokerChildProcess& child)
+{
+    return launch_as::broker::LaunchDelayedBrokerChildForTesting(child);
 }
 
 class ServerThread final
@@ -119,10 +127,12 @@ class ServerThread final
 class SessionServerThread final
 {
   public:
-    SessionServerThread(HANDLE pipe, HANDLE stopEvent)
+    SessionServerThread(HANDLE pipe, HANDLE stopEvent,
+        launch_as::broker::LaunchRequestHandler launchHandler = LaunchQuickChild,
+        SessionFinishCapture* finishCapture = nullptr)
         : completed_(CreateEventW(nullptr, TRUE, FALSE, nullptr)),
           thread_(
-              [pipe, stopEvent, this]
+              [pipe, stopEvent, launchHandler, finishCapture, this]
               {
                   launch_as::UniqueHandle connectEvent(CreateEventW(nullptr, TRUE, FALSE, nullptr));
                   if (!connectEvent)
@@ -153,8 +163,14 @@ class SessionServerThread final
                   {
                       return;
                   }
-                  launch_as::broker::ServeControlPipeRequest(
-                      pipe, stopEvent, nullptr, nullptr, LaunchQuickChild);
+                  launch_as::broker::ServeControlPipeRequest(pipe,
+                      stopEvent,
+                      nullptr,
+                      nullptr,
+                      launchHandler,
+                      nullptr,
+                      CaptureSessionFinished,
+                      finishCapture);
                   SetEvent(completed_.get());
               })
     {
@@ -178,7 +194,65 @@ class SessionServerThread final
     std::thread thread_;
 };
 
-[[nodiscard]] bool TestInteractiveModeRejected()
+[[nodiscard]] bool TestInteractiveWorkerOwnsDetachedProcessTree()
+{
+    const std::wstring pipeName =
+        L"\\\\.\\pipe\\launch-as-broker-detached-test-" + std::to_wstring(GetCurrentProcessId());
+    launch_as::UniqueHandle server(CreateNamedPipeW(pipeName.c_str(),
+        PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+        1,
+        static_cast<DWORD>(launch_as::broker::MaximumMessageBytes),
+        static_cast<DWORD>(launch_as::broker::MaximumMessageBytes),
+        0,
+        nullptr));
+    launch_as::UniqueHandle stopEvent(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+    if (!Expect(static_cast<bool>(server) && static_cast<bool>(stopEvent),
+            L"Could not create the detached interactive test pipe."))
+    {
+        return false;
+    }
+
+    SessionFinishCapture finishCapture;
+    SessionServerThread serverThread(
+        server.get(), stopEvent.get(), LaunchDelayedChild, &finishCapture);
+    launch_as::UniqueHandle client(CreateFileW(
+        pipeName.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr));
+    if (!Expect(static_cast<bool>(client), L"Could not connect the detached interactive test."))
+    {
+        return false;
+    }
+    constexpr char request[] =
+        R"json({"version":1,"requestId":"123e4567-e89b-12d3-a456-426614174000","operation":"launch","profileId":"LaunchAsUser","mode":"interactive","arguments":[],"workingDirectory":"C:\\repo","interactive":{"leasePipe":"\\\\.\\pipe\\launch-as-interactive-123e4567e89b12d3a456426614174000","nonce":"6f9619ff-8b86-d011-b42d-00c04fc964ff"}})json";
+    DWORD bytesWritten = 0;
+    std::array<char, launch_as::broker::MaximumMessageBytes> response {};
+    DWORD bytesRead = 0;
+    if (!Expect(WriteFile(client.get(), request, sizeof(request) - 1, &bytesWritten, nullptr) &&
+                    bytesWritten == sizeof(request) - 1,
+            L"Could not send the detached interactive request.") ||
+        !Expect(ReadFile(client.get(),
+                    response.data(),
+                    static_cast<DWORD>(response.size()),
+                    &bytesRead,
+                    nullptr) &&
+                    bytesRead != 0,
+            L"The detached interactive request did not receive a launch response."))
+    {
+        return false;
+    }
+
+    const ULONGLONG disconnectedAt = GetTickCount64();
+    client.reset();
+    const bool completed = serverThread.WaitForCompletion(3'000);
+    const ULONGLONG elapsed = GetTickCount64() - disconnectedAt;
+    return Expect(completed, L"The detached interactive worker did not finish.") &&
+           Expect(elapsed >= 500,
+               L"Closing the control connection terminated the interactive child early.") &&
+           Expect(finishCapture.invoked && finishCapture.processTreeExited,
+               L"The detached interactive worker did not confirm process-tree completion.");
+}
+
+[[nodiscard]] bool TestInteractiveModeDispatchesAuthenticatedCaller()
 {
     const std::wstring pipeName = L"\\\\.\\pipe\\launch-as-broker-unsupported-mode-test-" +
                                   std::to_wstring(GetCurrentProcessId());
@@ -192,7 +266,7 @@ class SessionServerThread final
         nullptr));
     launch_as::UniqueHandle stopEvent(CreateEventW(nullptr, TRUE, FALSE, nullptr));
     if (!Expect(static_cast<bool>(server) && static_cast<bool>(stopEvent),
-            L"Could not create the unsupported-mode test pipe."))
+            L"Could not create the interactive-mode test pipe."))
     {
         return false;
     }
@@ -201,17 +275,17 @@ class SessionServerThread final
     ServerThread serverThread(server.get(), stopEvent.get(), &capture);
     launch_as::UniqueHandle client(CreateFileW(
         pipeName.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr));
-    if (!Expect(static_cast<bool>(client), L"Could not connect to the unsupported-mode test pipe."))
+    if (!Expect(static_cast<bool>(client), L"Could not connect to the interactive-mode test pipe."))
     {
         return false;
     }
 
     constexpr char request[] =
-        R"json({"version":1,"requestId":"123e4567-e89b-12d3-a456-426614174000","operation":"launch","profileId":"LaunchAsUser","mode":"interactive","arguments":[],"workingDirectory":"C:\\repo"})json";
+        R"json({"version":1,"requestId":"123e4567-e89b-12d3-a456-426614174000","operation":"launch","profileId":"LaunchAsUser","mode":"interactive","arguments":[],"workingDirectory":"C:\\repo","interactive":{"leasePipe":"\\\\.\\pipe\\launch-as-interactive-123e4567e89b12d3a456426614174000","nonce":"6f9619ff-8b86-d011-b42d-00c04fc964ff"}})json";
     DWORD bytesWritten = 0;
     if (!Expect(WriteFile(client.get(), request, sizeof(request) - 1, &bytesWritten, nullptr) &&
                     bytesWritten == sizeof(request) - 1,
-            L"Could not send the unsupported-mode broker request."))
+            L"Could not send the interactive-mode broker request."))
     {
         return false;
     }
@@ -223,19 +297,30 @@ class SessionServerThread final
                     static_cast<DWORD>(response.size()),
                     &bytesRead,
                     nullptr),
-            L"Could not read the unsupported-mode broker response."))
+            L"Could not read the interactive-mode broker response."))
     {
         return false;
     }
     response.resize(bytesRead);
-    return Expect(serverThread.connected(), L"The unsupported-mode test pipe did not connect.") &&
-           Expect(!capture.invoked, L"The broker dispatched the unsupported interactive mode.") &&
+    return Expect(serverThread.connected(), L"The interactive-mode test pipe did not connect.") &&
+           Expect(capture.invoked, L"The broker did not dispatch the interactive request.") &&
+           Expect(capture.request.operation ==
+                          launch_as::broker::RequestOperation::InteractiveLaunch &&
+                      capture.request.interactive.leasePipe ==
+                          L"\\\\.\\pipe\\launch-as-interactive-"
+                          L"123e4567e89b12d3a456426614174000" &&
+                      capture.request.interactive.nonce == L"6f9619ff-8b86-d011-b42d-00c04fc964ff",
+               L"The broker changed the private interactive payload before dispatch.") &&
+           Expect(!capture.callerLogonSid.empty() &&
+                      IsValidSid(const_cast<BYTE*>(capture.callerLogonSid.data())) &&
+                      capture.callerSessionId != 0 && capture.callerSessionId != MAXDWORD,
+               L"Interactive dispatch omitted the authenticated caller session identity.") &&
            Expect(response.find("\"requestId\":\"123e4567-e89b-12d3-a456-426614174000\"") !=
                       std::string::npos,
-               L"The unsupported-mode response did not preserve the request id.") &&
-           Expect(response.find("\"reasonCode\":\"mode_not_supported\"") != std::string::npos &&
-                      response.find("\"win32Error\":50") != std::string::npos,
-               L"The broker did not return the stable unsupported-mode response.");
+               L"The interactive-mode response did not preserve the request id.") &&
+           Expect(response.find("\"reasonCode\":\"session_limit_reached\"") != std::string::npos &&
+                      response.find("\"win32Error\":170") != std::string::npos,
+               L"The broker did not dispatch through the launch handler.");
 }
 
 [[nodiscard]] bool TestWorkerReleasesHeldControlClient()
@@ -354,8 +439,9 @@ int wmain()
         return 1;
     }
     response.resize(bytesRead);
-    if (!TestInteractiveModeRejected() || !TestUnconfirmedTeardownFinishesSession() ||
-        !TestWorkerReleasesHeldControlClient())
+    if (!TestInteractiveModeDispatchesAuthenticatedCaller() ||
+        !TestUnconfirmedTeardownFinishesSession() || !TestWorkerReleasesHeldControlClient() ||
+        !TestInteractiveWorkerOwnsDetachedProcessTree())
     {
         return 1;
     }

@@ -33,6 +33,14 @@ class BrokerControlConnection final
     std::wstring requestId_;
 };
 
+[[nodiscard]] bool BuildInteractiveLaunchRequest(std::wstring_view requestId,
+    std::wstring_view profileId, std::span<const std::wstring> arguments,
+    std::wstring_view workingDirectory, std::wstring_view leasePipe, std::wstring_view nonce,
+    std::string& request);
+[[nodiscard]] DWORD LaunchBrokerInteractive(std::wstring_view profileId,
+    std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
+    std::wstring_view leasePipe, std::wstring_view nonce, BrokerControlConnection& connection,
+    DWORD& processId);
 [[nodiscard]] DWORD LaunchBrokerConsole(std::wstring_view profileId,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
     const TerminalPipeNames& pipes, COORD terminalSize, bool inheritCursor,

@@ -13,6 +13,32 @@
 
 int wmain()
 {
+    const std::wstring cancelledPipeName = L"\\\\.\\pipe\\launch-as-interactive-cancel-test-" +
+                                           std::to_wstring(GetCurrentProcessId()) + L"-" +
+                                           std::to_wstring(GetTickCount64());
+    HANDLE cancelledPipe = nullptr;
+    if (!Expect(launch_as::CreateInteractiveDesktopLeasePipe(cancelledPipeName, cancelledPipe) ==
+                    ERROR_SUCCESS,
+            L"Could not create the coordinator cancellation pipe."))
+    {
+        return 1;
+    }
+    HANDLE launchCompleted = CreateEventW(nullptr, TRUE, TRUE, nullptr);
+    if (!Expect(launchCompleted != nullptr, L"Could not create the launch-completion event."))
+    {
+        CloseHandle(cancelledPipe);
+        return 1;
+    }
+    const DWORD cancelledError = launch_as::CoordinateInteractiveDesktopLease(
+        cancelledPipe, L"6f9619ff-8b86-d011-b42d-00c04fc964ff", launchCompleted);
+    CloseHandle(launchCompleted);
+    CloseHandle(cancelledPipe);
+    if (!Expect(cancelledError == ERROR_CANCELLED,
+            L"The coordinator did not cancel after broker launch completion."))
+    {
+        return 1;
+    }
+
     const std::wstring pipeName = L"\\\\.\\pipe\\launch-as-interactive-handshake-test-" +
                                   std::to_wstring(GetCurrentProcessId()) + L"-" +
                                   std::to_wstring(GetTickCount64());

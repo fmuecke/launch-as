@@ -15,12 +15,19 @@
 namespace launch_as
 {
 
+enum class SessionMode
+{
+    Console,
+    Interactive
+};
+
 struct Options
 {
     std::wstring username;
     std::filesystem::path workingDirectory;
     std::filesystem::path executablePath;
     std::vector<std::wstring> processArguments;
+    SessionMode sessionMode = SessionMode::Console;
 };
 
 void PrintUsage();

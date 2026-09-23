@@ -60,6 +60,7 @@ $artifactPaths = @(
     (Join-Path $configurationDirectory 'launch-as-conhost.exe')
     (Join-Path $configurationDirectory 'LauncherBrokerChildIdentityProbe.exe')
     (Join-Path $configurationDirectory 'LauncherBrokerProcessAccessProbe.exe')
+    (Join-Path $configurationDirectory 'LauncherInteractiveTargetProbe.exe')
     (Join-Path $PSScriptRoot 'Invoke-BrokerDemandStartTest.ps1')
     (Join-Path $PSScriptRoot 'Install-LauncherAcceptanceFixture.ps1')
     (Join-Path $PSScriptRoot 'LauncherAcceptanceLogon.cs')
@@ -70,6 +71,7 @@ $artifactPaths = @(
     (Join-Path $PSScriptRoot 'Invoke-BrokerConsoleAcceptanceTest.ps1')
     (Join-Path $PSScriptRoot 'Invoke-BrokerProbeAcceptanceTest.ps1')
     (Join-Path $PSScriptRoot 'Invoke-BrokerSameAccountConcurrencyTest.ps1')
+    (Join-Path $PSScriptRoot 'Invoke-BrokerInteractiveAcceptanceTest.ps1')
 )
 foreach ($artifactPath in $artifactPaths) {
     if (-not (Test-Path -LiteralPath $artifactPath -PathType Leaf)) {

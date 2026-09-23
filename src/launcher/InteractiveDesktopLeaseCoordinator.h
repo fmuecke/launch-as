@@ -11,6 +11,8 @@ namespace launch_as
 {
 
 [[nodiscard]] DWORD CreateInteractiveDesktopLeasePipe(std::wstring_view pipeName, HANDLE& pipe);
+[[nodiscard]] DWORD CoordinateInteractiveDesktopLease(
+    HANDLE pipe, std::wstring_view expectedNonce, HANDLE launchCompletedEvent);
 [[nodiscard]] DWORD ServeInteractiveDesktopLease(
     HANDLE connectedPipe, std::wstring_view expectedNonce);
 

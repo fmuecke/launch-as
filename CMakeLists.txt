@@ -210,6 +210,38 @@ set_target_properties(launch_as_admin PROPERTIES
 )
 
 if(BUILD_TESTING)
+    add_executable(LauncherOptionsTests
+        tests/LauncherOptionsTests.cpp
+        src/launcher/LauncherOptions.cpp
+        src/launcher/LauncherOptions.h
+    )
+    configure_launch_as_test_target(LauncherOptionsTests launcher common)
+
+    add_test(
+        NAME launcher.options
+        COMMAND "$<TARGET_FILE:LauncherOptionsTests>"
+    )
+    set_tests_properties(launcher.options PROPERTIES
+        LABELS "launcher;unit"
+    )
+
+    add_executable(LauncherBrokerControlClientTests
+        tests/BrokerControlClientTests.cpp
+    )
+    target_link_libraries(LauncherBrokerControlClientTests PRIVATE
+        launch_as::launcher
+    )
+    configure_launch_as_test_target(
+        LauncherBrokerControlClientTests launcher protocol common)
+
+    add_test(
+        NAME launcher.broker_control_client
+        COMMAND "$<TARGET_FILE:LauncherBrokerControlClientTests>"
+    )
+    set_tests_properties(launcher.broker_control_client PROPERTIES
+        LABELS "launcher;unit"
+    )
+
     add_executable(LauncherBrokerProtocolTests
         tests/BrokerProtocolTests.cpp
         src/protocol/BrokerProtocol.cpp
@@ -460,6 +492,8 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/Invoke-LauncherAcceptanceTest.ps1"
             -ConcurrencyPath
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/Invoke-BrokerSameAccountConcurrencyTest.ps1"
+            -InteractiveAcceptancePath
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Invoke-BrokerInteractiveAcceptanceTest.ps1"
     )
     set_tests_properties(launcher.sandbox_acceptance_contract PROPERTIES
         LABELS "build;unit"
@@ -493,6 +527,7 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
             Invoke-BrokerConsoleAcceptanceTest.ps1
             Invoke-BrokerProbeAcceptanceTest.ps1
             Invoke-BrokerSameAccountConcurrencyTest.ps1
+            Invoke-BrokerInteractiveAcceptanceTest.ps1
             Run-InteractiveSessionProbeInSandbox.ps1
             WindowsSandboxAcceptanceSupport.psm1)
         string(REGEX REPLACE "\\.psm?1$" "" script_test_name "${script_name}")

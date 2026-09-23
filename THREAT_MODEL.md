@@ -6,21 +6,22 @@ Assessment date: 2026-09-15. Source baseline:
 `45209b376a59c673592e80002202513c77917304`.
 
 Interactive-path update: 2026-09-23, working tree based on
-`15d7274df612b8153527e285ce616bf7229668e0`.
+`6a8d5582a3e2133076e5da43ae475bc3b146a731`.
 
 ## 1. Assessment summary
 
 `launch-as` reduces the damage a workload can cause by running it under a managed local
 account, with an independent logon session and reduced token privileges. A LocalSystem broker
-owns password generation, logon, and process creation. The public client currently receives
-console terminal I/O and status, without receiving the account password or a reusable primary
-token. A private interactive-development path can place a GUI target on the caller's shared
-desktop while preserving broker ownership of those secrets and handles.
+owns password generation, logon, and process creation. The public client receives console terminal
+I/O and status, or coordinates a temporary interactive-desktop ACL lease, without receiving the
+account password or a reusable primary token. Public interactive mode can place a GUI target on the
+caller's shared desktop while preserving broker ownership of those secrets and handles.
 
 The central security claim is conditional: the workload should not gain access to the caller's
-processes through the caller's logon SID, or to the caller's interactive desktop through launcher
-placement. Files, services, network endpoints, and other objects that already admit the managed
-account remain accessible. A distinct logon SID does not override permissive object ACLs.
+processes through the caller's logon SID. Console mode also keeps the workload off the caller's
+interactive desktop; interactive mode deliberately opens that UI surface. Files, services, network
+endpoints, and other objects that already admit the managed account remain accessible. A distinct
+logon SID does not override permissive object ACLs.
 
 This is an alternate-account launcher with blast-radius controls. It provides no VM, container,
 AppContainer, filesystem allow-list, network isolation, or isolation between workloads sharing
@@ -28,10 +29,11 @@ one managed account. The privileged broker is part of the trusted computing base
 compromise can compromise the host.
 
 **Assessment status:** the original assessment was source-based, with deployment assumptions and
-open validation items below. The interactive-path update passed the 41-test host suite plus a
-fresh elevated, interactive Windows Sandbox probe at the application seam. Focused tests cover the
-private control-pipe contract separately. This is not installed-service end-to-end interactive
-acceptance, and it does not establish that a deployed installation satisfies the full model.
+open validation items below. The interactive-path update passed the 44-test host suite plus one
+fresh installed-service end-to-end Windows Sandbox acceptance through the public CLI. That run
+covered normal completion, not crash recovery, RDP, Fast User Switching, launcher disappearance,
+or broker restart, and it does not establish that every deployed installation satisfies the full
+model.
 
 ## 2. Scope and assumptions
 
@@ -136,7 +138,7 @@ The important boundaries are:
   protocol intent flag, not an independent security boundary.
 
 [BrokerProtocol.cpp](src/BrokerProtocol.cpp) uses a versioned, bounded parser: 64 KiB messages,
-at most 64 arguments, and validated identifiers and pipe names. The private interactive object
+at most 64 arguments, and validated identifiers and pipe names. The interactive object
 accepts only a lease pipe and nonce; attempts to supply session or SID identity are rejected as
 unknown fields. The broker instead supplies caller session and logon SID from pipe-client
 impersonation. Request IDs correlate responses; they do not authenticate the server.
@@ -184,7 +186,7 @@ writers. It does not contain a primary token or the broker control pipe. The dep
 [console host](src/PseudoConsoleHost.cpp) opens terminal pipes by name and starts the requested
 executable without general handle inheritance.
 
-The private interactive path assigns the restricted target token to the authenticated caller's
+The public interactive path assigns the restricted target token to the authenticated caller's
 captured session, acquires a nonce-bound lease for the target token's own logon SID, and creates the
 target suspended on `WinSta0\\Default`. The broker, not the coordinator, retains the target token,
 process, profile, Job, and lease connection. The temporary ACEs include `READ_CONTROL` and the
@@ -211,11 +213,12 @@ drive job termination. The implementation admits four sessions globally, two per
 eight pipe workers, with bounded request I/O waits. These bounds limit broker admission, not
 workload CPU, memory, disk, process count, network use, or repeated launch frequency.
 
-For a private interactive launch, control disconnect does not end the session. The broker worker
+For an interactive launch, control disconnect does not end the session. The broker worker
 owns the detached Job until the complete tree exits; service stop or another teardown path
 terminates and waits for the Job before releasing the desktop lease. This normal ordering is
-covered by focused worker tests and a fresh live Sandbox application-seam probe. Coordinator or
-broker crash recovery and one installed-service end-to-end acceptance test remain open.
+covered by focused worker tests and a fresh installed-service Sandbox acceptance through the public
+CLI. Coordinator or broker crash recovery, RDP, Fast User Switching, and launcher disappearance
+remain open.
 
 Jobs cover associated processes. Work delegated to another service or mechanism outside the job
 is not automatically contained; Microsoft explicitly documents exceptions to child association.
@@ -341,7 +344,7 @@ installation for destructive, elevated, network-redirection, and failure-injecti
 | Protocol and caller authorization | `BrokerProtocolTests`, `BrokerPipeTests`, `BrokerCallerPolicyTests`, `BrokerCommandTests` | Unrelated-account and managed-account direct clients denied; spoofed identities rejected; management denied without actual elevation; stopped-service fake-server test. |
 | Account, password, and token | `BrokerPasswordTests`, `BrokerEnrollmentStoreTests`, `BrokerAccountProvisioningTests` | SID replacement, record/key tampering, direct powerful privilege and privileged-group cases; secret absence from IPC/logs; inspect complete minted token. |
 | Installation and storage | `BrokerDataDirectoryTests`, `BrokerServiceInstallerTests`, setup contract tests | Actual file/directory owners and ACLs, service change rights, policy/key read/write denial, reparse/ownership cases, partial update recovery. |
-| Process and UI separation | `BrokerProcessLauncherTests`, `BrokerChildIdentityProbeTests`, `InteractiveLeaseHandshakeProbe`; `Invoke-BrokerProbeAcceptanceTest.ps1`, fresh interactive Sandbox probe | Console: distinct logon SID, caller's logon SID absent from child `TokenGroups`, and denied `PROCESS_VM_READ`/`PROCESS_TERMINATE` against controlled caller targets. Interactive: combine installed control-pipe dispatch with real GUI launch/lease cleanup in one test; add crash, RDP, Fast User Switching, launcher-disappearance, and broker-restart cases. |
+| Process and UI separation | `BrokerProcessLauncherTests`, `BrokerChildIdentityProbeTests`, `InteractiveLeaseHandshakeProbe`; `Invoke-BrokerProbeAcceptanceTest.ps1`, installed interactive Sandbox acceptance | Console: distinct logon SID, caller's logon SID absent from child `TokenGroups`, and denied `PROCESS_VM_READ`/`PROCESS_TERMINATE` against controlled caller targets. Interactive normal completion now combines installed control-pipe dispatch with real GUI launch and lease cleanup; add crash, RDP, Fast User Switching, launcher-disappearance, and broker-restart cases. |
 | Terminal and disconnect | `BrokerTerminalBridgeTests`, `TerminalDisconnectTests`; `Invoke-BrokerConsoleAcceptanceTest.ps1` | Installed exit-code/resize behavior, abrupt client death, service stop, descendants, inherited-handle audit, terminal connection races. |
 | Concurrency and profile lifetime | `Invoke-BrokerSameAccountConcurrencyTest.ps1` | Two-account overlap, fifth global launch rejection, independent teardown, held profile handles, unconfirmed termination, management during draining. |
 | Host-resource exposure | Deployment-specific probes | Managed-account filesystem and local-service access, outbound/loopback connectivity, same-account interference, indirect process creation, persistence and resource exhaustion. |
@@ -368,7 +371,7 @@ Sandbox token, or redirected-stdin launch does not substitute for that environme
 - Treat terminal output, shared writable files, and same-account peers as untrusted.
 - Reassess this model after changes to IPC, install paths, account ownership, token creation,
   inherited handles, profiles, networking, or session lifetime.
-- Before public GUI mode, complete the separate assessment of authenticated session selection,
-  window-station/desktop ACLs, RDP/session switching, crash cleanup, and installed end-to-end
-  behavior. Console evidence and the current split private-path evidence do not establish the full
-  shared-desktop contract.
+- Treat public GUI mode as a shared-desktop compatibility path, not an isolation boundary. Preserve
+  authenticated session selection and exact child-logon-SID ACL cleanup. Add RDP/session switching,
+  crash cleanup, launcher-disappearance, and broker-restart evidence before making claims about
+  those lifecycles; the normal-completion acceptance does not establish them.

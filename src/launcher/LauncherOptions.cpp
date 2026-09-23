@@ -20,10 +20,12 @@ void PrintUsage()
 {
     std::wcerr << LR"usage(Usage:
   launch-as.exe [run] --user <launch-as-user>
+                      [--mode console|interactive]
                       [--working-directory <directory>]
                       -- <absolute-executable> [arguments...]
 
-  Starts a console session through launch-as-broker. Create or take over the account first with the
+  Starts a console session by default, or a GUI process on the caller's shared desktop in
+  interactive mode, through launch-as-broker. Create or take over the account first with the
   elevated launch-as-admin command. The client never accepts or stores passwords.
 
 )usage";
@@ -42,6 +44,7 @@ std::optional<Options> ParseOptions(std::span<wchar_t*> arguments)
 
     Options options;
     bool processArgumentsStarted = false;
+    bool modeSeen = false;
     for (std::size_t index = firstOptionIndex; index < arguments.size(); ++index)
     {
         const std::wstring_view name(arguments[index]);
@@ -67,6 +70,22 @@ std::optional<Options> ParseOptions(std::span<wchar_t*> arguments)
         else if (name == L"--working-directory")
         {
             options.workingDirectory = value;
+        }
+        else if (name == L"--mode" && !modeSeen)
+        {
+            modeSeen = true;
+            if (value == L"console")
+            {
+                options.sessionMode = SessionMode::Console;
+            }
+            else if (value == L"interactive")
+            {
+                options.sessionMode = SessionMode::Interactive;
+            }
+            else
+            {
+                return std::nullopt;
+            }
         }
         else
         {

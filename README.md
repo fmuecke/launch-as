@@ -11,17 +11,18 @@ The current stable version is still v0.3.2. [Browse the stable v0.3.2 version](h
   can obtain `PROCESS_VM_READ` and `PROCESS_TERMINATE`, allowing memory reads and termination.
   Protected processes or processes with custom DACLs may not be accessible.
 
-**1.2.0-preview · Windows x64 · console programs only**
+**1.2.0-preview · Windows x64 · console and shared-desktop GUI programs**
 
-`launch-as` starts a console program as a **launch-as-managed local standard account** through the
+`launch-as` starts a program as a **launch-as-managed local standard account** through the
 `launch-as-broker` Windows service. The client never accepts, reads, stores, or transmits the
 account password. The broker creates an independent logon session, so the child does not inherit
 the caller's logon SID or its default access to the caller's processes.
 
 This is a general-purpose alternate-account launcher: its authorised caller can choose a configured
-launch-as-managed account and any absolute executable. It is blast-radius reduction, not a sandbox: it does not
-protect against a local administrator or kernel-level attacker. GUI applications are out of scope
-for this version.
+launch-as-managed account and any absolute executable. It is blast-radius reduction, not a sandbox:
+it does not protect against a local administrator or kernel-level attacker. Interactive mode puts
+the target on the caller's shared desktop, so screen, window, clipboard, and input interaction are
+intentionally possible even though the target retains an independent logon SID.
 
 ## Install the binary package
 
@@ -101,6 +102,21 @@ From a normal terminal, launch a configured launch-as-managed account in the cur
 creates the terminal data pipes, and returns the target program's exit code. The broker owns the
 temporary launch password and kills the console job when the client control connection closes.
 
+For a GUI program, select interactive mode explicitly:
+
+```powershell
+.\launch-as.exe `
+    --mode interactive `
+    --user LaunchAsUser `
+    --working-directory C:\dev\project `
+    -- C:\Windows\System32\notepad.exe
+```
+
+The launcher holds a temporary ACL lease for the target's unique logon SID on the caller's
+`WinSta0\Default` objects. It stays running until the complete GUI process tree exits and the broker
+releases that lease. Interactive mode deliberately shares the caller's UI surface; use console mode
+or a separate RDP, Windows Sandbox, or VM session for workloads that must not access that surface.
+
 ## Build and test
 
 The source build requires Visual Studio/MSVC, a Windows SDK, CMake 3.25+, PowerShell, `ninja`, and
@@ -138,23 +154,26 @@ UAC prompt. The existing elevated Sandbox user creates `LaunchAsDevCaller`, temp
 Administrators so that its SID becomes the broker's authorised installer, then removes that group
 membership. A fresh standard-user logon with a real visible console runs the acceptance suite
 against the reserved `LaunchAsDevTestUser` managed account. The workflow checks console identity,
-process isolation, disconnect teardown, and same-account concurrency, returns the result through
-the shared test directory, restores temporary desktop permissions, and destroys the guest.
+process isolation, disconnect teardown, same-account concurrency, and one installed-service
+interactive GUI launch through the public CLI. It returns the result through the shared test
+directory, restores temporary desktop permissions, and destroys the guest.
 
 No test entry point requires a broker service or managed test account on the host. Interactive
 acceptance requires Windows Sandbox with `wsb.exe` and a visible guest desktop, but no manual guest
 interaction. The production broker service and pipe names are intentional: they exist only inside
 the disposable guest and cannot conflict with a host installation.
 
-The probe confirms a distinct logon SID, no interactive windows, and denied `VM_READ` and
-`TERMINATE` access to the caller's process. These are blast-radius controls, not protection from a
-local administrator or kernel-level attacker.
+The console probe confirms a distinct logon SID, no interactive windows, and denied `VM_READ` and
+`TERMINATE` access to the caller's process. The interactive probe confirms caller-session
+`WinSta0\Default` placement, a different target logon SID, a visible window, and lease release after
+the target tree exits. Crash recovery, RDP, Fast User Switching, launcher disappearance, and broker
+restart remain additional interactive acceptance cases. These are blast-radius controls, not
+protection from a local administrator or kernel-level attacker.
 
 ## Design
 
-[launch-as-broker-spec.md](launch-as-broker-spec.md) is the Phase 1 implementation specification.
-The `interactive` GUI adapter is deliberately deferred to Phase 2; Phase 1 provides console
-(ConPTY) launches only.
+[launch-as-broker-spec.md](launch-as-broker-spec.md) describes the console (ConPTY) and interactive
+shared-desktop adapters, their different lifetimes, and their security boundaries.
 
 ## License
 

@@ -39,5 +39,7 @@ int wmain(int argc, wchar_t* argv[])
     {
         return static_cast<int>(ExitFailure);
     }
-    return static_cast<int>(RunBrokerConsole(*account, *options));
+    return static_cast<int>(options->sessionMode == SessionMode::Interactive
+                                ? RunBrokerInteractive(*account, *options)
+                                : RunBrokerConsole(*account, *options));
 }

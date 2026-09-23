@@ -5,6 +5,7 @@
 #include "LaunchProcess.h"
 
 #include "BrokerControlClient.h"
+#include "InteractiveDesktopLeaseCoordinator.h"
 #include "TerminalBridge.h"
 #include "Win32Support.h"
 
@@ -12,8 +13,10 @@
 #include <array>
 #include <filesystem>
 #include <iostream>
+#include <objbase.h>
 #include <optional>
 #include <sddl.h>
+#include <thread>
 #include <vector>
 
 namespace launch_as
@@ -206,6 +209,115 @@ ExitCode RunBrokerConsole(const AccountIdentity& account, const Options& options
     }
     std::wcout << L"Broker terminal session ended.\n";
     return childExitCode;
+}
+
+ExitCode RunBrokerInteractive(const AccountIdentity& account, const Options& options)
+{
+    std::error_code currentDirectoryError;
+    const std::filesystem::path workingDirectory =
+        options.workingDirectory.empty() ? std::filesystem::current_path(currentDirectoryError)
+                                         : options.workingDirectory;
+    if (currentDirectoryError)
+    {
+        std::wcerr << L"Could not resolve the current working directory: "
+                   << currentDirectoryError.message().c_str() << L"\n";
+        return ExitFailure;
+    }
+    std::vector<std::wstring> arguments;
+    arguments.reserve(options.processArguments.size() + 1);
+    arguments.emplace_back(options.executablePath.native());
+    arguments.insert(
+        arguments.end(), options.processArguments.begin(), options.processArguments.end());
+
+    GUID identifier {};
+    if (FAILED(CoCreateGuid(&identifier)))
+    {
+        std::wcerr << L"Could not create the interactive lease identifier.\n";
+        return ExitFailure;
+    }
+    wchar_t nonceBuffer[39] {};
+    if (StringFromGUID2(identifier, nonceBuffer, static_cast<int>(std::size(nonceBuffer))) != 39)
+    {
+        std::wcerr << L"Could not format the interactive lease identifier.\n";
+        return ExitFailure;
+    }
+    const std::wstring nonce(nonceBuffer + 1, 36);
+    std::wstring pipeSuffix;
+    pipeSuffix.reserve(nonce.size());
+    for (const wchar_t character : nonce)
+    {
+        if (character != L'-')
+        {
+            pipeSuffix.push_back(character);
+        }
+    }
+    const std::wstring pipeName = L"\\\\.\\pipe\\launch-as-interactive-" + pipeSuffix;
+    HANDLE rawLeasePipe = nullptr;
+    const DWORD pipeError = CreateInteractiveDesktopLeasePipe(pipeName, rawLeasePipe);
+    if (pipeError != ERROR_SUCCESS)
+    {
+        std::wcerr << L"Could not create the interactive desktop lease pipe: "
+                   << FormatWindowsError(pipeError) << L"\n";
+        return ExitFailure;
+    }
+    UniqueHandle leasePipe(rawLeasePipe);
+    UniqueHandle launchCompleted(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+    if (!launchCompleted)
+    {
+        const DWORD eventError = GetLastError();
+        std::wcerr << L"Could not create the interactive launch event: "
+                   << FormatWindowsError(eventError) << L"\n";
+        return ExitFailure;
+    }
+
+    BrokerControlConnection connection;
+    DWORD processId = 0;
+    DWORD launchError = ERROR_IO_PENDING;
+    std::thread launchWorker(
+        [&]
+        {
+            launchError = LaunchBrokerInteractive(account.username,
+                arguments,
+                workingDirectory.native(),
+                pipeName,
+                nonce,
+                connection,
+                processId);
+            SetEvent(launchCompleted.get());
+        });
+    const DWORD coordinatorError =
+        CoordinateInteractiveDesktopLease(leasePipe.get(), nonce, launchCompleted.get());
+    launchWorker.join();
+    connection.Reset();
+    DisconnectNamedPipe(leasePipe.get());
+
+    if (launchError != ERROR_SUCCESS)
+    {
+        if (launchError == ERROR_PIPE_BUSY)
+        {
+            std::wcerr << L"The broker control pipe stayed busy while connecting.\n";
+        }
+        else if (launchError == ERROR_BUSY)
+        {
+            std::wcerr << L"The broker session limit has been reached. Wait for a session to "
+                          L"finish before starting another.\n";
+        }
+        else
+        {
+            std::wcerr << L"Could not launch the enrolled account in interactive mode: "
+                       << FormatWindowsError(launchError) << L"\n";
+        }
+        return ExitFailure;
+    }
+    if (coordinatorError != ERROR_SUCCESS)
+    {
+        std::wcerr << L"The interactive desktop lease failed: "
+                   << FormatWindowsError(coordinatorError) << L"\n";
+        return ExitFailure;
+    }
+    std::wcout << L"Interactive broker session as " << account.qualifiedUsername << L" (PID "
+               << processId << L") ended and its desktop lease was released.\n";
+    return ExitSuccess;
 }
 
 } // namespace launch_as

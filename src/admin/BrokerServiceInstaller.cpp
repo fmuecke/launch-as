@@ -28,11 +28,11 @@ constexpr wchar_t BrokerExecutableName[] = L"launch-as-broker.exe";
 constexpr wchar_t BrokerConhostExecutableName[] = L"launch-as-conhost.exe";
 constexpr wchar_t BrokerServiceDisplayName[] = L"launch-as Broker";
 constexpr wchar_t BrokerServiceDescription[] =
-    L"Launches managed accounts in isolated console sessions.";
+    L"Launches managed accounts in isolated console and interactive sessions.";
 constexpr wchar_t BrokerInstallDacl[] = L"D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200A9;;;BU)";
 constexpr wchar_t BrokerRequiredPrivileges[] =
     L"SeAssignPrimaryTokenPrivilege\0SeIncreaseQuotaPrivilege\0SeImpersonatePrivilege\0"
-    L"SeBackupPrivilege\0SeRestorePrivilege\0\0";
+    L"SeBackupPrivilege\0SeRestorePrivilege\0SeTcbPrivilege\0\0";
 constexpr DWORD ServiceStopTimeoutMilliseconds = 10'000;
 
 class ServiceHandle final

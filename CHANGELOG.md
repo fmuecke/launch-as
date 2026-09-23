@@ -2,6 +2,15 @@
 
 ## [unreleased] - 2026-09-21
 
+- Added: Public `--mode interactive` launches GUI targets on the authenticated caller's shared
+  `WinSta0\Default` desktop while retaining an independent managed-account logon SID.
+- Security: The launcher holds an exact child-logon-SID desktop ACL lease until the broker reports
+  the complete interactive process tree exited; the installed service now retains and enables
+  `SeTcbPrivilege` only for cross-session token assignment.
+- Tests: Added one fresh Windows Sandbox installed-service acceptance path through the public CLI,
+  including caller-session placement, a visible GUI window, independent logon SID, and lease
+  release. Crash recovery, RDP, Fast User Switching, launcher disappearance, and broker restart
+  remain additional acceptance cases.
 - Changed: (internal) Modfying integration tests are now encapsulated by using the Windows Sandbox as
   as test environment.
 - Changed: (internal) Restructured source according to the different aspects (admin, broker, common,

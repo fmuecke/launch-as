@@ -174,6 +174,51 @@ DWORD CreateInteractiveDesktopLeasePipe(std::wstring_view pipeName, HANDLE& pipe
     return ERROR_SUCCESS;
 }
 
+DWORD CoordinateInteractiveDesktopLease(
+    HANDLE pipe, std::wstring_view expectedNonce, HANDLE launchCompletedEvent)
+{
+    if (pipe == nullptr || pipe == INVALID_HANDLE_VALUE || launchCompletedEvent == nullptr ||
+        launchCompletedEvent == INVALID_HANDLE_VALUE)
+    {
+        return ERROR_INVALID_HANDLE;
+    }
+    DWORD pipeMode = PIPE_READMODE_MESSAGE | PIPE_NOWAIT;
+    if (!SetNamedPipeHandleState(pipe, &pipeMode, nullptr, nullptr))
+    {
+        const DWORD modeError = GetLastError();
+        return modeError;
+    }
+    for (;;)
+    {
+        const BOOL connected = ConnectNamedPipe(pipe, nullptr);
+        const DWORD connectError = connected ? ERROR_SUCCESS : GetLastError();
+        if (connected || connectError == ERROR_PIPE_CONNECTED)
+        {
+            break;
+        }
+        if (connectError != ERROR_PIPE_LISTENING)
+        {
+            return connectError;
+        }
+        const DWORD waitResult = WaitForSingleObject(launchCompletedEvent, 10);
+        if (waitResult == WAIT_OBJECT_0)
+        {
+            return ERROR_CANCELLED;
+        }
+        if (waitResult != WAIT_TIMEOUT)
+        {
+            return waitResult == WAIT_FAILED ? GetLastError() : ERROR_GEN_FAILURE;
+        }
+    }
+    pipeMode = PIPE_READMODE_MESSAGE | PIPE_WAIT;
+    if (!SetNamedPipeHandleState(pipe, &pipeMode, nullptr, nullptr))
+    {
+        const DWORD modeError = GetLastError();
+        return modeError;
+    }
+    return ServeInteractiveDesktopLease(pipe, expectedNonce);
+}
+
 DWORD ServeInteractiveDesktopLease(HANDLE connectedPipe, std::wstring_view expectedNonce)
 {
     if (connectedPipe == nullptr || connectedPipe == INVALID_HANDLE_VALUE)

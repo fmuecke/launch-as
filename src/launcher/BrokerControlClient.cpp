@@ -68,26 +68,9 @@ namespace
     return request.size() <= broker::MaximumMessageBytes;
 }
 
-} // namespace
-
-HANDLE BrokerControlConnection::get() const noexcept { return pipe_.get(); }
-
-std::wstring_view BrokerControlConnection::requestId() const noexcept { return requestId_; }
-
-void BrokerControlConnection::SetRequestId(std::wstring value) { requestId_ = std::move(value); }
-
-void BrokerControlConnection::Reset(HANDLE pipe) noexcept
+[[nodiscard]] DWORD CreateRequestId(std::wstring& requestId)
 {
-    pipe_.reset(pipe);
-    requestId_.clear();
-}
-
-DWORD LaunchBrokerConsole(std::wstring_view profileId, std::span<const std::wstring> arguments,
-    std::wstring_view workingDirectory, const TerminalPipeNames& pipes, COORD terminalSize,
-    bool inheritCursor, BrokerControlConnection& connection, DWORD& processId)
-{
-    connection.Reset();
-    processId = 0;
+    requestId.clear();
     GUID identifier {};
     if (FAILED(CoCreateGuid(&identifier)))
     {
@@ -99,19 +82,13 @@ DWORD LaunchBrokerConsole(std::wstring_view profileId, std::span<const std::wstr
     {
         return ERROR_GEN_FAILURE;
     }
-    const std::wstring requestId(requestIdBuffer + 1, 36);
-    std::string request;
-    if (!BuildLaunchRequest(requestId,
-            profileId,
-            arguments,
-            workingDirectory,
-            pipes,
-            terminalSize,
-            inheritCursor,
-            request))
-    {
-        return ERROR_INVALID_PARAMETER;
-    }
+    requestId.assign(requestIdBuffer + 1, 36);
+    return ERROR_SUCCESS;
+}
+
+[[nodiscard]] DWORD SendLaunchRequest(std::wstring requestId, const std::string& request,
+    BrokerControlConnection& connection, DWORD& processId)
+{
     HANDLE rawPipe = nullptr;
     const DWORD pipeError = broker::OpenBrokerControlPipe(rawPipe);
     if (pipeError != ERROR_SUCCESS)
@@ -119,7 +96,7 @@ DWORD LaunchBrokerConsole(std::wstring_view profileId, std::span<const std::wstr
         return pipeError;
     }
     connection.Reset(rawPipe);
-    connection.SetRequestId(requestId);
+    connection.SetRequestId(std::move(requestId));
     DWORD bytesWritten = 0;
     const BOOL wroteRequest = WriteFile(connection.get(),
         request.data(),
@@ -158,6 +135,109 @@ DWORD LaunchBrokerConsole(std::wstring_view profileId, std::span<const std::wstr
     }
     connection.Reset();
     return ERROR_INVALID_DATA;
+}
+
+} // namespace
+
+bool BuildInteractiveLaunchRequest(std::wstring_view requestId, std::wstring_view profileId,
+    std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
+    std::wstring_view leasePipe, std::wstring_view nonce, std::string& request)
+{
+    if (requestId.empty() || profileId.empty() || arguments.empty() || workingDirectory.empty() ||
+        leasePipe.empty() || nonce.empty() || !IsValidUtf16(requestId) ||
+        !IsValidUtf16(profileId) || !IsValidUtf16(workingDirectory) || !IsValidUtf16(leasePipe) ||
+        !IsValidUtf16(nonce))
+    {
+        return false;
+    }
+    for (const std::wstring& argument : arguments)
+    {
+        if (!IsValidUtf16(argument))
+        {
+            return false;
+        }
+    }
+    request = "{\"version\":1,\"requestId\":";
+    broker::AppendJsonString(request, requestId);
+    request += ",\"operation\":\"launch\",\"profileId\":";
+    broker::AppendJsonString(request, profileId);
+    request += ",\"mode\":\"interactive\",\"arguments\":[";
+    for (std::size_t index = 0; index < arguments.size(); ++index)
+    {
+        if (index != 0)
+        {
+            request.push_back(',');
+        }
+        broker::AppendJsonString(request, arguments[index]);
+    }
+    request += "],\"workingDirectory\":";
+    broker::AppendJsonString(request, workingDirectory);
+    request += ",\"interactive\":{\"leasePipe\":";
+    broker::AppendJsonString(request, leasePipe);
+    request += ",\"nonce\":";
+    broker::AppendJsonString(request, nonce);
+    request += "}}";
+    return request.size() <= broker::MaximumMessageBytes;
+}
+
+HANDLE BrokerControlConnection::get() const noexcept { return pipe_.get(); }
+
+std::wstring_view BrokerControlConnection::requestId() const noexcept { return requestId_; }
+
+void BrokerControlConnection::SetRequestId(std::wstring value) { requestId_ = std::move(value); }
+
+void BrokerControlConnection::Reset(HANDLE pipe) noexcept
+{
+    pipe_.reset(pipe);
+    requestId_.clear();
+}
+
+DWORD LaunchBrokerInteractive(std::wstring_view profileId, std::span<const std::wstring> arguments,
+    std::wstring_view workingDirectory, std::wstring_view leasePipe, std::wstring_view nonce,
+    BrokerControlConnection& connection, DWORD& processId)
+{
+    connection.Reset();
+    processId = 0;
+    std::wstring requestId;
+    const DWORD requestIdError = CreateRequestId(requestId);
+    if (requestIdError != ERROR_SUCCESS)
+    {
+        return requestIdError;
+    }
+    std::string request;
+    if (!BuildInteractiveLaunchRequest(
+            requestId, profileId, arguments, workingDirectory, leasePipe, nonce, request))
+    {
+        return ERROR_INVALID_PARAMETER;
+    }
+    return SendLaunchRequest(std::move(requestId), request, connection, processId);
+}
+
+DWORD LaunchBrokerConsole(std::wstring_view profileId, std::span<const std::wstring> arguments,
+    std::wstring_view workingDirectory, const TerminalPipeNames& pipes, COORD terminalSize,
+    bool inheritCursor, BrokerControlConnection& connection, DWORD& processId)
+{
+    connection.Reset();
+    processId = 0;
+    std::wstring requestId;
+    const DWORD requestIdError = CreateRequestId(requestId);
+    if (requestIdError != ERROR_SUCCESS)
+    {
+        return requestIdError;
+    }
+    std::string request;
+    if (!BuildLaunchRequest(requestId,
+            profileId,
+            arguments,
+            workingDirectory,
+            pipes,
+            terminalSize,
+            inheritCursor,
+            request))
+    {
+        return ERROR_INVALID_PARAMETER;
+    }
+    return SendLaunchRequest(std::move(requestId), request, connection, processId);
 }
 
 DWORD WaitForBrokerConsoleExit(

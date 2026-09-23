@@ -18,13 +18,14 @@ namespace
 
 constexpr wchar_t BrokerServiceDisplayName[] = L"launch-as Broker";
 constexpr wchar_t BrokerServiceDescription[] =
-    L"Launches managed accounts in isolated console sessions.";
-constexpr std::array<std::wstring_view, 5> BrokerRequiredPrivileges {
+    L"Launches managed accounts in isolated console and interactive sessions.";
+constexpr std::array<std::wstring_view, 6> BrokerRequiredPrivileges {
     L"SeAssignPrimaryTokenPrivilege",
     L"SeIncreaseQuotaPrivilege",
     L"SeImpersonatePrivilege",
     L"SeBackupPrivilege",
     L"SeRestorePrivilege",
+    L"SeTcbPrivilege",
 };
 
 class ServiceHandle final

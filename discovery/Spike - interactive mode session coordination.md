@@ -210,3 +210,27 @@ the application seam while the pipe path is proven in focused tests. The public 
 yet create or retain the coordinator and emits only console requests. That public coordinator/CLI
 path plus installed interactive acceptance is the next feature slice. Crash recovery, RDP, Fast
 User Switching, launcher disappearance, and broker restart remain additional acceptance work.
+
+## Public coordinator and installed-service slice
+
+The public client now accepts `--mode console|interactive`, with console remaining the default.
+For interactive mode it creates a unique first-instance, SYSTEM-only lease pipe and nonce, sends
+their names in the otherwise identity-free broker request, and coordinates the lease from the
+caller's session. The launcher stays alive until the broker releases the lease after the complete
+GUI process tree exits. It never receives the managed-account password, target token, or target
+process handle.
+
+The installed service requires `SeTcbPrivilege` in its SCM required-privileges list so the broker
+can enable that privilege only while assigning the restricted target token to the authenticated
+caller's session. The first installed run exposed the omitted service configuration through
+`ERROR_NOT_ALL_ASSIGNED`; adding the privilege completed the intended least-duration enablement.
+
+A fresh Windows Sandbox run then exercised the public CLI, production-named installed service,
+authenticated caller identity, coordinator handshake, target creation, and release in one path.
+The target reported the caller's session, `WinSta0`, `Default`, and a logon SID different from the
+caller's; the caller observed the target's visible window; and the launcher returned success only
+after the target tree exited and the ACL lease was released. The retained passing run is
+`out/windows-sandbox-acceptance/1f50a9f293c64685a207f512d887f542`.
+
+This is one normal-completion acceptance case. Crash recovery, RDP, Fast User Switching, launcher
+disappearance, and broker restart remain additional acceptance work.

@@ -38,7 +38,11 @@ param(
 
     [Parameter(Mandatory)]
     [ValidateNotNullOrEmpty()]
-    [string] $ConcurrencyPath
+    [string] $ConcurrencyPath,
+
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
+    [string] $InteractiveAcceptancePath
 )
 
 Set-StrictMode -Version Latest
@@ -71,6 +75,9 @@ if (-not (Test-Path -LiteralPath $AcceptancePath -PathType Leaf)) {
 if (-not (Test-Path -LiteralPath $ConcurrencyPath -PathType Leaf)) {
     throw "The concurrency acceptance test does not exist: $ConcurrencyPath"
 }
+if (-not (Test-Path -LiteralPath $InteractiveAcceptancePath -PathType Leaf)) {
+    throw "The interactive launch acceptance test does not exist: $InteractiveAcceptancePath"
+}
 
 Import-Module $SupportModulePath -Force
 $singleSandboxList = @'
@@ -92,6 +99,7 @@ $demandStartText = Get-Content -LiteralPath $DemandStartPath -Raw
 $logonHelperText = Get-Content -LiteralPath $LogonHelperPath -Raw
 $standardCallerText = Get-Content -LiteralPath $StandardCallerPath -Raw
 $acceptanceText = Get-Content -LiteralPath $AcceptancePath -Raw
+$interactiveAcceptanceText = Get-Content -LiteralPath $InteractiveAcceptancePath -Raw
 $scriptText = @(
     $runnerText,
     $driverText,
@@ -100,6 +108,7 @@ $scriptText = @(
     $logonHelperText,
     $standardCallerText,
     $acceptanceText
+    $interactiveAcceptanceText
 ) -join `
     [Environment]::NewLine
 $immutableRevision = '7b4d862ab00465b06028b11ee4981c48c398602a'
@@ -140,6 +149,10 @@ foreach ($requiredText in @(
         'Invoke-LauncherAcceptanceTest.ps1',
         'LauncherBrokerChildIdentityProbe.exe',
         'LauncherBrokerProcessAccessProbe.exe',
+        'LauncherInteractiveTargetProbe.exe',
+        'Invoke-BrokerInteractiveAcceptanceTest.ps1',
+        '--mode',
+        'interactive',
         'launch-as-admin.exe',
         'launch-as-broker.exe',
         'launch-as-conhost.exe',

@@ -23,5 +23,6 @@ struct AccountIdentity
 [[nodiscard]] std::optional<AccountIdentity> ResolveLocalAccount(const std::wstring& username);
 [[nodiscard]] bool ValidateRunPaths(const Options& options);
 [[nodiscard]] ExitCode RunBrokerConsole(const AccountIdentity& account, const Options& options);
+[[nodiscard]] ExitCode RunBrokerInteractive(const AccountIdentity& account, const Options& options);
 
 } // namespace launch_as

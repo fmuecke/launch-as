@@ -5,12 +5,77 @@
 #include "InteractiveDesktopAclLease.h"
 
 #include <Aclapi.h>
+#include <Sddl.h>
 #include <algorithm>
+#include <string>
 
 namespace launch_as
 {
 namespace
 {
+
+class DesktopAclMutationLock final
+{
+  public:
+    ~DesktopAclMutationLock()
+    {
+        if (pipe_ != nullptr)
+        {
+            CloseHandle(pipe_);
+        }
+    }
+
+    [[nodiscard]] DWORD Acquire()
+    {
+        DWORD sessionId = MAXDWORD;
+        if (!ProcessIdToSessionId(GetCurrentProcessId(), &sessionId))
+        {
+            return GetLastError();
+        }
+        // The caller can create lease pipes even when its logon lacks access to
+        // the session's kernel-object namespace. A first pipe instance is exclusive.
+        PSECURITY_DESCRIPTOR descriptor = nullptr;
+        if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                L"D:P(A;;GA;;;SY)", SDDL_REVISION_1, &descriptor, nullptr))
+        {
+            return GetLastError();
+        }
+        SECURITY_ATTRIBUTES attributes {};
+        attributes.nLength = sizeof(attributes);
+        attributes.lpSecurityDescriptor = descriptor;
+        const std::wstring name = L"\\\\.\\pipe\\launch-as-desktop-acl-lock-" +
+                                  std::to_wstring(sessionId) +
+                                  L"-4a65a62e-3770-4b3f-9d80-76e06f40bd2b";
+        const ULONGLONG deadline = GetTickCount64() + 30'000;
+        for (;;)
+        {
+            HANDLE created = CreateNamedPipeW(name.c_str(),
+                PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+                1,
+                4096,
+                4096,
+                0,
+                &attributes);
+            if (created != INVALID_HANDLE_VALUE)
+            {
+                pipe_ = created;
+                LocalFree(descriptor);
+                return ERROR_SUCCESS;
+            }
+            const DWORD createError = GetLastError();
+            if (createError != ERROR_ACCESS_DENIED || GetTickCount64() >= deadline)
+            {
+                LocalFree(descriptor);
+                return createError;
+            }
+            Sleep(10);
+        }
+    }
+
+  private:
+    HANDLE pipe_ = nullptr;
+};
 
 [[nodiscard]] bool IsLogonSid(PSID sid) noexcept
 {
@@ -270,6 +335,12 @@ DWORD InteractiveDesktopAclLease::Acquire(PSID childLogonSid)
 
 DWORD InteractiveDesktopAclLease::Apply(ObjectLease& lease)
 {
+    DesktopAclMutationLock lock;
+    const DWORD lockError = lock.Acquire();
+    if (lockError != ERROR_SUCCESS)
+    {
+        return lockError;
+    }
     std::vector<BYTE> originalDescriptor;
     lease.status.readError = ReadSecurityDescriptor(lease.object, originalDescriptor);
     PACL originalDacl = nullptr;
@@ -359,6 +430,12 @@ DWORD InteractiveDesktopAclLease::Remove(ObjectLease& lease)
     if (!lease.leased)
     {
         return ERROR_SUCCESS;
+    }
+    DesktopAclMutationLock lock;
+    const DWORD lockError = lock.Acquire();
+    if (lockError != ERROR_SUCCESS)
+    {
+        return lockError;
     }
     std::vector<BYTE> descriptor;
     lease.status.removeError = ReadSecurityDescriptor(lease.object, descriptor);

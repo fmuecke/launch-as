@@ -441,6 +441,7 @@ BOOL CALLBACK IsWindowWithTitleVisible(HWND window, LPARAM context)
     DWORD launchError = accountCreateError;
     DWORD waitError = accountCreateError;
     DWORD releaseError = accountCreateError;
+    DWORD unconfirmedReleaseError = accountCreateError;
     DWORD targetExitCode = ERROR_CANCELLED;
     bool jobTreeExitedBeforeRelease = false;
     {
@@ -451,6 +452,10 @@ BOOL CALLBACK IsWindowWithTitleVisible(HWND window, LPARAM context)
         {
             launchError = application.Launch(request, caller, child);
             waitError = launchError;
+        }
+        if (launchError == ERROR_SUCCESS)
+        {
+            unconfirmedReleaseError = application.FinishSession(request, false);
         }
         if (launchError == ERROR_SUCCESS)
         {
@@ -527,6 +532,7 @@ BOOL CALLBACK IsWindowWithTitleVisible(HWND window, LPARAM context)
     result << "jobTreeExitedBeforeRelease=" << (jobTreeExitedBeforeRelease ? "true" : "false")
            << '\n';
     result << "releaseError=" << releaseError << '\n';
+    result << "unconfirmedReleaseError=" << unconfirmedReleaseError << '\n';
     result << "childCleanupSucceeded=" << (childCleanupSucceeded ? "true" : "false") << '\n';
     result << "accountDeleteError=" << accountDeleteError << '\n';
     result << "sessionIdMatchesCaller=" << (sessionIdMatchesCaller ? "true" : "false") << '\n';
@@ -541,9 +547,10 @@ BOOL CALLBACK IsWindowWithTitleVisible(HWND window, LPARAM context)
         targetLogonSidTextError == ERROR_SUCCESS && connectionHeld &&
         launchError == ERROR_SUCCESS && waitError == ERROR_SUCCESS &&
         targetExitCode == ERROR_SUCCESS && jobTreeExitedBeforeRelease &&
-        releaseError == ERROR_SUCCESS && childCleanupSucceeded &&
-        accountDeleteError == ERROR_SUCCESS && sessionIdMatchesCaller && windowStationIsWinSta0 &&
-        desktopIsDefault && logonSidMatchesLease && windowCreated && targetProbeSucceeded;
+        unconfirmedReleaseError == ERROR_BUSY && releaseError == ERROR_SUCCESS &&
+        childCleanupSucceeded && accountDeleteError == ERROR_SUCCESS && sessionIdMatchesCaller &&
+        windowStationIsWinSta0 && desktopIsDefault && logonSidMatchesLease && windowCreated &&
+        targetProbeSucceeded;
     result << "probeSucceeded=" << (success ? "true" : "false") << '\n';
     result.flush();
     return result.good() && success ? ERROR_SUCCESS : ERROR_ACCESS_DENIED;

@@ -248,7 +248,7 @@ DWORD BrokerApplication::Launch(
         const DWORD resumeError = child.Resume();
         if (resumeError != ERROR_SUCCESS)
         {
-            static_cast<void>(child.TerminateAndWaitForExit());
+            child.TerminateAndWaitForExitConfirmed();
             return complete(resumeError);
         }
         {
@@ -257,7 +257,7 @@ DWORD BrokerApplication::Launch(
                 interactiveLeasesByRequest_.emplace(request.requestId, std::move(lease));
             if (!inserted)
             {
-                static_cast<void>(child.TerminateAndWaitForExit());
+                child.TerminateAndWaitForExitConfirmed();
                 return complete(ERROR_ALREADY_EXISTS);
             }
         }
@@ -292,19 +292,31 @@ DWORD BrokerApplication::Launch(
     const DWORD validationError = ValidateChildLogonSid(child.process(), caller.logonSid);
     if (validationError != ERROR_SUCCESS)
     {
-        static_cast<void>(child.TerminateAndWaitForExit());
+        child.TerminateAndWaitForExitConfirmed();
         return complete(validationError);
     }
     const DWORD resumeError = child.Resume();
     if (resumeError != ERROR_SUCCESS)
     {
-        static_cast<void>(child.TerminateAndWaitForExit());
+        child.TerminateAndWaitForExitConfirmed();
     }
     return complete(resumeError);
 }
 
 DWORD BrokerApplication::FinishSession(const BrokerRequest& request, bool processTreeExited)
 {
+    if (!processTreeExited)
+    {
+        const std::array<std::wstring, 4> fields {
+            L"operation=launch",
+            AuditProfileId(L"profileId", request.profileId),
+            L"reason=process_tree_not_confirmed",
+            L"win32Error=" + std::to_wstring(ERROR_BUSY),
+        };
+        static_cast<void>(WriteBrokerAuditEvent(
+            EVENTLOG_ERROR_TYPE, BrokerAuditEvent::SessionTeardownFailed, fields));
+        return ERROR_BUSY;
+    }
     DWORD leaseError = ERROR_SUCCESS;
     if (request.operation == RequestOperation::InteractiveLaunch)
     {
@@ -328,13 +340,12 @@ DWORD BrokerApplication::FinishSession(const BrokerRequest& request, bool proces
         }
     }
     ReleaseSession(request.profileId);
-    if (!processTreeExited || leaseError != ERROR_SUCCESS)
+    if (leaseError != ERROR_SUCCESS)
     {
         const std::array<std::wstring, 4> fields {
             L"operation=launch",
             AuditProfileId(L"profileId", request.profileId),
-            L"reason=" + std::wstring(!processTreeExited ? L"process_tree_not_confirmed"
-                                                         : L"lease_release_failed"),
+            L"reason=lease_release_failed",
             L"win32Error=" + std::to_wstring(leaseError),
         };
         static_cast<void>(WriteBrokerAuditEvent(

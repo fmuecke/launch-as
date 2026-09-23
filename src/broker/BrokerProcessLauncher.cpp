@@ -346,7 +346,7 @@ void SetBrokerJobQueryFailureForTesting(bool fail) noexcept { failBrokerJobQuery
     const DWORD resumeError = child.Resume();
     if (resumeError != ERROR_SUCCESS)
     {
-        static_cast<void>(child.TerminateAndWaitForExit());
+        child.TerminateAndWaitForExitConfirmed();
     }
     return resumeError;
 }
@@ -492,15 +492,25 @@ bool BrokerChildProcess::TerminateAndWaitForExit() noexcept
         const DWORD remaining = now >= deadline ? 0 : static_cast<DWORD>(deadline - now);
         if (WaitForSingleObject(process_, remaining) != WAIT_OBJECT_0)
         {
-            Reset();
             return false;
         }
     }
     const ULONGLONG now = GetTickCount64();
     const DWORD remaining = now >= deadline ? 0 : static_cast<DWORD>(deadline - now);
     const bool processTreeExited = WaitForProcessTreeExit(remaining);
-    Reset();
+    if (processTreeExited)
+    {
+        Reset();
+    }
     return processTreeExited;
+}
+
+void BrokerChildProcess::TerminateAndWaitForExitConfirmed() noexcept
+{
+    while (!TerminateAndWaitForExit())
+    {
+        Sleep(100);
+    }
 }
 
 bool BrokerChildProcess::WaitForProcessTreeExit(DWORD timeoutMilliseconds) const noexcept
@@ -1015,7 +1025,7 @@ DWORD LaunchBrokerInteractiveProcess(HANDLE token, std::wstring_view accountName
     if (!OpenProcessToken(child.process(), TOKEN_QUERY, &childToken))
     {
         const DWORD childTokenError = GetLastError();
-        static_cast<void>(child.TerminateAndWaitForExit());
+        child.TerminateAndWaitForExitConfirmed();
         return releaseAfterFailure(childTokenError);
     }
     std::vector<BYTE> launchedLogonSid;
@@ -1033,7 +1043,7 @@ DWORD LaunchBrokerInteractiveProcess(HANDLE token, std::wstring_view accountName
     if (!identityMatches || launchedSessionError != ERROR_SUCCESS ||
         returnedBytes != sizeof(launchedSessionId) || launchedSessionId != targetSessionId)
     {
-        static_cast<void>(child.TerminateAndWaitForExit());
+        child.TerminateAndWaitForExitConfirmed();
         const DWORD validationError = launchedLogonSidError != ERROR_SUCCESS ? launchedLogonSidError
                                       : launchedSessionError != ERROR_SUCCESS ? launchedSessionError
                                                                               : ERROR_ACCESS_DENIED;
@@ -1105,7 +1115,7 @@ DWORD LaunchFixedBrokerProbe(HANDLE token, BrokerChildProcess& child)
     const DWORD resumeError = child.Resume();
     if (resumeError != ERROR_SUCCESS)
     {
-        static_cast<void>(child.TerminateAndWaitForExit());
+        child.TerminateAndWaitForExitConfirmed();
     }
     return resumeError;
 }

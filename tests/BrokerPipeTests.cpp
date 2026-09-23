@@ -47,14 +47,14 @@ void CaptureSessionFinished(
     }
 }
 
-[[nodiscard]] bool TestUnconfirmedTeardownFinishesSession()
+[[nodiscard]] bool TestUnconfirmedTeardownNotifiesSessionHandler()
 {
     launch_as::broker::BrokerRequest request;
     request.profileId = L"LaunchAsUser";
     SessionFinishCapture capture;
     launch_as::broker::FinishBrokerSession(CaptureSessionFinished, &capture, request, true, false);
     return Expect(capture.invoked,
-               L"The broker did not finish a session after an unconfirmed teardown.") &&
+               L"The broker did not report an unconfirmed teardown to the session handler.") &&
            Expect(!capture.processTreeExited,
                L"The broker did not report the unconfirmed process tree to the session handler.") &&
            Expect(capture.profileId == request.profileId,
@@ -440,8 +440,8 @@ int wmain()
     }
     response.resize(bytesRead);
     if (!TestInteractiveModeDispatchesAuthenticatedCaller() ||
-        !TestUnconfirmedTeardownFinishesSession() || !TestWorkerReleasesHeldControlClient() ||
-        !TestInteractiveWorkerOwnsDetachedProcessTree())
+        !TestUnconfirmedTeardownNotifiesSessionHandler() ||
+        !TestWorkerReleasesHeldControlClient() || !TestInteractiveWorkerOwnsDetachedProcessTree())
     {
         return 1;
     }

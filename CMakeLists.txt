@@ -707,6 +707,16 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
     )
     configure_launch_as_test_target(LauncherInteractiveAclLeaseProbe launcher)
 
+    add_executable(LauncherInteractiveAclLeaseConcurrencyProbe
+        tests/InteractiveAclLeaseConcurrencyProbe.cpp
+    )
+    target_link_libraries(LauncherInteractiveAclLeaseConcurrencyProbe PRIVATE
+        Advapi32
+        User32
+        launch_as::launcher
+    )
+    configure_launch_as_test_target(LauncherInteractiveAclLeaseConcurrencyProbe launcher)
+
     add_executable(LauncherInteractiveLeaseHandshakeTests
         tests/InteractiveLeaseHandshakeTests.cpp
     )

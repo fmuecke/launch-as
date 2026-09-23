@@ -61,6 +61,7 @@ $artifactPaths = @(
     (Join-Path $configurationDirectory 'LauncherBrokerChildIdentityProbe.exe')
     (Join-Path $configurationDirectory 'LauncherBrokerProcessAccessProbe.exe')
     (Join-Path $configurationDirectory 'LauncherInteractiveTargetProbe.exe')
+    (Join-Path $configurationDirectory 'LauncherInteractiveAclLeaseProbe.exe')
     (Join-Path $PSScriptRoot 'Invoke-BrokerDemandStartTest.ps1')
     (Join-Path $PSScriptRoot 'Install-LauncherAcceptanceFixture.ps1')
     (Join-Path $PSScriptRoot 'LauncherAcceptanceLogon.cs')

@@ -19,6 +19,7 @@ $systemResultPath = Join-Path $workDirectory 'system-session.txt'
 $probePath = Join-Path $workDirectory 'LauncherInteractiveSessionProbe.exe'
 $targetProbePath = Join-Path $workDirectory 'LauncherInteractiveTargetProbe.exe'
 $aclProbePath = Join-Path $workDirectory 'LauncherInteractiveAclLeaseProbe.exe'
+$aclConcurrencyProbePath = Join-Path $workDirectory 'LauncherInteractiveAclLeaseConcurrencyProbe.exe'
 $handshakeProbePath = Join-Path $workDirectory 'LauncherInteractiveLeaseHandshakeProbe.exe'
 $windowScriptPath = Join-Path $workDirectory 'Show-LauncherAcceptanceWindow.ps1'
 $canaryTitle = 'launch-as Sandbox acceptance caller'
@@ -32,6 +33,8 @@ $callerAccount = 'LaunchAsDevCaller'
 $callerCreated = $false
 $aclResultPath = $null
 $aclExitCodePath = $null
+$aclConcurrencyResultPath = $null
+$aclConcurrencyExitCodePath = $null
 $handshakeCoordinatorResultPath = $null
 $handshakeClientResultPath = $null
 $handshakeCoordinatorExitCodePath = $null
@@ -71,6 +74,8 @@ try {
         -Destination $targetProbePath
     Copy-Item -LiteralPath (Join-Path $SourceDirectory 'LauncherInteractiveAclLeaseProbe.exe') `
         -Destination $aclProbePath
+    Copy-Item -LiteralPath (Join-Path $SourceDirectory 'LauncherInteractiveAclLeaseConcurrencyProbe.exe') `
+        -Destination $aclConcurrencyProbePath
     Copy-Item -LiteralPath (Join-Path $SourceDirectory 'LauncherInteractiveLeaseHandshakeProbe.exe') `
         -Destination $handshakeProbePath
     Copy-Item -LiteralPath (Join-Path $SourceDirectory 'Show-LauncherAcceptanceWindow.ps1') `
@@ -284,6 +289,40 @@ try {
         throw "The standard-caller ACL lease probe failed with exit code '$probeExitCode'.`n$((Get-Content -LiteralPath $aclResultPath) -join [Environment]::NewLine)"
     }
 
+    $aclConcurrencyResultPath = Join-Path $aclResultDirectory 'acl-concurrency-result.txt'
+    $aclConcurrencyExitCodePath = Join-Path $aclResultDirectory 'acl-concurrency-exit-code.txt'
+    $aclConcurrencyWrapperPath = Join-Path $workDirectory 'Run-InteractiveAclLeaseConcurrencyProbe.cmd'
+    @(
+        '@echo off'
+        ('"{0}" "{1}"' -f $aclConcurrencyProbePath, $aclConcurrencyResultPath)
+        'set "probeExitCode=%ERRORLEVEL%"'
+        ('> "{0}" echo %probeExitCode%' -f $aclConcurrencyExitCodePath)
+        'exit /b %probeExitCode%'
+    ) | Set-Content -LiteralPath $aclConcurrencyWrapperPath -Encoding Ascii
+    $aclConcurrencyProbe = Start-Process `
+        -FilePath $env:ComSpec `
+        -ArgumentList @('/d', '/s', '/c', ('"{0}"' -f $aclConcurrencyWrapperPath)) `
+        -Credential $callerCredential `
+        -LoadUserProfile `
+        -WorkingDirectory $workDirectory `
+        -WindowStyle Hidden `
+        -PassThru
+    if (-not $aclConcurrencyProbe.WaitForExit(120000)) {
+        Stop-Process -Id $aclConcurrencyProbe.Id -Force -ErrorAction SilentlyContinue
+        throw 'The overlapping ACL lease probe timed out.'
+    }
+    if (-not (Test-Path -LiteralPath $aclConcurrencyResultPath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $aclConcurrencyExitCodePath -PathType Leaf)) {
+        throw 'The overlapping ACL lease probe omitted its result or exit code.'
+    }
+    $aclConcurrencyExitCode = [int] (Get-Content -LiteralPath $aclConcurrencyExitCodePath -Raw).Trim()
+    $aclConcurrencyResult = Read-ProbeResult -Path $aclConcurrencyResultPath
+    if ($aclConcurrencyExitCode -ne 0 -or
+        $aclConcurrencyResult['probeRounds'] -ne '40' -or
+        $aclConcurrencyResult['probeSucceeded'] -ne 'true') {
+        throw "Overlapping ACL leases failed with exit code '$aclConcurrencyExitCode'.`n$((Get-Content -LiteralPath $aclConcurrencyResultPath) -join [Environment]::NewLine)"
+    }
+
     $handshakeCoordinatorResultPath = Join-Path $aclResultDirectory 'handshake-coordinator-result.txt'
     $handshakeClientResultPath = Join-Path $aclResultDirectory 'handshake-client-result.txt'
     $handshakeCoordinatorExitCodePath = Join-Path $aclResultDirectory 'handshake-coordinator-exit-code.txt'
@@ -386,6 +425,7 @@ try {
         $handshakeClientResult['clientIsLocalSystem'] -ne 'true' -or
         $handshakeClientResult['connectionHeldAfterAcquire'] -ne 'true' -or
         $handshakeClientResult['acquireError'] -ne '0' -or
+        $handshakeClientResult['unconfirmedReleaseError'] -ne '170' -or
         $handshakeClientResult['releaseError'] -ne '0' -or
         $handshakeClientResult['sessionIdMatchesCaller'] -ne 'true' -or
         $handshakeClientResult['windowStationIsWinSta0'] -ne 'true' -or
@@ -421,8 +461,10 @@ try {
         "acl.daclSemanticallyRestored=$($aclResult['daclSemanticallyRestored'])"
         "acl.independentDaclSemanticallyRestored=$($aclResult['independentDaclSemanticallyRestored'])"
         "acl.probeSucceeded=$($aclResult['probeSucceeded'])"
+        "acl.concurrentProbeSucceeded=$($aclConcurrencyResult['probeSucceeded'])"
         "handshake.clientIsLocalSystem=$($handshakeClientResult['clientIsLocalSystem'])"
         "handshake.acquireError=$($handshakeClientResult['acquireError'])"
+        "handshake.unconfirmedReleaseError=$($handshakeClientResult['unconfirmedReleaseError'])"
         "handshake.releaseError=$($handshakeClientResult['releaseError'])"
         "handshake.independentDaclSemanticallyRestored=$($handshakeCoordinatorResult['independentDaclSemanticallyRestored'])"
         "handshake.probeSucceeded=$($handshakeClientResult['probeSucceeded'])"
@@ -447,6 +489,8 @@ catch {
             $systemResultPath,
             $aclResultPath,
             $aclExitCodePath,
+            $aclConcurrencyResultPath,
+            $aclConcurrencyExitCodePath,
             $handshakeCoordinatorResultPath,
             $handshakeClientResultPath,
             $handshakeCoordinatorExitCodePath,

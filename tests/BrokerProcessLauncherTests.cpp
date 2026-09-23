@@ -140,11 +140,11 @@ namespace
                processExited, L"The process assigned to the terminated broker Job did not exit.");
 }
 
-[[nodiscard]] bool TestTeardownFailureReturnsPromptly()
+[[nodiscard]] bool TestUnconfirmedTeardownRetainsJobUntilConfirmation()
 {
     launch_as::broker::BrokerChildProcess child;
-    if (!Expect(launch_as::broker::CreateBrokerJob(child) == ERROR_SUCCESS,
-            L"Could not create the broker teardown-failure test job."))
+    if (!Expect(launch_as::broker::LaunchDelayedBrokerChildForTesting(child) == ERROR_SUCCESS,
+            L"Could not launch the broker teardown-failure test child."))
     {
         return false;
     }
@@ -152,11 +152,22 @@ namespace
     const ULONGLONG start = GetTickCount64();
     const bool treeExited = child.TerminateAndWaitForExit();
     const ULONGLONG elapsed = GetTickCount64() - start;
+    const bool jobAndProcessRetained = child.job() != nullptr && child.process() != nullptr;
+    const bool processExited =
+        child.process() != nullptr && WaitForSingleObject(child.process(), 0) == WAIT_OBJECT_0;
     launch_as::broker::SetBrokerJobQueryFailureForTesting(false);
+    const bool confirmedAfterRecovery = child.TerminateAndWaitForExit();
     return Expect(!treeExited,
                L"The broker reported an unqueryable Job process tree as terminated.") &&
            Expect(elapsed < 1'000,
-               L"The broker did not return promptly after failing to query its Job process tree.");
+               L"The broker did not return promptly after failing to query its Job process "
+               L"tree.") &&
+           Expect(jobAndProcessRetained,
+               L"An unconfirmed teardown released its Job or process handle.") &&
+           Expect(processExited,
+               L"The injected query failure did not exercise a terminated child process.") &&
+           Expect(confirmedAfterRecovery && child.job() == nullptr,
+               L"The broker did not release the Job after exit was confirmed.");
 }
 
 [[nodiscard]] bool TestInteractiveLaunchRejectsIncompleteInputs()
@@ -178,7 +189,8 @@ namespace
 int wmain()
 {
     if (!TestWorkingDirectoryValidation() || !TestJobTerminationConfirmsActiveProcessZero() ||
-        !TestTeardownFailureReturnsPromptly() || !TestInteractiveLaunchRejectsIncompleteInputs())
+        !TestUnconfirmedTeardownRetainsJobUntilConfirmation() ||
+        !TestInteractiveLaunchRejectsIncompleteInputs())
     {
         return 1;
     }

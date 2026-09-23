@@ -32,6 +32,7 @@ class BrokerChildProcess final
     [[nodiscard]] bool ReadPseudoConsoleHostResult(
         DWORD& childExitCode, std::wstring& diagnostics) noexcept;
     [[nodiscard]] bool TerminateAndWaitForExit() noexcept;
+    void TerminateAndWaitForExitConfirmed() noexcept;
     [[nodiscard]] bool WaitForProcessTreeExit(DWORD timeoutMilliseconds) const noexcept;
 
   private:

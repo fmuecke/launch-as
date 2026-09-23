@@ -397,9 +397,16 @@ void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
             }
         }
     }
-    const bool processTreeExited = child.TerminateAndWaitForExit();
+    if (!child.TerminateAndWaitForExit())
+    {
+        FinishBrokerSession(
+            sessionFinishedHandler, sessionFinishedContext, request, sessionStarted, false);
+        // Keep the Job, desktop lease, and session slot owned by this worker until
+        // the complete tree is confirmed gone, including after a failed Job query.
+        child.TerminateAndWaitForExitConfirmed();
+    }
     FinishBrokerSession(
-        sessionFinishedHandler, sessionFinishedContext, request, sessionStarted, processTreeExited);
+        sessionFinishedHandler, sessionFinishedContext, request, sessionStarted, true);
     if (waitForControlClose)
     {
         WaitForControlConnectionClose(pipe, stopEvent);

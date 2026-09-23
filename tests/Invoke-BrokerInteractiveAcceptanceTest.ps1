@@ -32,6 +32,8 @@ if ($caller.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
 
 $launcher = Resolve-Path -LiteralPath $LauncherPath
 $probe = Resolve-Path -LiteralPath $ProbePath
+$aclLeaseProbe = Join-Path (Split-Path -Parent $launcher.Path) 'LauncherInteractiveAclLeaseProbe.exe'
+$null = Resolve-Path -LiteralPath $aclLeaseProbe
 $reportDirectory = Join-Path $ReportRoot (
     'launch-as-interactive-{0}' -f [guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($reportDirectory) | Out-Null
@@ -48,6 +50,7 @@ $reportAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
 Set-Acl -LiteralPath $reportDirectory -AclObject $reportAcl
 
 $reportPath = Join-Path $reportDirectory 'target.txt'
+$aclLeaseReportPath = Join-Path $reportDirectory 'acl-lease.txt'
 $stdoutPath = Join-Path $reportDirectory 'launcher.stdout.txt'
 $stderrPath = Join-Path $reportDirectory 'launcher.stderr.txt'
 $exitCodePath = Join-Path $reportDirectory 'launcher.exit-code.txt'
@@ -58,6 +61,16 @@ $callerSessionId = (Get-Process -Id $PID).SessionId
 $launcherProcess = $null
 
 try {
+    & $aclLeaseProbe $aclLeaseReportPath
+    $aclLeaseExitCode = $LASTEXITCODE
+    if (-not (Test-Path -LiteralPath $aclLeaseReportPath -PathType Leaf)) {
+        throw 'The installed caller ACL lease probe did not write its report.'
+    }
+    $aclLeaseReport = Get-Content -LiteralPath $aclLeaseReportPath -Raw
+    if ($aclLeaseExitCode -ne 0 -or $aclLeaseReport -notmatch '(?m)^probeSucceeded=true\s*$') {
+        throw "The installed caller could not lease its desktop (exit $aclLeaseExitCode).`n$aclLeaseReport"
+    }
+
     @(
         '@echo off'
         ('"{0}" --mode interactive --user "{1}" --working-directory "{2}" -- "{3}" "{4}" "{5}" 4000' -f `

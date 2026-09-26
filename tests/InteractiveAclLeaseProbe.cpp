@@ -97,6 +97,56 @@ namespace
     return result;
 }
 
+[[nodiscard]] DWORD ReadLeaseMask(HANDLE object, PSID sid, ACCESS_MASK& mask)
+{
+    mask = 0;
+    DWORD required = 0;
+    SECURITY_INFORMATION information = DACL_SECURITY_INFORMATION;
+    GetUserObjectSecurity(object, &information, nullptr, 0, &required);
+    const DWORD sizeError = GetLastError();
+    if (sizeError != ERROR_INSUFFICIENT_BUFFER || required == 0)
+    {
+        return sizeError == ERROR_SUCCESS ? ERROR_INVALID_SECURITY_DESCR : sizeError;
+    }
+    std::vector<BYTE> descriptor(required);
+    if (!GetUserObjectSecurity(object, &information, descriptor.data(), required, &required))
+    {
+        return GetLastError();
+    }
+    BOOL present = FALSE;
+    BOOL defaulted = FALSE;
+    PACL dacl = nullptr;
+    if (!GetSecurityDescriptorDacl(descriptor.data(), &present, &dacl, &defaulted))
+    {
+        return GetLastError();
+    }
+    if (!present || dacl == nullptr)
+    {
+        return ERROR_INVALID_ACL;
+    }
+    DWORD matches = 0;
+    for (DWORD index = 0; index < dacl->AceCount; ++index)
+    {
+        void* raw = nullptr;
+        if (!GetAce(dacl, index, &raw))
+        {
+            return GetLastError();
+        }
+        const auto* ace = static_cast<const ACCESS_ALLOWED_ACE*>(raw);
+        if (ace->Header.AceType == ACCESS_ALLOWED_ACE_TYPE &&
+            EqualSid(const_cast<DWORD*>(&ace->SidStart), sid))
+        {
+            if (ace->Header.AceFlags != 0)
+            {
+                return ERROR_INVALID_DATA;
+            }
+            ++matches;
+            mask = ace->Mask;
+        }
+    }
+    return matches == 1 ? ERROR_SUCCESS : ERROR_INVALID_DATA;
+}
+
 [[nodiscard]] bool LeaseSucceeded(const launch_as::InteractiveObjectAclLeaseStatus& result) noexcept
 {
     return result.openError == ERROR_SUCCESS && result.readError == ERROR_SUCCESS &&
@@ -203,6 +253,18 @@ int wmain(int argumentCount, wchar_t* arguments[])
 
     launch_as::InteractiveDesktopAclLease lease;
     const DWORD acquireError = leaseSid != nullptr ? lease.Acquire(leaseSid) : ERROR_INVALID_SID;
+    ACCESS_MASK windowStationMask = 0;
+    ACCESS_MASK desktopMask = 0;
+    const DWORD windowStationMaskError =
+        acquireError == ERROR_SUCCESS
+            ? ReadLeaseMask(snapshotWindowStation, leaseSid, windowStationMask)
+            : acquireError;
+    const DWORD desktopMaskError = acquireError == ERROR_SUCCESS
+                                       ? ReadLeaseMask(snapshotDesktop, leaseSid, desktopMask)
+                                       : acquireError;
+    const bool masksMatch = windowStationMaskError == ERROR_SUCCESS &&
+                            desktopMaskError == ERROR_SUCCESS && windowStationMask == 0x00020366 &&
+                            desktopMask == 0x000200cf;
     const DWORD releaseError = acquireError == ERROR_SUCCESS ? lease.Release() : acquireError;
     std::wstring finalWindowStationDacl;
     std::wstring finalDesktopDacl;
@@ -247,6 +309,9 @@ int wmain(int argumentCount, wchar_t* arguments[])
     output << "leaseSid=" << NarrowAscii(leaseSidText) << '\n';
     output << "sidError=" << sidError << '\n';
     output << "acquireError=" << acquireError << '\n';
+    output << "windowStationMask=" << windowStationMask << '\n';
+    output << "desktopMask=" << desktopMask << '\n';
+    output << "leaseMasksMatch=" << (masksMatch ? "true" : "false") << '\n';
     output << "releaseError=" << releaseError << '\n';
     WriteLease(output, "windowStation", windowStationLease);
     WriteLease(output, "desktop", desktopLease);
@@ -268,7 +333,7 @@ int wmain(int argumentCount, wchar_t* arguments[])
         elevationError == ERROR_SUCCESS && administratorError == ERROR_SUCCESS &&
         elevation.TokenIsElevated == 0 && !isAdministrator && sidError == ERROR_SUCCESS &&
         acquireError == ERROR_SUCCESS && releaseError == ERROR_SUCCESS && independentlyRestored &&
-        LeaseSucceeded(windowStationLease) && LeaseSucceeded(desktopLease);
+        masksMatch && LeaseSucceeded(windowStationLease) && LeaseSucceeded(desktopLease);
     output << "probeSucceeded=" << (success ? "true" : "false") << '\n';
     output.flush();
     const bool outputSucceeded = output.good();

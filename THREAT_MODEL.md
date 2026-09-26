@@ -189,9 +189,49 @@ executable without general handle inheritance.
 The public interactive path assigns the restricted target token to the authenticated caller's
 captured session, acquires a nonce-bound lease for the target token's own logon SID, and creates the
 target suspended on `WinSta0\\Default`. The broker, not the coordinator, retains the target token,
-process, profile, Job, and lease connection. The temporary ACEs include `READ_CONTROL` and the
-minimum object-specific GUI rights demonstrated by the live probe, but omit `WRITE_DAC`,
-`WRITE_OWNER`, and `DELETE`. Shared-desktop UI interaction is explicitly accepted in this mode;
+process, profile, Job, and lease connection. At service startup, before accepting requests, the
+broker disables `SeTcbPrivilege` on its process token and stops if that adjustment fails. This
+establishes a disabled baseline because LocalSystem starts with TCB enabled; the privilege remains
+present so temporary thread-token copies can enable it. Session assignment enables TCB on a
+temporary self-impersonation token belonging only to the worker thread. The worker reverts before
+leasing the desktop, loading the profile, or creating the process, including on assignment failure;
+it never re-enables TCB on the shared process token. Existing impersonation is rejected, and failed
+reversion terminates the broker rather than continuing with the temporary privileged identity.
+This follows [Microsoft's thread-token privilege guidance](https://devblogs.microsoft.com/oldnewthing/20190531-00/?p=102532).
+The SYSTEM Sandbox regression starts with TCB enabled, calls the production startup adjustment,
+then overlaps two assignments and checks that the process privilege stays disabled and both
+successful and denied assignments revert. Installed-service acceptance also inspects the running
+broker's process token after the GUI launch and requires TCB to remain present but disabled.
+
+The temporary, non-inheriting logon-SID ACEs grant this tested compatibility set:
+
+| Object | Mask | Granted rights |
+| --- | --- | --- |
+| `WinSta0` | `0x00020366` | `READ_CONTROL`, `WINSTA_READATTRIBUTES`, `WINSTA_ACCESSCLIPBOARD`, `WINSTA_ACCESSGLOBALATOMS`, `WINSTA_EXITWINDOWS`, `WINSTA_ENUMERATE`, `WINSTA_READSCREEN` |
+| `Default` desktop | `0x000200CF` | `READ_CONTROL`, `DESKTOP_CREATEMENU`, `DESKTOP_CREATEWINDOW`, `DESKTOP_ENUMERATE`, `DESKTOP_HOOKCONTROL`, `DESKTOP_READOBJECTS`, `DESKTOP_WRITEOBJECTS` |
+
+On 2026-09-26, each candidate right was removed individually and checked through
+`Invoke-LauncherAcceptanceInWindowsSandbox.ps1`, including the installed broker and public GUI
+launch. Successful reductions accumulated; the rejected reduction was restored before continuing.
+
+| Right removed | Installed GUI acceptance result |
+| --- | --- |
+| `WINSTA_EXITWINDOWS` | Failed: the GUI target exited without writing its report. Restoring the right restored passing acceptance; retained. |
+| `DESKTOP_JOURNALRECORD` | Passed; removed. |
+| `DESKTOP_JOURNALPLAYBACK` | Passed; removed. |
+| `DESKTOP_SWITCHDESKTOP` | Passed; removed. |
+| `WINSTA_CREATEDESKTOP` | Passed; removed. |
+| `WINSTA_WRITEATTRIBUTES` | Passed; removed. |
+| `WINSTA_ENUMDESKTOPS` | Passed; removed. |
+
+The ACL probe checks the exact masks and cleanup; the GUI probe checks caller-session placement,
+independent logon SID, visible window creation, normal exit, and lease release. These results do
+not prove a universal minimum or compatibility with every GUI application. The grant omits
+`WRITE_DAC`, `WRITE_OWNER`, and `DELETE`; it does not negate permissions supplied by other ACEs.
+Remaining rights still expose clipboard, screen, hooks, and window-station logoff capabilities;
+see Microsoft's [window-station rights](https://learn.microsoft.com/en-us/windows/win32/winstation/window-station-security-and-access-rights)
+and [desktop rights](https://learn.microsoft.com/en-us/windows/win32/winstation/desktop-security-and-access-rights).
+Shared-desktop UI interaction is explicitly accepted in this mode;
 the independent target logon SID is intended to keep the caller-process surface closed.
 
 The independent token removes the intended path through the caller's logon-SID default ACEs.

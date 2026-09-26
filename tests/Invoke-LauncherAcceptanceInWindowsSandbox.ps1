@@ -60,6 +60,7 @@ $artifactPaths = @(
     (Join-Path $configurationDirectory 'launch-as-conhost.exe')
     (Join-Path $configurationDirectory 'LauncherBrokerChildIdentityProbe.exe')
     (Join-Path $configurationDirectory 'LauncherBrokerProcessAccessProbe.exe')
+    (Join-Path $configurationDirectory 'LauncherBrokerProcessLauncherTests.exe')
     (Join-Path $configurationDirectory 'LauncherInteractiveTargetProbe.exe')
     (Join-Path $configurationDirectory 'LauncherInteractiveAclLeaseProbe.exe')
     (Join-Path $PSScriptRoot 'Invoke-BrokerDemandStartTest.ps1')
@@ -125,6 +126,22 @@ $sandboxResult = Invoke-WindowsSandboxTest `
         if ($guestRun.ExitCode -ne 0 -or $result -notmatch '(?m)^PASS\s*$') {
             throw "Interactive Windows Sandbox acceptance failed.`n$result`n$($guestRun.Output)"
         }
+        $privilegeProbe = Join-Path $sandbox.GuestMountPath 'LauncherBrokerProcessLauncherTests.exe'
+        $guestPrivilegeResult = Join-Path $sandbox.GuestMountPath 'service-privilege-result.txt'
+        $privilegeCommand = 'cmd.exe /d /s /c ""{0}" --service-privilege > "{1}" 2>&1"' -f `
+            $privilegeProbe, $guestPrivilegeResult
+        $privilegeRun = & $sandbox.InvokeCommand `
+            -Command $privilegeCommand -Phase 'Installed broker process privilege' -CaptureFailure
+        $privilegeResultPath = Join-Path $sandbox.HostDirectory 'service-privilege-result.txt'
+        if (-not (Test-Path -LiteralPath $privilegeResultPath -PathType Leaf)) {
+            throw "The installed broker privilege probe did not write its result.`n$($privilegeRun.Output)"
+        }
+        $privilegeResult = Get-Content -LiteralPath $privilegeResultPath -Raw
+        if ($privilegeRun.ExitCode -ne 0 -or
+            $privilegeResult -notmatch '(?m)^Installed broker process TCB is disabled\s*$') {
+            throw "The installed broker retained enabled TCB after GUI acceptance.`n$privilegeResult"
+        }
+        Write-Output $privilegeResult.TrimEnd()
         Write-Output $result.TrimEnd()
     }
 

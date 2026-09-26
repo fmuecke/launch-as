@@ -53,6 +53,7 @@ $artifactPaths = @(
     (Join-Path $configurationDirectory 'LauncherBrokerAuditTests.exe')
     (Join-Path $configurationDirectory 'LauncherBrokerAccountProvisioningTests.exe')
     (Join-Path $configurationDirectory 'LauncherBrokerServiceInstallerTests.exe')
+    (Join-Path $configurationDirectory 'LauncherBrokerProcessLauncherTests.exe')
     (Join-Path $configurationDirectory 'launch-as-broker.exe')
 )
 foreach ($artifactPath in $artifactPaths) {
@@ -78,6 +79,13 @@ $sandboxResult = Invoke-WindowsSandboxTest `
             'LauncherBrokerServiceInstallerTests.exe'
         $brokerPath = Join-Path $sandbox.GuestMountPath 'launch-as-broker.exe'
         $testCases = @(
+            [PSCustomObject]@{
+                Name       = 'Broker session privilege test'
+                Executable = Join-Path $sandbox.GuestMountPath 'LauncherBrokerProcessLauncherTests.exe'
+                Arguments  = @('--session-privilege')
+                ResultFile = 'session-privilege-result.txt'
+                Marker     = 'Broker session privilege tests passed'
+            }
             [PSCustomObject]@{
                 Name       = 'Broker audit integration test'
                 Executable = $auditTestPath

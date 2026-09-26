@@ -137,9 +137,14 @@ distributable `out\release\launch-as-v<version>-win64.zip` package.
 
 `-RunTests` runs every host-safe, noninteractive CTest test. The privileged audit,
 account-provisioning, and service-installer executables are built but are not registered with CTest.
-`-RunSandboxTests` runs those three executables as SYSTEM inside a fresh Windows Sandbox without
-elevating or changing the host. It downloads a pinned revision of the Windows Sandbox test helper
-and verifies its SHA-256 before import.
+`-RunSandboxTests` runs those three executables and the process launcher's session-privilege
+regression as SYSTEM inside a fresh Windows Sandbox without elevating or changing the host.
+The privilege regression starts from SYSTEM's enabled TCB state, checks the broker's startup
+adjustment, then concurrent thread-local TCB scopes and cleanup after success and failure. It is
+excluded from the process launcher's normal host-safe CTest invocation. Installed GUI acceptance
+also checks that the running broker's process token retains TCB in a disabled state.
+The runner downloads a pinned revision of the Windows Sandbox test helper and verifies its
+SHA-256 before import.
 
 `-RunAllTests` runs the local and automated Sandbox sets, then asks whether to run interactive
 acceptance in another fresh guest. Declining the prompt completes the automated run. Run the

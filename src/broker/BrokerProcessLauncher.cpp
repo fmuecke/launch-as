@@ -25,6 +25,7 @@ constexpr DWORD JobTerminationTimeoutMilliseconds = 5'000;
 
 #ifdef LAUNCH_AS_TESTING
 bool failBrokerJobQueryForTesting = false;
+thread_local void (*sessionAssignmentObserverForTesting)() = nullptr;
 #endif
 
 [[nodiscard]] bool IsDirectorySeparator(wchar_t character) noexcept
@@ -52,7 +53,7 @@ class EnabledProcessPrivileges final
         }
     }
 
-    [[nodiscard]] DWORD EnableRequired(bool includeTrustedComputerBase = false)
+    [[nodiscard]] DWORD EnableRequired()
     {
         if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &token_))
         {
@@ -81,7 +82,7 @@ class EnabledProcessPrivileges final
         {
             return quotaError;
         }
-        return includeTrustedComputerBase ? Enable(SE_TCB_NAME) : ERROR_SUCCESS;
+        return ERROR_SUCCESS;
     }
 
   private:
@@ -118,7 +119,7 @@ class EnabledProcessPrivileges final
     }
 
     HANDLE token_ = nullptr;
-    std::array<TOKEN_PRIVILEGES, 5> previous_ {};
+    std::array<TOKEN_PRIVILEGES, 4> previous_ {};
     DWORD enabledCount_ = 0;
 };
 
@@ -293,7 +294,105 @@ void CloseHandleIfPresent(HANDLE& handle) noexcept
 
 } // namespace
 
+DWORD DisableBrokerProcessTcbPrivilege()
+{
+    HANDLE token = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &token))
+    {
+        return GetLastError();
+    }
+    TOKEN_PRIVILEGES requested {};
+    requested.PrivilegeCount = 1;
+    if (!LookupPrivilegeValueW(nullptr, SE_TCB_NAME, &requested.Privileges[0].Luid))
+    {
+        const DWORD lookupError = GetLastError();
+        CloseHandle(token);
+        return lookupError;
+    }
+    // LocalSystem starts with TCB enabled. Keep it present for private thread-token copies,
+    // but permanently disable it on the process token before any workers can use that token.
+    if (!AdjustTokenPrivileges(token, FALSE, &requested, 0, nullptr, nullptr))
+    {
+        const DWORD adjustmentError = GetLastError();
+        CloseHandle(token);
+        return adjustmentError;
+    }
+    const DWORD adjustmentError = GetLastError();
+    CloseHandle(token);
+    return adjustmentError;
+}
+
+DWORD SetBrokerTokenSessionId(HANDLE token, DWORD sessionId)
+{
+    // Session assignment runs only after caller impersonation has ended. Do not replace an
+    // existing thread identity, or enable TCB on the process token shared by other workers.
+    HANDLE existingToken = nullptr;
+    if (OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &existingToken))
+    {
+        CloseHandle(existingToken);
+        return ERROR_BAD_IMPERSONATION_LEVEL;
+    }
+    const DWORD threadTokenError = GetLastError();
+    if (threadTokenError != ERROR_NO_TOKEN)
+    {
+        return threadTokenError;
+    }
+    if (!ImpersonateSelf(SecurityImpersonation))
+    {
+        return GetLastError();
+    }
+    struct RevertOnExit final
+    {
+        ~RevertOnExit()
+        {
+            if (!RevertToSelf())
+            {
+                // Never continue a service worker with the temporary privileged identity.
+                RaiseFailFastException(nullptr, nullptr, 0);
+            }
+        }
+    } revertOnExit;
+
+    HANDLE threadToken = nullptr;
+    if (!OpenThreadToken(
+            GetCurrentThread(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, TRUE, &threadToken))
+    {
+        return GetLastError();
+    }
+    TOKEN_PRIVILEGES requested {};
+    requested.PrivilegeCount = 1;
+    requested.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+    if (!LookupPrivilegeValueW(nullptr, SE_TCB_NAME, &requested.Privileges[0].Luid))
+    {
+        const DWORD lookupError = GetLastError();
+        CloseHandle(threadToken);
+        return lookupError;
+    }
+    const BOOL adjusted =
+        AdjustTokenPrivileges(threadToken, FALSE, &requested, 0, nullptr, nullptr);
+    const DWORD adjustmentError = GetLastError();
+    CloseHandle(threadToken);
+    if (!adjusted || adjustmentError != ERROR_SUCCESS)
+    {
+        return adjustmentError;
+    }
 #ifdef LAUNCH_AS_TESTING
+    if (sessionAssignmentObserverForTesting != nullptr)
+    {
+        sessionAssignmentObserverForTesting();
+    }
+#endif
+    return SetTokenInformation(token, TokenSessionId, &sessionId, sizeof(sessionId))
+               ? ERROR_SUCCESS
+               : GetLastError();
+}
+
+#ifdef LAUNCH_AS_TESTING
+void SetBrokerSessionAssignmentObserverForTesting(void (*observer)()) noexcept
+{
+    sessionAssignmentObserverForTesting = observer;
+}
+
 void SetBrokerJobQueryFailureForTesting(bool fail) noexcept { failBrokerJobQueryForTesting = fail; }
 
 [[nodiscard]] DWORD LaunchBrokerChildForTesting(
@@ -900,19 +999,18 @@ DWORD LaunchBrokerInteractiveProcess(HANDLE token, std::wstring_view accountName
     {
         return jobError;
     }
+    const DWORD sessionError = SetBrokerTokenSessionId(token, targetSessionId);
+    if (sessionError != ERROR_SUCCESS)
+    {
+        child.Reset();
+        return sessionError;
+    }
     EnabledProcessPrivileges privileges;
-    const DWORD privilegeError = privileges.EnableRequired(true);
+    const DWORD privilegeError = privileges.EnableRequired();
     if (privilegeError != ERROR_SUCCESS)
     {
         child.Reset();
         return privilegeError;
-    }
-    if (!SetTokenInformation(
-            token, TokenSessionId, &targetSessionId, static_cast<DWORD>(sizeof(targetSessionId))))
-    {
-        const DWORD sessionError = GetLastError();
-        child.Reset();
-        return sessionError;
     }
     std::vector<BYTE> childLogonSid;
     const DWORD logonSidError = GetTokenLogonSid(token, childLogonSid);

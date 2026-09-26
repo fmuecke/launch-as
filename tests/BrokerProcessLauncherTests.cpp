@@ -8,13 +8,219 @@
 
 #include <Windows.h>
 #include <array>
+#include <atomic>
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace
 {
+
+[[nodiscard]] bool HasNoThreadToken()
+{
+    HANDLE token = nullptr;
+    if (OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &token))
+    {
+        CloseHandle(token);
+        return false;
+    }
+    return GetLastError() == ERROR_NO_TOKEN;
+}
+
+[[nodiscard]] bool TcbHasState(HANDLE token, bool enabled)
+{
+    LUID tcb {};
+    if (!LookupPrivilegeValueW(nullptr, SE_TCB_NAME, &tcb))
+    {
+        return false;
+    }
+    DWORD required = 0;
+    GetTokenInformation(token, TokenPrivileges, nullptr, 0, &required);
+    const DWORD sizeError = GetLastError();
+    if (sizeError != ERROR_INSUFFICIENT_BUFFER || required == 0)
+    {
+        return false;
+    }
+    std::vector<BYTE> storage(required);
+    if (!GetTokenInformation(token, TokenPrivileges, storage.data(), required, &required))
+    {
+        return false;
+    }
+    const auto* privileges = reinterpret_cast<const TOKEN_PRIVILEGES*>(storage.data());
+    for (DWORD index = 0; index < privileges->PrivilegeCount; ++index)
+    {
+        const auto& privilege = privileges->Privileges[index];
+        if (privilege.Luid.LowPart == tcb.LowPart && privilege.Luid.HighPart == tcb.HighPart)
+        {
+            return ((privilege.Attributes & SE_PRIVILEGE_ENABLED) != 0) == enabled;
+        }
+    }
+    return false;
+}
+
+HANDLE assignmentsEntered = nullptr;
+HANDLE assignmentsContinue = nullptr;
+std::atomic<int> assignmentCount = 0;
+std::atomic<bool> assignmentScopesValid = true;
+
+void ObserveSessionAssignment()
+{
+    HANDLE token = nullptr;
+    if (!OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &token))
+    {
+        assignmentScopesValid = false;
+    }
+    else
+    {
+        if (!TcbHasState(token, true))
+        {
+            assignmentScopesValid = false;
+        }
+        CloseHandle(token);
+    }
+    if (++assignmentCount == 2)
+    {
+        SetEvent(assignmentsEntered);
+    }
+    if (WaitForSingleObject(assignmentsContinue, 10'000) != WAIT_OBJECT_0)
+    {
+        assignmentScopesValid = false;
+    }
+}
+
+// Run only as SYSTEM in a fresh Sandbox. The host suite never requires SeTcbPrivilege.
+[[nodiscard]] bool TestSessionPrivilegeScope()
+{
+    HANDLE processToken = nullptr;
+    if (!Expect(OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_DUPLICATE, &processToken),
+            L"Could not open the privilege-test process token."))
+    {
+        return false;
+    }
+    if (!Expect(TcbHasState(processToken, true),
+            L"This test requires the default SYSTEM state with TCB initially enabled.") ||
+        !Expect(launch_as::broker::DisableBrokerProcessTcbPrivilege() == ERROR_SUCCESS &&
+                    TcbHasState(processToken, false),
+            L"Broker initialization did not disable process TCB while retaining the privilege."))
+    {
+        CloseHandle(processToken);
+        return false;
+    }
+    assignmentsEntered = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    assignmentsContinue = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    bool workersSucceeded[2] {};
+    auto worker = [&](int index)
+    {
+        HANDLE target = nullptr;
+        if (!DuplicateTokenEx(processToken,
+                TOKEN_QUERY | TOKEN_ADJUST_DEFAULT | TOKEN_ADJUST_SESSIONID,
+                nullptr,
+                SecurityImpersonation,
+                TokenPrimary,
+                &target))
+        {
+            return;
+        }
+        DWORD sessionId = MAXDWORD;
+        DWORD bytes = 0;
+        const BOOL read =
+            GetTokenInformation(target, TokenSessionId, &sessionId, sizeof(sessionId), &bytes);
+        launch_as::broker::SetBrokerSessionAssignmentObserverForTesting(ObserveSessionAssignment);
+        const DWORD error = launch_as::broker::SetBrokerTokenSessionId(target, sessionId);
+        launch_as::broker::SetBrokerSessionAssignmentObserverForTesting(nullptr);
+        DWORD assignedSessionId = MAXDWORD;
+        const BOOL assigned = GetTokenInformation(
+            target, TokenSessionId, &assignedSessionId, sizeof(assignedSessionId), &bytes);
+        std::wcerr << L"session assignment worker " << index << L": error=" << error << L", before="
+                   << sessionId << L", after=" << assignedSessionId << L", reverted="
+                   << HasNoThreadToken() << L'\n';
+        workersSucceeded[index] = read && assigned && assignedSessionId == sessionId &&
+                                  error == ERROR_SUCCESS && HasNoThreadToken();
+        CloseHandle(target);
+    };
+    std::thread first(worker, 0);
+    std::thread second(worker, 1);
+    const bool overlapped = WaitForSingleObject(assignmentsEntered, 10'000) == WAIT_OBJECT_0;
+    const bool processUnchanged = TcbHasState(processToken, false) && HasNoThreadToken();
+    std::wcerr << L"process TCB stayed disabled=" << processUnchanged << L'\n';
+    SetEvent(assignmentsContinue);
+    first.join();
+    second.join();
+    CloseHandle(assignmentsEntered);
+    CloseHandle(assignmentsContinue);
+    HANDLE queryOnlyTarget = nullptr;
+    const BOOL duplicated = DuplicateTokenEx(
+        processToken, TOKEN_QUERY, nullptr, SecurityImpersonation, TokenPrimary, &queryOnlyTarget);
+    const DWORD failureError = launch_as::broker::SetBrokerTokenSessionId(queryOnlyTarget, 0);
+    const bool failureRestored = HasNoThreadToken() && TcbHasState(processToken, false);
+    if (queryOnlyTarget != nullptr)
+    {
+        CloseHandle(queryOnlyTarget);
+    }
+    CloseHandle(processToken);
+    return Expect(overlapped && assignmentCount == 2 && assignmentScopesValid,
+               L"Concurrent assignments did not each enable a private thread privilege.") &&
+           Expect(processUnchanged && workersSucceeded[0] && workersSucceeded[1],
+               L"Session assignment leaked TCB to the process or retained a thread token.") &&
+           Expect(duplicated && failureError == ERROR_ACCESS_DENIED && failureRestored,
+               L"Failed session assignment did not preserve its error and revert impersonation.");
+}
+
+// Invoked only by installed-service acceptance inside the disposable guest.
+[[nodiscard]] bool TestInstalledServiceTcbDisabled()
+{
+    SC_HANDLE manager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+    SC_HANDLE service = manager != nullptr
+                            ? OpenServiceW(manager, L"launch-as-broker", SERVICE_QUERY_STATUS)
+                            : nullptr;
+    SERVICE_STATUS_PROCESS status {};
+    DWORD bytes = 0;
+    const bool running = service != nullptr &&
+                         QueryServiceStatusEx(service,
+                             SC_STATUS_PROCESS_INFO,
+                             reinterpret_cast<BYTE*>(&status),
+                             sizeof(status),
+                             &bytes) &&
+                         status.dwCurrentState == SERVICE_RUNNING;
+    if (service != nullptr)
+    {
+        CloseServiceHandle(service);
+    }
+    if (manager != nullptr)
+    {
+        CloseServiceHandle(manager);
+    }
+    HANDLE process = running
+                         ? OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, status.dwProcessId)
+                         : nullptr;
+    HANDLE token = nullptr;
+    const bool disabled = process != nullptr && OpenProcessToken(process, TOKEN_QUERY, &token) &&
+                          TcbHasState(token, false);
+    if (token != nullptr)
+    {
+        CloseHandle(token);
+    }
+    if (process != nullptr)
+    {
+        CloseHandle(process);
+    }
+    return Expect(disabled, L"Installed broker must retain TCB in its process token, disabled.");
+}
+
+[[nodiscard]] bool TestSessionAssignmentRejectsImpersonation()
+{
+    if (!ImpersonateSelf(SecurityImpersonation))
+    {
+        return false;
+    }
+    const DWORD error = launch_as::broker::SetBrokerTokenSessionId(nullptr, 0);
+    const bool identityRetained = !HasNoThreadToken();
+    const BOOL reverted = RevertToSelf();
+    return Expect(error == ERROR_BAD_IMPERSONATION_LEVEL && identityRetained && reverted,
+        L"Session assignment replaced an existing impersonation identity.");
+}
 
 [[nodiscard]] bool TestWorkingDirectoryValidation()
 {
@@ -186,8 +392,30 @@ namespace
 
 } // namespace
 
-int wmain()
+int wmain(int argumentCount, wchar_t* arguments[])
 {
+    if (argumentCount == 2 && std::wstring_view(arguments[1]) == L"--service-privilege")
+    {
+        if (!TestInstalledServiceTcbDisabled())
+        {
+            return 1;
+        }
+        std::cout << "Installed broker process TCB is disabled\n";
+        return 0;
+    }
+    if (argumentCount == 2 && std::wstring_view(arguments[1]) == L"--session-privilege")
+    {
+        if (!TestSessionPrivilegeScope())
+        {
+            return 1;
+        }
+        std::cout << "Broker session privilege tests passed\n";
+        return 0;
+    }
+    if (!TestSessionAssignmentRejectsImpersonation())
+    {
+        return 1;
+    }
     if (!TestWorkingDirectoryValidation() || !TestJobTerminationConfirmsActiveProcessZero() ||
         !TestUnconfirmedTeardownRetainsJobUntilConfirmation() ||
         !TestInteractiveLaunchRejectsIncompleteInputs())

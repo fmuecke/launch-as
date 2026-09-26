@@ -146,5 +146,11 @@ finally {
     if (Test-Path -LiteralPath $stderrPath -PathType Leaf) {
         Get-Content -LiteralPath $stderrPath | Write-Host
     }
+    foreach ($probeReport in @($aclLeaseReportPath, $reportPath, $exitCodePath)) {
+        if (Test-Path -LiteralPath $probeReport -PathType Leaf) {
+            Write-Host ([IO.Path]::GetFileName($probeReport))
+            Get-Content -LiteralPath $probeReport | Write-Host
+        }
+    }
     Remove-Item -LiteralPath $reportDirectory -Recurse -Force -ErrorAction SilentlyContinue
 }

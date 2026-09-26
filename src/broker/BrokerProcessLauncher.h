@@ -79,8 +79,12 @@ class BrokerChildProcess final
 [[nodiscard]] DWORD LaunchFixedBrokerProbe(HANDLE token, BrokerChildProcess& child);
 [[nodiscard]] DWORD GetTokenLogonSid(HANDLE token, std::vector<BYTE>& logonSid);
 [[nodiscard]] DWORD ValidateChildLogonSid(HANDLE process, const std::vector<BYTE>& callerLogonSid);
+[[nodiscard]] DWORD SetBrokerTokenSessionId(HANDLE token, DWORD sessionId);
+// Call once during service initialization, before starting any request workers.
+[[nodiscard]] DWORD DisableBrokerProcessTcbPrivilege();
 
 #ifdef LAUNCH_AS_TESTING
+void SetBrokerSessionAssignmentObserverForTesting(void (*observer)()) noexcept;
 void SetBrokerJobQueryFailureForTesting(bool fail) noexcept;
 [[nodiscard]] DWORD LaunchQuickBrokerChildForTesting(BrokerChildProcess& child);
 [[nodiscard]] DWORD LaunchDelayedBrokerChildForTesting(BrokerChildProcess& child);

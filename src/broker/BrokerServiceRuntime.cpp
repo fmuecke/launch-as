@@ -8,6 +8,7 @@
 #include "BrokerCallerPolicy.h"
 #include "BrokerControlPipeListener.h"
 #include "BrokerDataDirectory.h"
+#include "BrokerProcessLauncher.h"
 #include "Win32Support.h"
 
 #include <Windows.h>
@@ -59,6 +60,12 @@ void WINAPI ServiceMain(DWORD, wchar_t**)
 
     serviceStatus.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
     ReportServiceStatus(SERVICE_START_PENDING);
+    const DWORD privilegeError = launch_as::broker::DisableBrokerProcessTcbPrivilege();
+    if (privilegeError != ERROR_SUCCESS)
+    {
+        ReportServiceStatus(SERVICE_STOPPED, privilegeError);
+        return;
+    }
     launch_as::UniqueHandle ownedStopEvent(CreateEventW(nullptr, TRUE, FALSE, nullptr));
     if (!ownedStopEvent)
     {

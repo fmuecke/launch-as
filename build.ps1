@@ -9,6 +9,9 @@ param(
     [string] $Configuration = 'Release',
 
     [Parameter()]
+    [switch] $SkipFormatting,
+
+    [Parameter()]
     [Alias('Test')]
     [switch] $RunTests,
 
@@ -162,16 +165,18 @@ $nativeSourceFiles = @(
     Sort-Object -Property FullName |
     ForEach-Object -MemberName FullName
 )
-$clangFormat = Get-Command -Name 'clang-format' -CommandType Application -ErrorAction SilentlyContinue |
-    Select-Object -First 1
-if ($null -eq $clangFormat) {
-    Write-Warning 'clang-format was not found on PATH; continuing without formatting native C++ sources.'
-}
-else {
-    Write-Host 'Formatting native C++ sources'
-    & $clangFormat.Source -i -- @nativeSourceFiles
-    if ($LASTEXITCODE -ne 0) {
-        throw "clang-format failed with exit code $LASTEXITCODE."
+if (-not $SkipFormatting) {
+    $clangFormat = Get-Command -Name 'clang-format' -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($null -eq $clangFormat) {
+        Write-Warning 'clang-format was not found on PATH; continuing without formatting native C++ sources.'
+    }
+    else {
+        Write-Host 'Formatting native C++ sources'
+        & $clangFormat.Source -i -- @nativeSourceFiles
+        if ($LASTEXITCODE -ne 0) {
+            throw "clang-format failed with exit code $LASTEXITCODE."
+        }
     }
 }
 

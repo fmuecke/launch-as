@@ -33,7 +33,7 @@ jobs:
 
       - name: Build, test, and package
         # RunTests excludes elevated and interactive tests that need Windows Sandbox.
-        run: .\build.ps1 -Configuration Release -RunTests -PackageRelease
+        run: .\build.ps1 -Configuration Release -RunTests -PackageRelease -SkipFormatting
 
       - name: Upload release package
         uses: actions/upload-artifact@v7

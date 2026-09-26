@@ -120,8 +120,11 @@ or a separate RDP, Windows Sandbox, or VM session for workloads that must not ac
 ## Build and test
 
 The source build requires Visual Studio/MSVC, a Windows SDK, CMake 3.25+, PowerShell, `ninja`, and
-`clang-format`. Run `build.ps1` from the repository root; it initializes the MSVC environment when
-needed and builds the Ninja Multi-Config Release target by default.
+`clang-format` 22 or newer. Run `build.ps1` from the repository root; it initializes the MSVC
+environment when needed and builds the Ninja Multi-Config Release target by default.
+
+Local builds format sources by default. Use `-SkipFormatting` to build without running
+clang-format; CI uses this switch to build the checked-in sources unchanged.
 
 ```powershell
 .\build.ps1

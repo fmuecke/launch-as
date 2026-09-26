@@ -20,15 +20,14 @@ if ($parseErrors.Count -ne 0) {
     throw 'build.ps1 did not parse.'
 }
 $statements = @($ast.EndBlock.Statements)
-$assignment = $statements | Where-Object {
-    $_ -is [Management.Automation.Language.AssignmentStatementAst] -and
-    $_.Left.Extent.Text -eq '$clangFormat'
+$formatting = $statements | Where-Object {
+    $_ -is [Management.Automation.Language.IfStatementAst] -and
+    $_.Clauses[0].Item1.Extent.Text -eq '-not $SkipFormatting'
 } | Select-Object -First 1
-if ($null -eq $assignment) {
-    throw 'Could not locate the formatter selection in build.ps1.'
+if ($null -eq $formatting) {
+    throw 'Could not locate the formatting step in build.ps1.'
 }
-$formatting = $statements[[array]::IndexOf($statements, $assignment) + 1]
-$formatStep = [scriptblock]::Create($assignment.Extent.Text + "`n" + $formatting.Extent.Text)
+$formatStep = [scriptblock]::Create($formatting.Extent.Text)
 
 $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 $fixture = Join-Path $temporaryRoot ('launch-as-formatter-' + [guid]::NewGuid().ToString('N'))
@@ -46,12 +45,22 @@ try {
         throw 'The fixture must expose two formatter applications.'
     }
     $nativeSourceFiles = @('sample source.cpp')
+    $SkipFormatting = $false
     $output = @(& $formatStep)
     if ($output.Count -ne 2 -or $output[0] -ne 'first formatter' -or
         $output[1] -ne '-i -- "sample source.cpp"') {
         throw "The build did not invoke only the first formatter with the source arguments: $output"
     }
 
+    # Skip even an installed formatter that would fail (for example, an old version).
+    $SkipFormatting = $true
+    $env:PATH = $second
+    $output = @(& $formatStep 3>&1)
+    if ($output.Count -ne 0) {
+        throw '-SkipFormatting must not invoke clang-format or emit formatter warnings.'
+    }
+
+    $SkipFormatting = $false
     $env:PATH = $fixture
     $output = @(& $formatStep 3>&1)
     if ($output.Count -ne 1 -or $output[0] -isnot [Management.Automation.WarningRecord]) {

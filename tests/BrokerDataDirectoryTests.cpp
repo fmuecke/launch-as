@@ -4,6 +4,7 @@
 
 #include "BrokerDataDirectory.h"
 #include "TestSupport.h"
+#include "Win32Support.h"
 
 #include <Aclapi.h>
 #include <ShlObj.h>
@@ -184,6 +185,56 @@ class ScopedEnvironmentVariable final
     return valid && hasSystem && hasAdministrators && hasService == brokerServiceSidFound;
 }
 
+[[nodiscard]] bool CreateUserOwnedDirectory(const std::wstring& path)
+{
+    HANDLE rawToken = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &rawToken))
+    {
+        return false;
+    }
+    launch_as::UniqueHandle token(rawToken);
+    alignas(TOKEN_USER) std::array<BYTE, sizeof(TOKEN_USER) + SECURITY_MAX_SID_SIZE> storage {};
+    DWORD returnedBytes = 0;
+    if (!GetTokenInformation(token.get(),
+            TokenUser,
+            storage.data(),
+            static_cast<DWORD>(storage.size()),
+            &returnedBytes))
+    {
+        return false;
+    }
+    const PSID userSid = reinterpret_cast<const TOKEN_USER*>(storage.data())->User.Sid;
+    if (IsWellKnownSid(userSid, WinLocalSystemSid) ||
+        IsWellKnownSid(userSid, WinBuiltinAdministratorsSid))
+    {
+        return false;
+    }
+    // Elevated tokens can default new objects to Administrators ownership. Select the
+    // individual user SID explicitly so this remains an untrusted-owner fixture.
+    SECURITY_DESCRIPTOR descriptor {};
+    if (!InitializeSecurityDescriptor(&descriptor, SECURITY_DESCRIPTOR_REVISION) ||
+        !SetSecurityDescriptorOwner(&descriptor, userSid, FALSE))
+    {
+        return false;
+    }
+    SECURITY_ATTRIBUTES attributes {sizeof(attributes), &descriptor, FALSE};
+    if (!CreateDirectoryW(path.c_str(), &attributes))
+    {
+        return false;
+    }
+    PSID actualOwner = nullptr;
+    launch_as::LocalAllocation<PSECURITY_DESCRIPTOR> actualDescriptor;
+    return GetNamedSecurityInfoW(path.c_str(),
+               SE_FILE_OBJECT,
+               OWNER_SECURITY_INFORMATION,
+               &actualOwner,
+               nullptr,
+               nullptr,
+               nullptr,
+               actualDescriptor.address()) == ERROR_SUCCESS &&
+           actualOwner != nullptr && EqualSid(actualOwner, userSid) != FALSE;
+}
+
 // Junctions never require elevation or SeCreateSymbolicLinkPrivilege to create, unlike symlinks,
 // so this reproduces what an unprivileged attacker can pre-plant at the target path.
 [[nodiscard]] bool CreateDirectoryJunction(const std::wstring& path, const std::wstring& target)
@@ -235,7 +286,7 @@ int wmain()
     // re-grant themselves access no matter what DACL gets stamped on top of it afterwards.
     const std::wstring untrustedOwnerDirectory = (directory.path() / L"untrusted-owner").native();
     const bool untrustedOwnerRejected =
-        Expect(CreateDirectoryW(untrustedOwnerDirectory.c_str(), nullptr) != FALSE,
+        Expect(CreateUserOwnedDirectory(untrustedOwnerDirectory),
             L"Could not pre-create the untrusted-owner directory fixture.") &&
         Expect(launch_as::broker::CreateSecureDirectory(untrustedOwnerDirectory) != ERROR_SUCCESS,
             L"CreateSecureDirectory adopted a pre-existing directory it does not own.");

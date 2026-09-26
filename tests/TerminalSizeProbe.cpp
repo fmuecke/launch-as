@@ -29,13 +29,19 @@ namespace
 int wmain(int argumentCount, wchar_t* arguments[])
 {
     COORD expectedSize {};
-    if (argumentCount != 3 || !ParseDimension(arguments[1], expectedSize.X) ||
+    if (argumentCount != 4 || !ParseDimension(arguments[1], expectedSize.X) ||
         !ParseDimension(arguments[2], expectedSize.Y))
     {
-        std::wcerr << L"Expected terminal width and height.\n";
+        std::wcerr << L"Expected terminal width, height, and readiness event.\n";
         return 1;
     }
 
+    HANDLE readyEvent = OpenEventW(EVENT_MODIFY_STATE, FALSE, arguments[3]);
+    if (readyEvent == nullptr)
+    {
+        std::wcerr << L"Could not open the terminal-size readiness event.\n";
+        return 1;
+    }
     const HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     COORD observedSize {};
@@ -44,6 +50,17 @@ int wmain(int argumentCount, wchar_t* arguments[])
         CONSOLE_SCREEN_BUFFER_INFO information {};
         if (GetConsoleScreenBufferInfo(output, &information))
         {
+            if (readyEvent != nullptr)
+            {
+                const BOOL signalled = SetEvent(readyEvent);
+                CloseHandle(readyEvent);
+                readyEvent = nullptr;
+                if (!signalled)
+                {
+                    std::wcerr << L"Could not signal terminal-size readiness.\n";
+                    return 1;
+                }
+            }
             observedSize.X = information.srWindow.Right - information.srWindow.Left + 1;
             observedSize.Y = information.srWindow.Bottom - information.srWindow.Top + 1;
             if (observedSize.X == expectedSize.X && observedSize.Y == expectedSize.Y)
@@ -58,6 +75,10 @@ int wmain(int argumentCount, wchar_t* arguments[])
         std::this_thread::sleep_for(std::chrono::milliseconds(25));
     }
 
+    if (readyEvent != nullptr)
+    {
+        CloseHandle(readyEvent);
+    }
     std::wcerr << L"Observed terminal size " << observedSize.X << L"x" << observedSize.Y
                << L"; expected " << expectedSize.X << L"x" << expectedSize.Y << L".\n";
     return 1;

@@ -23,6 +23,7 @@ using launch_as::TerminalBridge;
 using launch_as::UniqueHandle;
 
 constexpr DWORD ProcessTimeoutMilliseconds = 10'000;
+constexpr DWORD ProbeReadyTimeoutMilliseconds = 5'000;
 constexpr auto BridgeStopTimeout = std::chrono::seconds(2);
 
 [[nodiscard]] bool VerifyTargetReceivesOnlyPipeClients()
@@ -136,6 +137,14 @@ int wmain(int argumentCount, wchar_t* arguments[])
         return 1;
     }
 
+    const std::wstring readyEventName =
+        L"Local\\launch-as-terminal-size-ready-" + std::to_wstring(GetCurrentProcessId());
+    UniqueHandle readyEvent(CreateEventW(nullptr, TRUE, FALSE, readyEventName.c_str()));
+    if (!readyEvent)
+    {
+        std::wcerr << L"Could not create the terminal-size probe readiness event.\n";
+        return 1;
+    }
     const std::vector<std::wstring> helperArguments {
         L"--internal-pseudoconsole-host",
         L"--size",
@@ -144,7 +153,8 @@ int wmain(int argumentCount, wchar_t* arguments[])
         L"--",
         terminalSizeProbe.native(),
         L"91",
-        L"27"
+        L"27",
+        readyEventName
     };
     std::wstring commandLine = BuildWindowsCommandLine(launcherPath.native(), helperArguments);
 
@@ -259,15 +269,6 @@ int wmain(int argumentCount, wchar_t* arguments[])
         std::wcerr << terminalError << L"\n";
         return 1;
     }
-    if (!terminalBridge.SendResize(COORD {91, 27}))
-    {
-        TerminateProcess(process.get(), 1);
-        WaitForSingleObject(process.get(), ProcessTimeoutMilliseconds);
-        terminalBridge.Stop();
-        std::wcerr << L"Could not send the test terminal size.\n";
-        return 1;
-    }
-
     if (ResumeThread(thread.get()) == static_cast<DWORD>(-1))
     {
         const DWORD resumeError = GetLastError();
@@ -276,6 +277,21 @@ int wmain(int argumentCount, wchar_t* arguments[])
         terminalBridge.Stop();
         std::wcerr << L"Could not resume the current-user ConPTY helper: "
                    << FormatWindowsError(resumeError) << L"\n";
+        return 1;
+    }
+
+    // Test a resize of an attached console, not a race with ConPTY/child initialization.
+    const std::array<HANDLE, 2> readyHandles {readyEvent.get(), process.get()};
+    if (WaitForMultipleObjects(static_cast<DWORD>(readyHandles.size()),
+            readyHandles.data(),
+            FALSE,
+            ProbeReadyTimeoutMilliseconds) != WAIT_OBJECT_0 ||
+        !terminalBridge.SendResize(COORD {91, 27}))
+    {
+        TerminateProcess(process.get(), 1);
+        WaitForSingleObject(process.get(), ProcessTimeoutMilliseconds);
+        terminalBridge.Stop();
+        std::wcerr << L"The terminal-size probe did not become ready or receive its resize.\n";
         return 1;
     }
 

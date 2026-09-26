@@ -60,6 +60,34 @@ constexpr ULONGLONG BusyPipeResponseBoundMilliseconds = 1'000;
     return exitCode;
 }
 
+[[nodiscard]] bool VerifyUnelevatedInstallRejected(std::wstring_view adminPath)
+{
+    HANDLE rawToken = nullptr;
+    if (!Expect(OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &rawToken) != FALSE,
+            L"Could not open the command-test token."))
+    {
+        return false;
+    }
+    launch_as::UniqueHandle token(rawToken);
+    TOKEN_ELEVATION elevation {};
+    DWORD returnedBytes = 0;
+    if (!Expect(GetTokenInformation(
+                    token.get(), TokenElevation, &elevation, sizeof(elevation), &returnedBytes) !=
+                    FALSE,
+            L"Could not determine command-test elevation."))
+    {
+        return false;
+    }
+    if (elevation.TokenIsElevated != 0)
+    {
+        // Never run a real install on an elevated host just to test its refusal to non-admins.
+        std::wcout << L"SKIP: unelevated install refusal check (test process is elevated).\n";
+        return true;
+    }
+    return Expect(RunCommand(adminPath, L"install") == ERROR_ACCESS_DENIED,
+        L"Admin install did not require elevation.");
+}
+
 struct CommandResult
 {
     DWORD exitCode = ERROR_GEN_FAILURE;
@@ -266,8 +294,7 @@ int wmain(int argumentCount, wchar_t* arguments[])
     {
         return 1;
     }
-    if (!Expect(RunCommand(adminPath, L"install") == ERROR_ACCESS_DENIED,
-            L"Admin install did not require elevation."))
+    if (!VerifyUnelevatedInstallRejected(adminPath))
     {
         return 1;
     }

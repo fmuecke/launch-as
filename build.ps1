@@ -162,7 +162,8 @@ $nativeSourceFiles = @(
     Sort-Object -Property FullName |
     ForEach-Object -MemberName FullName
 )
-$clangFormat = Get-Command -Name 'clang-format' -CommandType Application -ErrorAction SilentlyContinue
+$clangFormat = Get-Command -Name 'clang-format' -CommandType Application -ErrorAction SilentlyContinue |
+    Select-Object -First 1
 if ($null -eq $clangFormat) {
     Write-Warning 'clang-format was not found on PATH; continuing without formatting native C++ sources.'
 }

@@ -422,6 +422,20 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
     )
 
     add_test(
+        NAME launcher.build_formatter
+        COMMAND
+            pwsh
+            -NoProfile
+            -File
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Test-BuildFormatter.ps1"
+            -Path
+            "${CMAKE_CURRENT_SOURCE_DIR}/build.ps1"
+    )
+    set_tests_properties(launcher.build_formatter PROPERTIES
+        LABELS "build;unit"
+    )
+
+    add_test(
         NAME launcher.sandbox_integration_contract
         COMMAND
             pwsh

@@ -29,3 +29,10 @@ if (-not (Test-BrokerServiceInstalled)) {
     --user LaunchAsUser `
     --working-directory C:\dev\ `
     -- C:\Windows\System32\cmd.exe /d /k
+
+.\out\build\Release\launch-as.exe `
+    --mode interactive `
+    --user LaunchAsUser `
+    --working-directory C:\dev\ `
+    -- C:\Windows\System32\notepad.exe    
+

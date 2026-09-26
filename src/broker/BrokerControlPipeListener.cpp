@@ -80,19 +80,20 @@ DWORD ConfigureProfile(void* context, const BrokerRequest& request,
 }
 
 DWORD LaunchProfile(void* context, const BrokerRequest& request, const BrokerCallerIdentity& caller,
-    BrokerChildProcess& child)
+    BrokerSession& session)
 {
     auto* application = static_cast<BrokerApplication*>(context);
     return application == nullptr ? ERROR_INVALID_PARAMETER
-                                  : application->Launch(request, caller, child);
+                                  : application->Launch(request, caller, session);
 }
 
-void FinishProfileSession(void* context, const BrokerRequest& request, bool processTreeExited)
+void FinishProfileSession(
+    void* context, const BrokerRequest& request, BrokerSession& session, bool processTreeExited)
 {
     auto* application = static_cast<BrokerApplication*>(context);
     if (application != nullptr)
     {
-        static_cast<void>(application->FinishSession(request, processTreeExited));
+        static_cast<void>(application->FinishSession(request, session, processTreeExited));
     }
 }
 

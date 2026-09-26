@@ -174,8 +174,9 @@ DWORD BrokerApplication::Configure(const BrokerRequest& request, const BrokerCal
 }
 
 DWORD BrokerApplication::Launch(
-    const BrokerRequest& request, const BrokerCallerIdentity& caller, BrokerChildProcess& child)
+    const BrokerRequest& request, const BrokerCallerIdentity& caller, BrokerSession& session)
 {
+    BrokerChildProcess& child = session.child;
     bool sessionReserved = false;
     const auto complete = [&](DWORD result)
     {
@@ -251,16 +252,7 @@ DWORD BrokerApplication::Launch(
             child.TerminateAndWaitForExitConfirmed();
             return complete(resumeError);
         }
-        {
-            std::lock_guard leaseLock(leaseMutex_);
-            const auto [ignored, inserted] =
-                interactiveLeasesByRequest_.emplace(request.requestId, std::move(lease));
-            if (!inserted)
-            {
-                child.TerminateAndWaitForExitConfirmed();
-                return complete(ERROR_ALREADY_EXISTS);
-            }
-        }
+        session.desktopLease = std::move(lease);
         return complete(ERROR_SUCCESS);
     }
     std::vector<std::wstring> conhostArguments {
@@ -303,7 +295,8 @@ DWORD BrokerApplication::Launch(
     return complete(resumeError);
 }
 
-DWORD BrokerApplication::FinishSession(const BrokerRequest& request, bool processTreeExited)
+DWORD BrokerApplication::FinishSession(
+    const BrokerRequest& request, BrokerSession& session, bool processTreeExited)
 {
     if (!processTreeExited)
     {
@@ -320,24 +313,7 @@ DWORD BrokerApplication::FinishSession(const BrokerRequest& request, bool proces
     DWORD leaseError = ERROR_SUCCESS;
     if (request.operation == RequestOperation::InteractiveLaunch)
     {
-        InteractiveDesktopLeaseConnection lease;
-        {
-            std::lock_guard leaseLock(leaseMutex_);
-            const auto existing = interactiveLeasesByRequest_.find(request.requestId);
-            if (existing == interactiveLeasesByRequest_.end())
-            {
-                leaseError = ERROR_NOT_FOUND;
-            }
-            else
-            {
-                lease = std::move(existing->second);
-                interactiveLeasesByRequest_.erase(existing);
-            }
-        }
-        if (leaseError == ERROR_SUCCESS)
-        {
-            leaseError = ReleaseInteractiveDesktopLease(lease);
-        }
+        leaseError = ReleaseInteractiveDesktopLease(session.desktopLease);
     }
     ReleaseSession(request.profileId);
     if (leaseError != ERROR_SUCCESS)

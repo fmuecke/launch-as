@@ -30,6 +30,7 @@ add_library(launch_as_broker_core STATIC
     BrokerProcessLauncher.h
     BrokerRegistration.cpp
     BrokerRegistration.h
+    BrokerSession.h
     BrokerServiceRuntime.cpp
     BrokerServiceRuntime.h
 )

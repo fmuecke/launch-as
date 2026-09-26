@@ -5,8 +5,8 @@
 #pragma once
 
 #include "BrokerCallerIdentity.h"
-#include "BrokerProcessLauncher.h"
 #include "BrokerProtocol.h"
+#include "BrokerSession.h"
 
 #include <Windows.h>
 #include <vector>
@@ -17,13 +17,13 @@ namespace launch_as::broker
 using ConfigurationRequestHandler = DWORD (*)(void* context, const BrokerRequest& request,
     const BrokerCallerIdentity& caller, std::vector<std::wstring>& accounts);
 using LaunchRequestHandler = DWORD (*)(void* context, const BrokerRequest& request,
-    const BrokerCallerIdentity& caller, BrokerChildProcess& child);
+    const BrokerCallerIdentity& caller, BrokerSession& session);
 using SessionFinishedHandler = void (*)(
-    void* context, const BrokerRequest& request, bool processTreeExited);
+    void* context, const BrokerRequest& request, BrokerSession& session, bool processTreeExited);
 
 void FinishBrokerSession(SessionFinishedHandler sessionFinishedHandler,
-    void* sessionFinishedContext, const BrokerRequest& request, bool sessionStarted,
-    bool processTreeExited);
+    void* sessionFinishedContext, const BrokerRequest& request, BrokerSession& session,
+    bool sessionStarted, bool processTreeExited);
 
 void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
     ConfigurationRequestHandler configurationRequestHandler = nullptr,

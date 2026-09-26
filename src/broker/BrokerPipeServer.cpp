@@ -285,12 +285,12 @@ void WaitForControlConnectionClose(HANDLE pipe, HANDLE stopEvent)
 } // namespace
 
 void FinishBrokerSession(SessionFinishedHandler sessionFinishedHandler,
-    void* sessionFinishedContext, const BrokerRequest& request, bool sessionStarted,
-    bool processTreeExited)
+    void* sessionFinishedContext, const BrokerRequest& request, BrokerSession& session,
+    bool sessionStarted, bool processTreeExited)
 {
     if (sessionStarted && sessionFinishedHandler != nullptr)
     {
-        sessionFinishedHandler(sessionFinishedContext, request, processTreeExited);
+        sessionFinishedHandler(sessionFinishedContext, request, session, processTreeExited);
     }
 }
 
@@ -302,7 +302,8 @@ void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
     std::string message;
     BrokerRequest request;
     BrokerCallerIdentity caller;
-    BrokerChildProcess child;
+    BrokerSession session;
+    BrokerChildProcess& child = session.child;
     std::string response;
     bool sessionStarted = false;
     if (!ReadRequest(pipe, stopEvent, message) || !CaptureCallerIdentity(pipe, caller))
@@ -354,7 +355,7 @@ void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
         }
         else
         {
-            const DWORD launchError = launchRequestHandler(launchContext, request, caller, child);
+            const DWORD launchError = launchRequestHandler(launchContext, request, caller, session);
             if (launchError == ERROR_SUCCESS && child)
             {
                 sessionStarted = true;
@@ -399,14 +400,18 @@ void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
     }
     if (!child.TerminateAndWaitForExit())
     {
-        FinishBrokerSession(
-            sessionFinishedHandler, sessionFinishedContext, request, sessionStarted, false);
+        FinishBrokerSession(sessionFinishedHandler,
+            sessionFinishedContext,
+            request,
+            session,
+            sessionStarted,
+            false);
         // Keep the Job, desktop lease, and session slot owned by this worker until
         // the complete tree is confirmed gone, including after a failed Job query.
         child.TerminateAndWaitForExitConfirmed();
     }
     FinishBrokerSession(
-        sessionFinishedHandler, sessionFinishedContext, request, sessionStarted, true);
+        sessionFinishedHandler, sessionFinishedContext, request, session, sessionStarted, true);
     if (waitForControlClose)
     {
         WaitForControlConnectionClose(pipe, stopEvent);

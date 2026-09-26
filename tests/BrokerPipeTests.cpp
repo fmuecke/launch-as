@@ -33,10 +33,11 @@ struct SessionFinishCapture
     bool invoked = false;
     bool processTreeExited = true;
     std::wstring profileId;
+    launch_as::broker::BrokerSession* session = nullptr;
 };
 
-void CaptureSessionFinished(
-    void* context, const launch_as::broker::BrokerRequest& request, bool processTreeExited)
+void CaptureSessionFinished(void* context, const launch_as::broker::BrokerRequest& request,
+    launch_as::broker::BrokerSession& session, bool processTreeExited)
 {
     auto* capture = static_cast<SessionFinishCapture*>(context);
     if (capture != nullptr)
@@ -44,6 +45,7 @@ void CaptureSessionFinished(
         capture->invoked = true;
         capture->processTreeExited = processTreeExited;
         capture->profileId = request.profileId;
+        capture->session = &session;
     }
 }
 
@@ -52,17 +54,69 @@ void CaptureSessionFinished(
     launch_as::broker::BrokerRequest request;
     request.profileId = L"LaunchAsUser";
     SessionFinishCapture capture;
-    launch_as::broker::FinishBrokerSession(CaptureSessionFinished, &capture, request, true, false);
+    launch_as::broker::BrokerSession session;
+    launch_as::broker::FinishBrokerSession(
+        CaptureSessionFinished, &capture, request, session, true, false);
     return Expect(capture.invoked,
                L"The broker did not report an unconfirmed teardown to the session handler.") &&
            Expect(!capture.processTreeExited,
                L"The broker did not report the unconfirmed process tree to the session handler.") &&
            Expect(capture.profileId == request.profileId,
-               L"The broker changed the profile while finishing a session.");
+               L"The broker changed the profile while finishing a session.") &&
+           Expect(capture.session == &session,
+               L"The broker did not forward the worker-owned session to the finish handler.");
+}
+
+[[nodiscard]] bool TestSessionDestructorConfirmsProcessTreeExit()
+{
+    launch_as::UniqueHandle job;
+    launch_as::UniqueHandle process;
+    {
+        launch_as::broker::BrokerSession session;
+        if (!Expect(launch_as::broker::LaunchDelayedBrokerChildForTesting(session.child) ==
+                        ERROR_SUCCESS,
+                L"Could not launch the session cleanup test child."))
+        {
+            return false;
+        }
+        HANDLE duplicateJob = nullptr;
+        HANDLE duplicateProcess = nullptr;
+        const BOOL jobDuplicated = DuplicateHandle(GetCurrentProcess(),
+            session.child.job(),
+            GetCurrentProcess(),
+            &duplicateJob,
+            0,
+            FALSE,
+            DUPLICATE_SAME_ACCESS);
+        job.reset(duplicateJob);
+        const BOOL processDuplicated = DuplicateHandle(GetCurrentProcess(),
+            session.child.process(),
+            GetCurrentProcess(),
+            &duplicateProcess,
+            0,
+            FALSE,
+            DUPLICATE_SAME_ACCESS);
+        process.reset(duplicateProcess);
+        if (!Expect(jobDuplicated && processDuplicated,
+                L"Could not retain handles for independent session cleanup verification."))
+        {
+            return false;
+        }
+    }
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting {};
+    return Expect(WaitForSingleObject(process.get(), 0) == WAIT_OBJECT_0,
+               L"Session destruction returned before its child exited.") &&
+           Expect(QueryInformationJobObject(job.get(),
+                      JobObjectBasicAccountingInformation,
+                      &accounting,
+                      sizeof(accounting),
+                      nullptr) &&
+                      accounting.ActiveProcesses == 0,
+               L"Session destruction returned before the complete Job tree exited.");
 }
 
 DWORD CaptureLaunchRequest(void* context, const launch_as::broker::BrokerRequest& request,
-    const launch_as::broker::BrokerCallerIdentity& caller, launch_as::broker::BrokerChildProcess&)
+    const launch_as::broker::BrokerCallerIdentity& caller, launch_as::broker::BrokerSession&)
 {
     auto* capture = static_cast<LaunchCapture*>(context);
     if (capture == nullptr)
@@ -78,15 +132,15 @@ DWORD CaptureLaunchRequest(void* context, const launch_as::broker::BrokerRequest
 }
 
 DWORD LaunchQuickChild(void*, const launch_as::broker::BrokerRequest&,
-    const launch_as::broker::BrokerCallerIdentity&, launch_as::broker::BrokerChildProcess& child)
+    const launch_as::broker::BrokerCallerIdentity&, launch_as::broker::BrokerSession& session)
 {
-    return launch_as::broker::LaunchQuickBrokerChildForTesting(child);
+    return launch_as::broker::LaunchQuickBrokerChildForTesting(session.child);
 }
 
 DWORD LaunchDelayedChild(void*, const launch_as::broker::BrokerRequest&,
-    const launch_as::broker::BrokerCallerIdentity&, launch_as::broker::BrokerChildProcess& child)
+    const launch_as::broker::BrokerCallerIdentity&, launch_as::broker::BrokerSession& session)
 {
-    return launch_as::broker::LaunchDelayedBrokerChildForTesting(child);
+    return launch_as::broker::LaunchDelayedBrokerChildForTesting(session.child);
 }
 
 class ServerThread final
@@ -441,7 +495,8 @@ int wmain()
     response.resize(bytesRead);
     if (!TestInteractiveModeDispatchesAuthenticatedCaller() ||
         !TestUnconfirmedTeardownNotifiesSessionHandler() ||
-        !TestWorkerReleasesHeldControlClient() || !TestInteractiveWorkerOwnsDetachedProcessTree())
+        !TestSessionDestructorConfirmsProcessTreeExit() || !TestWorkerReleasesHeldControlClient() ||
+        !TestInteractiveWorkerOwnsDetachedProcessTree())
     {
         return 1;
     }

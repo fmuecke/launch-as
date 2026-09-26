@@ -423,7 +423,8 @@ BOOL CALLBACK IsWindowWithTitleVisible(HWND window, LPARAM context)
         std::wstring(targetWindowTitle),
         L"4000"
     };
-    launch_as::broker::BrokerChildProcess child;
+    launch_as::broker::BrokerSession session;
+    auto& child = session.child;
     launch_as::broker::BrokerRequest request;
     request.operation = launch_as::broker::RequestOperation::InteractiveLaunch;
     request.requestId = nonce;
@@ -444,18 +445,21 @@ BOOL CALLBACK IsWindowWithTitleVisible(HWND window, LPARAM context)
     DWORD unconfirmedReleaseError = accountCreateError;
     DWORD targetExitCode = ERROR_CANCELLED;
     bool jobTreeExitedBeforeRelease = false;
+    bool connectionHeld = false;
+    bool connectionReleased = false;
     {
         launch_as::broker::BrokerApplication application(
             enrollmentDirectory.native(), callerUserSid);
         if (accountCreated && callerLogonSidError == ERROR_SUCCESS &&
             callerUserSidError == ERROR_SUCCESS)
         {
-            launchError = application.Launch(request, caller, child);
+            launchError = application.Launch(request, caller, session);
             waitError = launchError;
         }
         if (launchError == ERROR_SUCCESS)
         {
-            unconfirmedReleaseError = application.FinishSession(request, false);
+            unconfirmedReleaseError = application.FinishSession(request, session, false);
+            connectionHeld = static_cast<bool>(session.desktopLease);
         }
         if (launchError == ERROR_SUCCESS)
         {
@@ -481,10 +485,10 @@ BOOL CALLBACK IsWindowWithTitleVisible(HWND window, LPARAM context)
             waitError == ERROR_SUCCESS && child.WaitForProcessTreeExit(5'000);
         if (launchError == ERROR_SUCCESS)
         {
-            releaseError = application.FinishSession(request, jobTreeExitedBeforeRelease);
+            releaseError = application.FinishSession(request, session, jobTreeExitedBeforeRelease);
+            connectionReleased = !session.desktopLease;
         }
     }
-    const bool connectionHeld = launchError == ERROR_SUCCESS;
     const bool childCleanupSucceeded = child.TerminateAndWaitForExit();
 
     const std::map<std::string, std::string> targetResult = ReadProbeResult(targetResultPath);
@@ -526,6 +530,7 @@ BOOL CALLBACK IsWindowWithTitleVisible(HWND window, LPARAM context)
     result << "targetLogonSidError=" << targetLogonSidError << '\n';
     result << "targetLogonSidTextError=" << targetLogonSidTextError << '\n';
     result << "connectionHeldAfterAcquire=" << (connectionHeld ? "true" : "false") << '\n';
+    result << "connectionReleasedAfterExit=" << (connectionReleased ? "true" : "false") << '\n';
     result << "acquireError=" << launchError << '\n';
     result << "waitError=" << waitError << '\n';
     result << "targetExitCode=" << targetExitCode << '\n';
@@ -544,7 +549,7 @@ BOOL CALLBACK IsWindowWithTitleVisible(HWND window, LPARAM context)
         processTokenError == ERROR_SUCCESS && isLocalSystem &&
         callerLogonSidError == ERROR_SUCCESS && callerUserSidError == ERROR_SUCCESS &&
         accountCreateError == ERROR_SUCCESS && targetLogonSidError == ERROR_SUCCESS &&
-        targetLogonSidTextError == ERROR_SUCCESS && connectionHeld &&
+        targetLogonSidTextError == ERROR_SUCCESS && connectionHeld && connectionReleased &&
         launchError == ERROR_SUCCESS && waitError == ERROR_SUCCESS &&
         targetExitCode == ERROR_SUCCESS && jobTreeExitedBeforeRelease &&
         unconfirmedReleaseError == ERROR_BUSY && releaseError == ERROR_SUCCESS &&

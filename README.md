@@ -1,6 +1,6 @@
 <!-- Project URL: https://github.com/fmuecke/launch-as -->
 
-# launch-as
+# launch-as [![Windows build](https://github.com/fmuecke/launch-as/actions/workflows/build.yml/badge.svg)](https://github.com/fmuecke/launch-as/actions/workflows/build.yml)
 
 Launch-as is currently used in [agent-win-sandbox](https://github.com/fmuecke/agent-win-sandbox) to create a least-privilege session for a coding agent like Claude Code or GitHub Copilot CLI.
 

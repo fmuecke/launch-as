@@ -1,0 +1,51 @@
+# SPDX-FileCopyrightText: 2026 Florian Mücke
+# SPDX-License-Identifier: GPL-3.0-only
+# Project: https://github.com/fmuecke/launch-as
+
+name: Windows build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: MSVC x64 Release
+    runs-on: windows-2022
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      # build.ps1 initializes the x64 Visual Studio environment via vswhere.
+      CC: cl
+      CXX: cl
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Build, test, and package
+        # RunTests excludes elevated and interactive tests that need Windows Sandbox.
+        run: .\build.ps1 -Configuration Release -RunTests -PackageRelease
+
+      - name: Upload release package
+        uses: actions/upload-artifact@v7
+        with:
+          name: launch-as-msvc-x64-release
+          path: out/launch-as-v*-win64.zip
+          if-no-files-found: error
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: launch-as-test-logs
+          path: out/release-build/Testing/Temporary/
+          if-no-files-found: ignore

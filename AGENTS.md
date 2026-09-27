@@ -1,3 +1,28 @@
+# Agent Working Agreement
+
+Optimize for the intended outcome, not merely the requested implementation.
+
+- Clarify consequential assumptions early.
+- Treat requirements and inherited constraints as hypotheses.
+- Remove unnecessary scope before adding or optimizing anything.
+- Prefer eliminating causes over compensating for symptoms.
+- Complexity must justify itself.
+- First make the change easy, then make the easy change.
+- Tidy first when a small structural change makes the intended change simpler or safer.
+- For changed functional behavior, prefer the simplest meaningful test first when practical.
+- Keep structural and behavioral changes separate when practical.
+- Prefer small, reversible steps and fast feedback.
+
+Use `first-principles-analysis` for significant design, architecture, requirements, or optimization decisions.
+Use `security-review` for security-sensitive work.
+Use `redpen` for human-facing prose where signal/noise matters.
+
+## Completion
+
+Use the `definition-of-done` skill to establish required verification early and before any claim that coding work is complete, fixed, ready, or done.
+
+---
+
 # Repository Guidelines
 
 ## Structure
@@ -45,11 +70,10 @@ Requires Visual Studio/MSVC, a Windows SDK, CMake 3.25+, PowerShell, and
 `clang-format` on `PATH`. `build.ps1` recursively formats native sources before
 configuration; review formatting-only changes before committing.
 
-Acceptance testing must not depend on a host-installed broker or a host test account.
-The Sandbox workflow installs the production-named broker only inside the disposable
-guest. It reserves `LaunchAsDevCaller` for a fresh standard caller and
-`LaunchAsDevTestUser` for the managed target. Leaf acceptance scripts require the
-account explicitly and are orchestrated automatically by the guest workflow.
+Use the reusable [windows-sandbox-tests](.agents/skills/windows-sandbox-tests/SKILL.md)
+skill to run, diagnose, or extend Sandbox tests. Read the
+[launch-as workflow guide](tests/windows-sandbox-workflow.md) for this project's
+commands, guest identities, result files, and coverage.
 
 ## Code
 

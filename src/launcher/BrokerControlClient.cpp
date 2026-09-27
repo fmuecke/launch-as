@@ -91,8 +91,8 @@ DWORD LaunchBrokerInteractive(std::wstring_view profileId, std::span<const std::
 }
 
 DWORD LaunchBrokerConsole(std::wstring_view profileId, std::span<const std::wstring> arguments,
-    std::wstring_view workingDirectory, const TerminalPipeNames& pipes, COORD terminalSize,
-    bool inheritCursor, BrokerControlConnection& connection, DWORD& processId)
+    std::wstring_view workingDirectory, const TerminalPipeNames& pipes, bool inheritCursor,
+    BrokerControlConnection& connection, DWORD& processId)
 {
     connection.Reset();
     processId = 0;
@@ -109,7 +109,6 @@ DWORD LaunchBrokerConsole(std::wstring_view profileId, std::span<const std::wstr
             pipes.input,
             pipes.output,
             pipes.resize,
-            terminalSize,
             inheritCursor,
             request))
     {

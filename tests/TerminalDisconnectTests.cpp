@@ -106,9 +106,6 @@ int wmain(int argumentCount, wchar_t* arguments[])
 
     const std::vector<std::wstring> hostArguments {
         L"--internal-pseudoconsole-host",
-        L"--size",
-        L"120",
-        L"30",
         L"--pipe-in",
         pipeNames.input,
         L"--pipe-out",

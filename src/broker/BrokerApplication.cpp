@@ -144,10 +144,6 @@ DWORD BrokerApplication::Configure(const BrokerRequest& request, const BrokerCal
     {
         return complete(registration_.List(accounts));
     }
-    if (!request.confirmed)
-    {
-        return complete(ERROR_CANCELLED);
-    }
     if (!caller.isElevated)
     {
         return complete(ERROR_ELEVATION_REQUIRED);
@@ -257,9 +253,6 @@ DWORD BrokerApplication::Launch(
     }
     std::vector<std::wstring> conhostArguments {
         L"--internal-pseudoconsole-host",
-        L"--size",
-        std::to_wstring(request.console.columns),
-        std::to_wstring(request.console.rows),
     };
     if (request.console.inheritCursor)
     {

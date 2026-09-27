@@ -32,8 +32,6 @@ struct ConsoleRequest
     std::wstring pipeIn;
     std::wstring pipeOut;
     std::wstring pipeResize;
-    SHORT columns = 0;
-    SHORT rows = 0;
     bool inheritCursor = false;
 };
 
@@ -66,7 +64,6 @@ struct BrokerRequest
     RequestOperation operation = RequestOperation::ConsoleLaunch;
     std::wstring requestId;
     std::wstring profileId;
-    bool confirmed = false;
     bool force = false;
     std::vector<std::wstring> arguments;
     std::wstring workingDirectory;
@@ -84,7 +81,6 @@ struct InteractiveLeaseRequest
 {
     InteractiveLeaseOperation operation = InteractiveLeaseOperation::Acquire;
     std::wstring nonce;
-    std::wstring desktop;
     std::wstring childLogonSid;
 };
 
@@ -105,12 +101,13 @@ enum class ParseResult
 [[nodiscard]] bool ParseInteractiveLeaseResponse(std::string_view response,
     InteractiveLeaseOperation expectedOperation, std::wstring_view expectedNonce,
     DWORD& win32Error);
+// The broker accepts force only with TakeOver.
 [[nodiscard]] std::string BuildManagementRequest(RequestOperation operation,
-    std::wstring_view requestId, std::wstring_view profileId, bool confirmed, bool force = false);
+    std::wstring_view requestId, std::wstring_view profileId, bool force = false);
 [[nodiscard]] bool BuildConsoleLaunchRequest(std::wstring_view requestId,
     std::wstring_view profileId, std::span<const std::wstring> arguments,
     std::wstring_view workingDirectory, std::wstring_view pipeIn, std::wstring_view pipeOut,
-    std::wstring_view pipeResize, COORD terminalSize, bool inheritCursor, std::string& request);
+    std::wstring_view pipeResize, bool inheritCursor, std::string& request);
 [[nodiscard]] bool BuildInteractiveLaunchRequest(std::wstring_view requestId,
     std::wstring_view profileId, std::span<const std::wstring> arguments,
     std::wstring_view workingDirectory, std::wstring_view leasePipe, std::wstring_view nonce,

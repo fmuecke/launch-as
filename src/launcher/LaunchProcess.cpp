@@ -141,7 +141,6 @@ ExitCode RunBrokerConsole(const AccountIdentity& account, const Options& options
         arguments,
         workingDirectory.native(),
         pipeNames,
-        terminalBridge.terminalSize(),
         terminalBridge.supportsCursorInheritance(),
         connection,
         processId);

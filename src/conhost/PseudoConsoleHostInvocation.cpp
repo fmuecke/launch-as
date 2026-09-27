@@ -4,8 +4,6 @@
 
 #include "PseudoConsoleHostInvocation.h"
 
-#include <cwchar>
-#include <limits>
 #include <string_view>
 
 namespace launch_as
@@ -14,23 +12,10 @@ namespace
 {
 
 constexpr std::wstring_view HostArgument = L"--internal-pseudoconsole-host";
-constexpr std::wstring_view SizeArgument = L"--size";
 constexpr std::wstring_view InheritCursorArgument = L"--inherit-cursor";
 constexpr std::wstring_view PipeInArgument = L"--pipe-in";
 constexpr std::wstring_view PipeOutArgument = L"--pipe-out";
 constexpr std::wstring_view PipeResizeArgument = L"--pipe-resize";
-
-[[nodiscard]] bool ParseDimension(const wchar_t* text, SHORT& value) noexcept
-{
-    wchar_t* end = nullptr;
-    const long parsed = std::wcstol(text, &end, 10);
-    if (end == text || *end != L'\0' || parsed <= 0 || parsed > std::numeric_limits<SHORT>::max())
-    {
-        return false;
-    }
-    value = static_cast<SHORT>(parsed);
-    return true;
-}
 
 } // namespace
 
@@ -42,15 +27,12 @@ bool IsPseudoConsoleHostInvocation(std::span<wchar_t*> arguments) noexcept
 bool ParsePseudoConsoleHostInvocation(
     std::span<wchar_t*> arguments, PseudoConsoleHostInvocation& invocation)
 {
-    if (arguments.size() < 7 || std::wstring_view(arguments[1]) != HostArgument ||
-        std::wstring_view(arguments[2]) != SizeArgument ||
-        !ParseDimension(arguments[3], invocation.terminalSize.X) ||
-        !ParseDimension(arguments[4], invocation.terminalSize.Y))
+    if (arguments.size() < 4 || std::wstring_view(arguments[1]) != HostArgument)
     {
         return false;
     }
 
-    std::size_t separatorIndex = 5;
+    std::size_t separatorIndex = 2;
     invocation.inheritCursor =
         std::wstring_view(arguments[separatorIndex]) == InheritCursorArgument;
     if (invocation.inheritCursor)

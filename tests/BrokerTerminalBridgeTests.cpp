@@ -42,9 +42,6 @@ constexpr ULONGLONG BrokerConnectionTimeoutBoundMilliseconds = 1'000;
         std::filesystem::path(systemDirectory.data()) / L"cmd.exe";
     const std::vector<std::wstring> arguments {
         L"--internal-pseudoconsole-host",
-        L"--size",
-        L"120",
-        L"30",
         L"--pipe-in",
         pipeNames.input,
         L"--pipe-out",
@@ -162,9 +159,6 @@ constexpr ULONGLONG BrokerConnectionTimeoutBoundMilliseconds = 1'000;
         std::filesystem::path(systemDirectory.data()) / L"cmd.exe";
     const std::vector<std::wstring> arguments {
         L"--internal-pseudoconsole-host",
-        L"--size",
-        L"120",
-        L"30",
         L"--pipe-in",
         pipeNames.input,
         L"--pipe-out",

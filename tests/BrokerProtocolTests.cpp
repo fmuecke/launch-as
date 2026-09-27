@@ -29,14 +29,12 @@ constexpr char ValidRequest[] = R"json({
     "pipeIn": "\\\\.\\pipe\\launch-as-123-in",
     "pipeOut": "\\\\.\\pipe\\launch-as-123-out",
     "pipeResize": "\\\\.\\pipe\\launch-as-123-resize",
-    "cols": 120,
-    "rows": 30,
     "inheritCursor": true
   }
 })json";
 
 constexpr char LegacyConsoleRequest[] =
-    R"json({"version":1,"requestId":"123e4567-e89b-12d3-a456-426614174000","operation":"launch","profileId":"LaunchAsUser","mode":"console","arguments":[],"workingDirectory":"C:\\repo","console":{"pipeIn":"\\\\.\\pipe\\launch-as-123-in","pipeOut":"\\\\.\\pipe\\launch-as-123-out","pipeResize":"\\\\.\\pipe\\launch-as-123-resize","cols":120,"rows":30}})json";
+    R"json({"version":1,"requestId":"123e4567-e89b-12d3-a456-426614174000","operation":"launch","profileId":"LaunchAsUser","mode":"console","arguments":[],"workingDirectory":"C:\\repo","console":{"pipeIn":"\\\\.\\pipe\\launch-as-123-in","pipeOut":"\\\\.\\pipe\\launch-as-123-out","pipeResize":"\\\\.\\pipe\\launch-as-123-resize"}})json";
 
 constexpr char InteractiveRequest[] = R"json({
   "version": 1,
@@ -62,24 +60,23 @@ constexpr char ForgetRequest[] = R"json({
   "version": 1,
   "requestId": "123e4567-e89b-12d3-a456-426614174000",
   "operation": "forget",
-  "profileId": "LaunchAsUser",
-  "confirmed": true
+  "profileId": "LaunchAsUser"
 })json";
 
-constexpr char DeleteRequest[] = R"json({
+constexpr char ForcedDeleteRequest[] = R"json({
   "version": 1,
   "requestId": "123e4567-e89b-12d3-a456-426614174000",
   "operation": "delete",
   "profileId": "LaunchAsUser",
-  "confirmed": true,
   "force": true
 })json";
 
-constexpr char UnconfirmedCreateRequest[] = R"json({
+constexpr char RetiredConfirmedRequest[] = R"json({
   "version": 1,
   "requestId": "123e4567-e89b-12d3-a456-426614174000",
   "operation": "create",
-  "profileId": "sandbox"
+  "profileId": "sandbox",
+  "confirmed": true
 })json";
 
 constexpr wchar_t InteractiveLeaseNonce[] = L"6f9619ff-8b86-d011-b42d-00c04fc964ff";
@@ -96,8 +93,6 @@ int wmain()
         !Expect(request.arguments.size() == 3 && request.arguments[1] == L"café" &&
                     request.arguments[2] == L"emoji \U0001F680",
             L"Unicode argument was not decoded.") ||
-        !Expect(request.console.columns == 120 && request.console.rows == 30,
-            L"Console size was not decoded.") ||
         !Expect(request.console.inheritCursor, L"Cursor-inheritance capability was not decoded.") ||
         !Expect(request.profileId == L"LaunchAsUser", L"Profile id was not decoded."))
     {
@@ -140,17 +135,17 @@ int wmain()
     {
         return 1;
     }
-    if (!Expect(launch_as::broker::ParseBrokerRequest(DeleteRequest, request) ==
-                        launch_as::broker::ParseResult::Success &&
-                    request.operation == launch_as::broker::RequestOperation::Delete &&
-                    request.force,
-            L"Forced delete request was rejected."))
-    {
-        return 1;
-    }
-    if (!Expect(launch_as::broker::ParseBrokerRequest(UnconfirmedCreateRequest, request) ==
+    std::string sizedConsoleRequest(ValidRequest);
+    sizedConsoleRequest.insert(sizedConsoleRequest.find("\"inheritCursor\""), "\"cols\": 120, ");
+    if (!Expect(launch_as::broker::ParseBrokerRequest(ForcedDeleteRequest, request) ==
                     launch_as::broker::ParseResult::InvalidRequest,
-            L"Unconfirmed registration request was accepted."))
+            L"A forced request other than takeover was accepted.") ||
+        !Expect(launch_as::broker::ParseBrokerRequest(RetiredConfirmedRequest, request) ==
+                    launch_as::broker::ParseResult::InvalidRequest,
+            L"A request with the retired confirmed field was accepted.") ||
+        !Expect(launch_as::broker::ParseBrokerRequest(sizedConsoleRequest, request) ==
+                    launch_as::broker::ParseResult::InvalidRequest,
+            L"A console request with the retired cols field was accepted."))
     {
         return 1;
     }
@@ -159,15 +154,14 @@ int wmain()
     const std::string acquireLease = launch_as::broker::BuildInteractiveLeaseAcquireRequest(
         InteractiveLeaseNonce, InteractiveLeaseLogonSid);
     if (!Expect(acquireLease == "{\"version\":1,\"operation\":\"acquire\",\"nonce\":"
-                                "\"6f9619ff-8b86-d011-b42d-00c04fc964ff\",\"desktop\":"
-                                "\"WinSta0\\\\Default\",\"childLogonSid\":\"S-1-5-5-123-456\"}",
+                                "\"6f9619ff-8b86-d011-b42d-00c04fc964ff\","
+                                "\"childLogonSid\":\"S-1-5-5-123-456\"}",
             L"Interactive lease acquire encoding is not stable.") ||
         !Expect(
             launch_as::broker::ParseInteractiveLeaseRequest(
                 acquireLease, InteractiveLeaseNonce, leaseRequest) &&
                 leaseRequest.operation == launch_as::broker::InteractiveLeaseOperation::Acquire &&
                 leaseRequest.nonce == InteractiveLeaseNonce &&
-                leaseRequest.desktop == L"WinSta0\\Default" &&
                 leaseRequest.childLogonSid == InteractiveLeaseLogonSid,
             L"Interactive lease acquire request was not decoded."))
     {
@@ -176,6 +170,8 @@ int wmain()
 
     std::string unexpectedLeaseField = acquireLease;
     unexpectedLeaseField.insert(unexpectedLeaseField.rfind('}'), ",\"sessionId\":1");
+    std::string desktopLease = acquireLease;
+    desktopLease.insert(desktopLease.rfind('}'), ",\"desktop\":\"WinSta0\\\\Default\"");
     std::string accountSidLease = acquireLease;
     accountSidLease.replace(accountSidLease.find("S-1-5-5-123-456"),
         std::string("S-1-5-5-123-456").size(),
@@ -186,6 +182,9 @@ int wmain()
         !Expect(!launch_as::broker::ParseInteractiveLeaseRequest(
                     unexpectedLeaseField, InteractiveLeaseNonce, leaseRequest),
             L"Interactive lease request accepted an unexpected session id.") ||
+        !Expect(!launch_as::broker::ParseInteractiveLeaseRequest(
+                    desktopLease, InteractiveLeaseNonce, leaseRequest),
+            L"Interactive lease request accepted the retired desktop field.") ||
         !Expect(!launch_as::broker::ParseInteractiveLeaseRequest(
                     accountSidLease, InteractiveLeaseNonce, leaseRequest),
             L"Interactive lease request accepted an account SID instead of a logon SID."))
@@ -218,8 +217,16 @@ int wmain()
             launch_as::broker::ParseInteractiveLeaseRequest(
                 releaseLease, InteractiveLeaseNonce, leaseRequest) &&
                 leaseRequest.operation == launch_as::broker::InteractiveLeaseOperation::Release &&
-                leaseRequest.desktop.empty() && leaseRequest.childLogonSid.empty(),
+                leaseRequest.childLogonSid.empty(),
             L"Interactive lease release request was not decoded."))
+    {
+        return 1;
+    }
+    std::string releaseWithSid = releaseLease;
+    releaseWithSid.insert(releaseWithSid.rfind('}'), ",\"childLogonSid\":\"S-1-5-5-123-456\"");
+    if (!Expect(!launch_as::broker::ParseInteractiveLeaseRequest(
+                    releaseWithSid, InteractiveLeaseNonce, leaseRequest),
+            L"Interactive lease release request accepted a child logon SID."))
     {
         return 1;
     }
@@ -227,13 +234,11 @@ int wmain()
         launch_as::broker::BuildManagementRequest(launch_as::broker::RequestOperation::TakeOver,
             L"123e4567-e89b-12d3-a456-426614174000",
             L"account with space",
-            true,
             true);
     if (!Expect(launch_as::broker::ParseBrokerRequest(managementRequest, request) ==
                         launch_as::broker::ParseResult::Success &&
                     request.operation == launch_as::broker::RequestOperation::TakeOver &&
-                    request.profileId == L"account with space" && request.confirmed &&
-                    request.force,
+                    request.profileId == L"account with space" && request.force,
             L"Built management request was not accepted by the protocol parser.") ||
         !Expect(launch_as::broker::RequestOperationSuccessReason(
                     launch_as::broker::RequestOperation::TakeOver) == "taken_over" &&
@@ -331,6 +336,15 @@ int wmain()
                     response, L"123e4567-e89b-12d3-a456-426614174000", parsedError) &&
                     parsedError == ERROR_NOT_READY,
             L"Error response did not preserve its Win32 error."))
+    {
+        return 1;
+    }
+    std::string invalidThenValidVersion = response;
+    invalidThenValidVersion.replace(
+        invalidThenValidVersion.find("\"version\":1"), 11, "\"version\":2,\"version\":1");
+    if (!Expect(!launch_as::broker::ParseErrorResponse(
+                    invalidThenValidVersion, L"123e4567-e89b-12d3-a456-426614174000", parsedError),
+            L"A response with an invalid then valid duplicate field was accepted."))
     {
         return 1;
     }

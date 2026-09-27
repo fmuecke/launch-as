@@ -15,7 +15,6 @@ namespace launch_as
 
 struct PseudoConsoleHostInvocation
 {
-    COORD terminalSize {};
     bool inheritCursor = false;
     std::filesystem::path executable;
     std::vector<std::wstring> processArguments;

@@ -316,26 +316,23 @@ class JsonReader final
            value.find_first_of(L"\\/", prefix.size()) == std::wstring::npos;
 }
 
-[[nodiscard]] bool ReadArguments(JsonReader& reader, std::vector<std::wstring>& arguments)
+// Reads a non-empty JSON object. readField consumes the value of each member and returns false to
+// reject the object, including for an unknown or duplicate name.
+template <typename ReadField>
+[[nodiscard]] bool ReadObject(JsonReader& reader, ReadField&& readField)
 {
-    if (!reader.Consume('['))
+    if (!reader.Consume('{'))
     {
         return false;
     }
-    if (reader.Consume(']'))
-    {
-        return true;
-    }
     for (;;)
     {
-        std::wstring argument;
-        if (!reader.String(argument) || argument.size() > 8 * 1024 ||
-            arguments.size() == MaximumArguments)
+        std::wstring name;
+        if (!reader.String(name) || !reader.Consume(':') || !readField(name))
         {
             return false;
         }
-        arguments.push_back(std::move(argument));
-        if (reader.Consume(']'))
+        if (reader.Consume('}'))
         {
             return true;
         }
@@ -346,7 +343,12 @@ class JsonReader final
     }
 }
 
-[[nodiscard]] bool ReadAccounts(JsonReader& reader, std::vector<std::wstring>& accounts)
+// Marks a field as seen; returns false when it was already seen.
+[[nodiscard]] bool FirstSeen(bool& seen) noexcept { return !std::exchange(seen, true); }
+
+template <typename IsValid>
+[[nodiscard]] bool ReadStringArray(
+    JsonReader& reader, std::vector<std::wstring>& values, IsValid&& isValid)
 {
     if (!reader.Consume('['))
     {
@@ -358,13 +360,12 @@ class JsonReader final
     }
     for (;;)
     {
-        std::wstring account;
-        if (!reader.String(account) || !IsValidProfileId(account) ||
-            accounts.size() == MaximumArguments)
+        std::wstring value;
+        if (!reader.String(value) || !isValid(value) || values.size() == MaximumArguments)
         {
             return false;
         }
-        accounts.push_back(std::move(account));
+        values.push_back(std::move(value));
         if (reader.Consume(']'))
         {
             return true;
@@ -378,121 +379,52 @@ class JsonReader final
 
 [[nodiscard]] bool ReadConsole(JsonReader& reader, ConsoleRequest& console)
 {
-    if (!reader.Consume('{'))
-    {
-        return false;
-    }
     bool pipeIn = false;
     bool pipeOut = false;
     bool pipeResize = false;
-    bool columns = false;
-    bool rows = false;
-    bool inheritCursorSeen = false;
-    for (;;)
-    {
-        std::wstring name;
-        if (!reader.String(name) || !reader.Consume(':'))
-        {
-            return false;
-        }
-        if (name == L"pipeIn" && !pipeIn)
-        {
-            pipeIn = reader.String(console.pipeIn);
-        }
-        else if (name == L"pipeOut" && !pipeOut)
-        {
-            pipeOut = reader.String(console.pipeOut);
-        }
-        else if (name == L"pipeResize" && !pipeResize)
-        {
-            pipeResize = reader.String(console.pipeResize);
-        }
-        else if (name == L"inheritCursor" && !inheritCursorSeen)
-        {
-            inheritCursorSeen = reader.Boolean(console.inheritCursor);
-        }
-        else
-        {
-            DWORD value = 0;
-            if ((name == L"cols" && !columns) || (name == L"rows" && !rows))
-            {
-                if (!reader.Unsigned(value) || value == 0 ||
-                    value > static_cast<DWORD>(std::numeric_limits<SHORT>::max()))
-                {
-                    return false;
-                }
-                if (name == L"cols")
-                {
-                    console.columns = static_cast<SHORT>(value);
-                    columns = true;
-                }
-                else
-                {
-                    console.rows = static_cast<SHORT>(value);
-                    rows = true;
-                }
-            }
-            else
-            {
-                return false;
-            }
-        }
-        if (!(pipeIn || name != L"pipeIn") || !(pipeOut || name != L"pipeOut") ||
-            !(pipeResize || name != L"pipeResize"))
-        {
-            return false;
-        }
-        if (reader.Consume('}'))
-        {
-            return pipeIn && pipeOut && pipeResize && columns && rows;
-        }
-        if (!reader.Consume(','))
-        {
-            return false;
-        }
-    }
+    bool inheritCursor = false;
+    return ReadObject(reader,
+               [&](std::wstring_view name)
+               {
+                   if (name == L"pipeIn")
+                   {
+                       return FirstSeen(pipeIn) && reader.String(console.pipeIn);
+                   }
+                   if (name == L"pipeOut")
+                   {
+                       return FirstSeen(pipeOut) && reader.String(console.pipeOut);
+                   }
+                   if (name == L"pipeResize")
+                   {
+                       return FirstSeen(pipeResize) && reader.String(console.pipeResize);
+                   }
+                   if (name == L"inheritCursor")
+                   {
+                       return FirstSeen(inheritCursor) && reader.Boolean(console.inheritCursor);
+                   }
+                   return false;
+               }) &&
+           pipeIn && pipeOut && pipeResize;
 }
 
 [[nodiscard]] bool ReadInteractiveLaunch(JsonReader& reader, InteractiveLaunchRequest& interactive)
 {
-    if (!reader.Consume('{'))
-    {
-        return false;
-    }
     bool leasePipe = false;
     bool nonce = false;
-    for (;;)
-    {
-        std::wstring name;
-        if (!reader.String(name) || !reader.Consume(':'))
-        {
-            return false;
-        }
-        if (name == L"leasePipe" && !leasePipe)
-        {
-            leasePipe = reader.String(interactive.leasePipe);
-        }
-        else if (name == L"nonce" && !nonce)
-        {
-            nonce = reader.String(interactive.nonce);
-        }
-        else
-        {
-            return false;
-        }
-        if (!(leasePipe || name != L"leasePipe") || !(nonce || name != L"nonce"))
-        {
-            return false;
-        }
-        if (reader.Consume('}'))
-        {
-            return leasePipe && nonce;
-        }
-        if (!reader.Consume(','))
-        {
-            return false;
-        }
-    }
+    return ReadObject(reader,
+               [&](std::wstring_view name)
+               {
+                   if (name == L"leasePipe")
+                   {
+                       return FirstSeen(leasePipe) && reader.String(interactive.leasePipe);
+                   }
+                   if (name == L"nonce")
+                   {
+                       return FirstSeen(nonce) && reader.String(interactive.nonce);
+                   }
+                   return false;
+               }) &&
+           leasePipe && nonce;
 }
 
 template <typename ParseAdditionalField>
@@ -502,67 +434,49 @@ template <typename ParseAdditionalField>
     ParseAdditionalField&& parseAdditionalField)
 {
     JsonReader reader(response);
-    if (!reader.Consume('{'))
-    {
-        return false;
-    }
-
     bool version = false;
     bool responseId = false;
     bool status = false;
     bool reason = false;
     bool error = false;
-    for (;;)
-    {
-        std::wstring name;
-        if (!reader.String(name) || !reader.Consume(':'))
+    const bool parsed = ReadObject(reader,
+        [&](std::wstring_view name)
         {
-            return false;
-        }
-        if (name == L"version" && !version)
-        {
-            DWORD value = 0;
-            version = reader.Unsigned(value) && value == 1;
-        }
-        else if (name == L"requestId" && !responseId)
-        {
-            std::wstring value;
-            responseId = reader.String(value) && value == requestId;
-        }
-        else if (name == L"status" && !status)
-        {
-            std::wstring value;
-            status = reader.String(value) && value == expectedStatus;
-        }
-        else if (name == L"reasonCode" && !reason)
-        {
-            std::wstring value;
-            reason = reader.String(value) &&
-                     (expectedReason.empty() ? !value.empty() : value == expectedReason);
-        }
-        else if (name == L"win32Error" && !error)
-        {
-            DWORD value = 0;
-            error = reader.Unsigned(value) && (!expectedWin32Error || value == *expectedWin32Error);
-            if (error && parsedWin32Error != nullptr)
+            DWORD number = 0;
+            std::wstring text;
+            if (name == L"version")
             {
-                *parsedWin32Error = value;
+                return FirstSeen(version) && reader.Unsigned(number) && number == 1;
             }
-        }
-        else if (!parseAdditionalField(name, reader))
-        {
-            return false;
-        }
-
-        if (reader.Consume('}'))
-        {
-            return reader.End() && version && responseId && status && reason && error;
-        }
-        if (!reader.Consume(','))
-        {
-            return false;
-        }
-    }
+            if (name == L"requestId")
+            {
+                return FirstSeen(responseId) && reader.String(text) && text == requestId;
+            }
+            if (name == L"status")
+            {
+                return FirstSeen(status) && reader.String(text) && text == expectedStatus;
+            }
+            if (name == L"reasonCode")
+            {
+                return FirstSeen(reason) && reader.String(text) &&
+                       (expectedReason.empty() ? !text.empty() : text == expectedReason);
+            }
+            if (name == L"win32Error")
+            {
+                if (!FirstSeen(error) || !reader.Unsigned(number) ||
+                    (expectedWin32Error && number != *expectedWin32Error))
+                {
+                    return false;
+                }
+                if (parsedWin32Error != nullptr)
+                {
+                    *parsedWin32Error = number;
+                }
+                return true;
+            }
+            return parseAdditionalField(name, reader);
+        });
+    return parsed && reader.End() && version && responseId && status && reason && error;
 }
 
 } // namespace
@@ -703,7 +617,7 @@ std::string_view RequestOperationFailureReason(RequestOperation operation) noexc
 }
 
 std::string BuildManagementRequest(RequestOperation operation, std::wstring_view requestId,
-    std::wstring_view profileId, bool confirmed, bool force)
+    std::wstring_view profileId, bool force)
 {
     std::string request = "{\"version\":1,\"requestId\":";
     AppendJsonString(request, requestId);
@@ -713,7 +627,6 @@ std::string BuildManagementRequest(RequestOperation operation, std::wstring_view
     {
         request += ",\"profileId\":";
         AppendJsonString(request, profileId);
-        request += confirmed ? ",\"confirmed\":true" : ",\"confirmed\":false";
     }
     if (force)
     {
@@ -764,11 +677,10 @@ namespace
 bool BuildConsoleLaunchRequest(std::wstring_view requestId, std::wstring_view profileId,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
     std::wstring_view pipeIn, std::wstring_view pipeOut, std::wstring_view pipeResize,
-    COORD terminalSize, bool inheritCursor, std::string& request)
+    bool inheritCursor, std::string& request)
 {
-    if (pipeIn.empty() || pipeOut.empty() || pipeResize.empty() || terminalSize.X <= 0 ||
-        terminalSize.Y <= 0 || !IsValidUtf16(pipeIn) || !IsValidUtf16(pipeOut) ||
-        !IsValidUtf16(pipeResize) ||
+    if (pipeIn.empty() || pipeOut.empty() || pipeResize.empty() || !IsValidUtf16(pipeIn) ||
+        !IsValidUtf16(pipeOut) || !IsValidUtf16(pipeResize) ||
         !BeginLaunchRequest(requestId, profileId, "console", arguments, workingDirectory, request))
     {
         return false;
@@ -779,9 +691,8 @@ bool BuildConsoleLaunchRequest(std::wstring_view requestId, std::wstring_view pr
     AppendJsonString(request, pipeOut);
     request += ",\"pipeResize\":";
     AppendJsonString(request, pipeResize);
-    request += ",\"cols\":" + std::to_string(terminalSize.X) +
-               ",\"rows\":" + std::to_string(terminalSize.Y) +
-               ",\"inheritCursor\":" + (inheritCursor ? "true" : "false") + "}}";
+    request += ",\"inheritCursor\":";
+    request += inheritCursor ? "true}}" : "false}}";
     return request.size() <= MaximumMessageBytes;
 }
 
@@ -811,165 +722,107 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
         return ParseResult::InvalidRequest;
     }
 
-    JsonReader reader(message);
-    if (!reader.Consume('{'))
-    {
-        return ParseResult::InvalidRequest;
-    }
-
-    bool version = false;
-    bool versionSeen = false;
-    bool requestId = false;
-    bool requestIdSeen = false;
-    bool operation = false;
-    bool operationSeen = false;
-    std::wstring operationName;
-    bool profile = false;
-    bool profileSeen = false;
-    bool modeSeen = false;
     enum class LaunchMode
     {
         Missing,
         Console,
-        Interactive,
-        Unknown
+        Interactive
     };
+    JsonReader reader(message);
+    std::wstring operationName;
     LaunchMode launchMode = LaunchMode::Missing;
+    bool version = false;
+    bool requestId = false;
+    bool operation = false;
+    bool profile = false;
+    bool mode = false;
     bool arguments = false;
-    bool argumentsSeen = false;
     bool workingDirectory = false;
-    bool workingDirectorySeen = false;
     bool console = false;
-    bool consoleSeen = false;
     bool interactive = false;
-    bool interactiveSeen = false;
-    bool confirmed = false;
-    bool confirmedSeen = false;
-    bool forceSeen = false;
-    for (;;)
-    {
-        std::wstring name;
-        if (!reader.String(name) || !reader.Consume(':'))
+    bool force = false;
+    const bool parsed = ReadObject(reader,
+        [&](std::wstring_view name)
         {
-            return ParseResult::InvalidRequest;
-        }
-        if (name == L"version" && !versionSeen)
-        {
-            versionSeen = true;
-            DWORD value = 0;
-            version = reader.Unsigned(value) && value == 1;
-        }
-        else if (name == L"requestId" && !requestIdSeen)
-        {
-            requestIdSeen = true;
-            requestId = reader.String(request.requestId);
-        }
-        else if (name == L"operation" && !operationSeen)
-        {
-            operationSeen = true;
-            operation = reader.String(operationName);
-        }
-        else if (name == L"profileId" && !profileSeen)
-        {
-            profileSeen = true;
-            profile = reader.String(request.profileId) && IsValidProfileId(request.profileId);
-        }
-        else if (name == L"mode" && !modeSeen)
-        {
-            modeSeen = true;
-            std::wstring value;
-            if (!reader.String(value))
+            if (name == L"version")
             {
-                launchMode = LaunchMode::Unknown;
+                DWORD value = 0;
+                return FirstSeen(version) && reader.Unsigned(value) && value == 1;
             }
-            else if (value == L"console")
+            if (name == L"requestId")
             {
-                launchMode = LaunchMode::Console;
+                return FirstSeen(requestId) && reader.String(request.requestId) &&
+                       IsRequestId(request.requestId);
             }
-            else if (value == L"interactive")
+            if (name == L"operation")
             {
-                launchMode = LaunchMode::Interactive;
+                return FirstSeen(operation) && reader.String(operationName);
             }
-            else
+            if (name == L"profileId")
             {
-                launchMode = LaunchMode::Unknown;
+                return FirstSeen(profile) && reader.String(request.profileId) &&
+                       IsValidProfileId(request.profileId);
             }
-        }
-        else if (name == L"arguments" && !argumentsSeen)
-        {
-            argumentsSeen = true;
-            arguments = ReadArguments(reader, request.arguments);
-        }
-        else if (name == L"workingDirectory" && !workingDirectorySeen)
-        {
-            workingDirectorySeen = true;
-            workingDirectory = reader.String(request.workingDirectory) &&
-                               !request.workingDirectory.empty() &&
-                               request.workingDirectory.size() <= 32 * 1024;
-        }
-        else if (name == L"console" && !consoleSeen)
-        {
-            consoleSeen = true;
-            console = ReadConsole(reader, request.console);
-        }
-        else if (name == L"interactive" && !interactiveSeen)
-        {
-            interactiveSeen = true;
-            interactive = ReadInteractiveLaunch(reader, request.interactive);
-        }
-        else if (name == L"confirmed" && !confirmedSeen)
-        {
-            confirmedSeen = true;
-            confirmed = reader.Boolean(request.confirmed);
-        }
-        else if (name == L"force" && !forceSeen)
-        {
-            forceSeen = true;
-            if (!reader.Boolean(request.force))
+            if (name == L"mode")
             {
-                return ParseResult::InvalidRequest;
+                std::wstring value;
+                if (!FirstSeen(mode) || !reader.String(value))
+                {
+                    return false;
+                }
+                launchMode = value == L"console"       ? LaunchMode::Console
+                             : value == L"interactive" ? LaunchMode::Interactive
+                                                       : LaunchMode::Missing;
+                return launchMode != LaunchMode::Missing;
             }
-        }
-        else
-        {
-            return ParseResult::InvalidRequest;
-        }
-        if (reader.Consume('}'))
-        {
-            break;
-        }
-        if (!reader.Consume(','))
-        {
-            return ParseResult::InvalidRequest;
-        }
-    }
-    if (!reader.End())
-    {
-        return ParseResult::InvalidRequest;
-    }
-    if (!version || !requestId || !operation || !IsRequestId(request.requestId))
+            if (name == L"arguments")
+            {
+                return FirstSeen(arguments) && ReadStringArray(reader,
+                                                   request.arguments,
+                                                   [](const std::wstring& argument)
+                                                   { return argument.size() <= 8 * 1024; });
+            }
+            if (name == L"workingDirectory")
+            {
+                return FirstSeen(workingDirectory) && reader.String(request.workingDirectory) &&
+                       !request.workingDirectory.empty() &&
+                       request.workingDirectory.size() <= 32 * 1024;
+            }
+            if (name == L"console")
+            {
+                return FirstSeen(console) && ReadConsole(reader, request.console);
+            }
+            if (name == L"interactive")
+            {
+                return FirstSeen(interactive) && ReadInteractiveLaunch(reader, request.interactive);
+            }
+            if (name == L"force")
+            {
+                return FirstSeen(force) && reader.Boolean(request.force);
+            }
+            return false;
+        });
+    if (!parsed || !reader.End() || !version || !requestId || !operation)
     {
         return ParseResult::InvalidRequest;
     }
     if (operationName == L"list")
     {
-        if (profileSeen || modeSeen || argumentsSeen || workingDirectorySeen || consoleSeen ||
-            interactiveSeen || confirmedSeen || forceSeen)
+        if (profile || mode || arguments || workingDirectory || console || interactive || force)
         {
             return ParseResult::InvalidRequest;
         }
         request.operation = RequestOperation::List;
         return ParseResult::Success;
     }
-    if (!profile)
+    if (!profile || (force && operationName != L"takeover"))
     {
         return ParseResult::InvalidRequest;
     }
     if (operationName == L"create" || operationName == L"takeover" || operationName == L"forget" ||
         operationName == L"delete")
     {
-        if (modeSeen || argumentsSeen || workingDirectorySeen || consoleSeen || interactiveSeen ||
-            !confirmedSeen || !confirmed)
+        if (mode || arguments || workingDirectory || console || interactive)
         {
             return ParseResult::InvalidRequest;
         }
@@ -979,18 +832,13 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
                                                            : RequestOperation::Delete;
         return ParseResult::Success;
     }
-    if (forceSeen)
-    {
-        return ParseResult::InvalidRequest;
-    }
-    if (operationName != L"launch")
+    if (operationName != L"launch" || !arguments || !workingDirectory)
     {
         return ParseResult::InvalidRequest;
     }
     if (launchMode == LaunchMode::Interactive)
     {
-        if (!arguments || !workingDirectory || consoleSeen || !interactive ||
-            !IsInteractiveLeasePipeName(request.interactive.leasePipe) ||
+        if (console || !interactive || !IsInteractiveLeasePipeName(request.interactive.leasePipe) ||
             !IsRequestId(request.interactive.nonce))
         {
             return ParseResult::InvalidRequest;
@@ -998,9 +846,8 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
         request.operation = RequestOperation::InteractiveLaunch;
         return ParseResult::Success;
     }
-    if (launchMode != LaunchMode::Console || !arguments || !workingDirectory || !console ||
-        interactiveSeen || !IsConsolePipeName(request.console.pipeIn) ||
-        !IsConsolePipeName(request.console.pipeOut) ||
+    if (launchMode != LaunchMode::Console || !console || interactive ||
+        !IsConsolePipeName(request.console.pipeIn) || !IsConsolePipeName(request.console.pipeOut) ||
         !IsConsolePipeName(request.console.pipeResize) ||
         request.console.pipeIn == request.console.pipeOut ||
         request.console.pipeIn == request.console.pipeResize ||
@@ -1021,7 +868,7 @@ std::string BuildInteractiveLeaseAcquireRequest(
     }
     std::string request = "{\"version\":1,\"operation\":\"acquire\",\"nonce\":";
     AppendJsonString(request, nonce);
-    request += ",\"desktop\":\"WinSta0\\\\Default\",\"childLogonSid\":";
+    request += ",\"childLogonSid\":";
     AppendJsonString(request, childLogonSid);
     request += '}';
     return request;
@@ -1049,89 +896,47 @@ bool ParseInteractiveLeaseRequest(
         return false;
     }
     JsonReader reader(message);
-    if (!reader.Consume('{'))
-    {
-        return false;
-    }
-    bool version = false;
-    bool versionSeen = false;
-    bool operation = false;
-    bool operationSeen = false;
-    bool nonce = false;
-    bool nonceSeen = false;
-    bool desktop = false;
-    bool desktopSeen = false;
-    bool childLogonSid = false;
-    bool childLogonSidSeen = false;
     std::wstring operationName;
-    for (;;)
-    {
-        std::wstring name;
-        if (!reader.String(name) || !reader.Consume(':'))
+    bool version = false;
+    bool operation = false;
+    bool nonce = false;
+    bool childLogonSid = false;
+    const bool parsed = ReadObject(reader,
+        [&](std::wstring_view name)
         {
+            if (name == L"version")
+            {
+                DWORD value = 0;
+                return FirstSeen(version) && reader.Unsigned(value) && value == 1;
+            }
+            if (name == L"operation")
+            {
+                return FirstSeen(operation) && reader.String(operationName) &&
+                       (operationName == L"acquire" || operationName == L"release");
+            }
+            if (name == L"nonce")
+            {
+                return FirstSeen(nonce) && reader.String(request.nonce) &&
+                       request.nonce == expectedNonce;
+            }
+            if (name == L"childLogonSid")
+            {
+                return FirstSeen(childLogonSid) && reader.String(request.childLogonSid) &&
+                       IsLogonSid(request.childLogonSid);
+            }
             return false;
-        }
-        if (name == L"version" && !versionSeen)
-        {
-            versionSeen = true;
-            DWORD value = 0;
-            version = reader.Unsigned(value) && value == 1;
-        }
-        else if (name == L"operation" && !operationSeen)
-        {
-            operationSeen = true;
-            operation = reader.String(operationName) &&
-                        (operationName == L"acquire" || operationName == L"release");
-        }
-        else if (name == L"nonce" && !nonceSeen)
-        {
-            nonceSeen = true;
-            nonce = reader.String(request.nonce) && request.nonce == expectedNonce;
-        }
-        else if (name == L"desktop" && !desktopSeen)
-        {
-            desktopSeen = true;
-            desktop = reader.String(request.desktop) && request.desktop == L"WinSta0\\Default";
-        }
-        else if (name == L"childLogonSid" && !childLogonSidSeen)
-        {
-            childLogonSidSeen = true;
-            childLogonSid =
-                reader.String(request.childLogonSid) && IsLogonSid(request.childLogonSid);
-        }
-        else
-        {
-            return false;
-        }
-        if (reader.Consume('}'))
-        {
-            break;
-        }
-        if (!reader.Consume(','))
-        {
-            return false;
-        }
-    }
-    if (!reader.End() || !version || !operation || !nonce)
+        });
+    if (!parsed || !reader.End() || !version || !operation || !nonce)
     {
         return false;
     }
-    if (operationName == L"acquire")
-    {
-        if (!desktop || !childLogonSid)
-        {
-            return false;
-        }
-        request.operation = InteractiveLeaseOperation::Acquire;
-        return true;
-    }
-    if (desktopSeen || childLogonSidSeen)
+    // Acquire requires the child logon SID; release must not carry one.
+    if (childLogonSid != (operationName == L"acquire"))
     {
         return false;
     }
-    request.operation = InteractiveLeaseOperation::Release;
-    request.desktop.clear();
-    request.childLogonSid.clear();
+    request.operation =
+        childLogonSid ? InteractiveLeaseOperation::Acquire : InteractiveLeaseOperation::Release;
     return true;
 }
 
@@ -1163,79 +968,53 @@ bool ParseInteractiveLeaseResponse(std::string_view response,
         return false;
     }
     JsonReader reader(response);
-    if (!reader.Consume('{'))
+    DWORD parsedError = ERROR_INVALID_DATA;
+    bool statusIsOk = false;
+    bool version = false;
+    bool operation = false;
+    bool nonce = false;
+    bool status = false;
+    bool error = false;
+    const bool parsed = ReadObject(reader,
+        [&](std::wstring_view name)
+        {
+            DWORD number = 0;
+            std::wstring text;
+            if (name == L"version")
+            {
+                return FirstSeen(version) && reader.Unsigned(number) && number == 1;
+            }
+            if (name == L"operation")
+            {
+                return FirstSeen(operation) && reader.String(text) &&
+                       text == InteractiveLeaseOperationName(expectedOperation);
+            }
+            if (name == L"nonce")
+            {
+                return FirstSeen(nonce) && reader.String(text) && text == expectedNonce;
+            }
+            if (name == L"status")
+            {
+                if (!FirstSeen(status) || !reader.String(text))
+                {
+                    return false;
+                }
+                statusIsOk = text == L"ok";
+                return statusIsOk || text == L"error";
+            }
+            if (name == L"win32Error")
+            {
+                return FirstSeen(error) && reader.Unsigned(parsedError);
+            }
+            return false;
+        });
+    if (!parsed || !reader.End() || !version || !operation || !nonce || !status || !error ||
+        statusIsOk != (parsedError == ERROR_SUCCESS))
     {
         return false;
     }
-    bool version = false;
-    bool versionSeen = false;
-    bool operation = false;
-    bool operationSeen = false;
-    bool nonce = false;
-    bool nonceSeen = false;
-    bool status = false;
-    bool statusSeen = false;
-    bool error = false;
-    bool errorSeen = false;
-    bool statusIsOk = false;
-    for (;;)
-    {
-        std::wstring name;
-        if (!reader.String(name) || !reader.Consume(':'))
-        {
-            return false;
-        }
-        if (name == L"version" && !versionSeen)
-        {
-            versionSeen = true;
-            DWORD value = 0;
-            version = reader.Unsigned(value) && value == 1;
-        }
-        else if (name == L"operation" && !operationSeen)
-        {
-            operationSeen = true;
-            std::wstring value;
-            operation =
-                reader.String(value) && value == InteractiveLeaseOperationName(expectedOperation);
-        }
-        else if (name == L"nonce" && !nonceSeen)
-        {
-            nonceSeen = true;
-            std::wstring value;
-            nonce = reader.String(value) && value == expectedNonce;
-        }
-        else if (name == L"status" && !statusSeen)
-        {
-            statusSeen = true;
-            std::wstring value;
-            status = reader.String(value) && (value == L"ok" || value == L"error");
-            statusIsOk = value == L"ok";
-        }
-        else if (name == L"win32Error" && !errorSeen)
-        {
-            errorSeen = true;
-            error = reader.Unsigned(win32Error);
-        }
-        else
-        {
-            return false;
-        }
-        if (reader.Consume('}'))
-        {
-            break;
-        }
-        if (!reader.Consume(','))
-        {
-            return false;
-        }
-    }
-    const bool valid = reader.End() && version && operation && nonce && status && error &&
-                       statusIsOk == (win32Error == ERROR_SUCCESS);
-    if (!valid)
-    {
-        win32Error = ERROR_INVALID_DATA;
-    }
-    return valid;
+    win32Error = parsedError;
+    return true;
 }
 
 std::string BuildErrorResponse(
@@ -1289,12 +1068,8 @@ bool ParseListResponse(
         nullptr,
         [&accounts, &listedAccounts](std::wstring_view name, JsonReader& reader)
         {
-            if (name != L"accounts" || listedAccounts)
-            {
-                return false;
-            }
-            listedAccounts = ReadAccounts(reader, accounts);
-            return listedAccounts;
+            return name == L"accounts" && FirstSeen(listedAccounts) &&
+                   ReadStringArray(reader, accounts, IsValidProfileId);
         });
     if (!parsed || !listedAccounts)
     {
@@ -1343,12 +1118,8 @@ bool ParseLaunchSuccessResponse(
         nullptr,
         [&processId, &process](std::wstring_view name, JsonReader& reader)
         {
-            if (name != L"processId" || process)
-            {
-                return false;
-            }
-            process = reader.Unsigned(processId) && processId != 0;
-            return process;
+            return name == L"processId" && FirstSeen(process) && reader.Unsigned(processId) &&
+                   processId != 0;
         });
     if (!parsed || !process)
     {
@@ -1379,14 +1150,7 @@ bool ParseLaunchExitResponse(
         ERROR_SUCCESS,
         nullptr,
         [&exitCode, &exit](std::wstring_view name, JsonReader& reader)
-        {
-            if (name != L"exitCode" || exit)
-            {
-                return false;
-            }
-            exit = reader.Unsigned(exitCode);
-            return exit;
-        });
+        { return name == L"exitCode" && FirstSeen(exit) && reader.Unsigned(exitCode); });
     if (!parsed || !exit)
     {
         exitCode = 0;
@@ -1424,17 +1188,11 @@ bool ParseLaunchHostFailureResponse(std::string_view response, std::wstring_view
         [&hostExitCode, &hostExit, &diagnostics, &diagnostic](
             std::wstring_view name, JsonReader& reader)
         {
-            if (name == L"hostExitCode" && !hostExit)
+            if (name == L"hostExitCode")
             {
-                hostExit = reader.Unsigned(hostExitCode);
-                return hostExit;
+                return FirstSeen(hostExit) && reader.Unsigned(hostExitCode);
             }
-            if (name == L"diagnostic" && !diagnostic)
-            {
-                diagnostic = reader.String(diagnostics);
-                return diagnostic;
-            }
-            return false;
+            return name == L"diagnostic" && FirstSeen(diagnostic) && reader.String(diagnostics);
         });
     if (!parsed || !hostExit || !diagnostic)
     {

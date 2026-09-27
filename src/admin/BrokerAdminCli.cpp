@@ -21,15 +21,15 @@
 namespace
 {
 [[nodiscard]] DWORD ForwardManagementRequest(launch_as::broker::RequestOperation operation,
-    std::wstring_view accountName, bool confirmed, bool force, std::vector<std::wstring>* accounts)
+    std::wstring_view accountName, bool force, std::vector<std::wstring>* accounts)
 {
     std::wstring requestId;
     if (!launch_as::CreateGuidString(requestId))
     {
         return ERROR_GEN_FAILURE;
     }
-    const std::string request = launch_as::broker::BuildManagementRequest(
-        operation, requestId, accountName, confirmed, force);
+    const std::string request =
+        launch_as::broker::BuildManagementRequest(operation, requestId, accountName, force);
 
     HANDLE rawPipe = nullptr;
     const DWORD openError = launch_as::broker::OpenBrokerControlPipe(rawPipe);
@@ -145,7 +145,7 @@ int RunConfigurationCommand(int argumentCount, wchar_t* arguments[])
     {
         std::vector<std::wstring> accounts;
         const DWORD listError = ForwardManagementRequest(
-            launch_as::broker::RequestOperation::List, L"", false, false, &accounts);
+            launch_as::broker::RequestOperation::List, L"", false, &accounts);
         if (listError == ERROR_SUCCESS)
         {
             if (accounts.empty())
@@ -233,7 +233,7 @@ int RunConfigurationCommand(int argumentCount, wchar_t* arguments[])
             takeOverExisting ? launch_as::broker::RequestOperation::TakeOver
                              : launch_as::broker::RequestOperation::Create;
         const DWORD configurationError =
-            ForwardManagementRequest(operation, accountName, true, forced, nullptr);
+            ForwardManagementRequest(operation, accountName, forced, nullptr);
         if (configurationError == ERROR_SUCCESS)
         {
             std::wcout << (takeOverExisting ? L"Took over " : L"Created ") << accountName << L".\n";
@@ -276,8 +276,7 @@ int RunConfigurationCommand(int argumentCount, wchar_t* arguments[])
             ForwardManagementRequest(deleting ? launch_as::broker::RequestOperation::Delete
                                               : launch_as::broker::RequestOperation::Forget,
                 accountName,
-                true,
-                forced,
+                false,
                 nullptr);
         if (operationError == ERROR_SUCCESS)
         {

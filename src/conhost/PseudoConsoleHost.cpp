@@ -79,7 +79,8 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
         std::wcerr << pipeError << L"\n";
         return ExitFailure;
     }
-    if (!ReadTerminalSize(resizeInput.get(), invocation.terminalSize))
+    COORD terminalSize {};
+    if (!ReadTerminalSize(resizeInput.get(), terminalSize))
     {
         std::wcerr << L"Could not read the initial broker terminal size.\n";
         return ExitFailure;
@@ -95,7 +96,7 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
 
     PseudoConsoleSession pseudoConsole;
     std::wstring terminalError;
-    if (!pseudoConsole.Initialize(invocation.terminalSize,
+    if (!pseudoConsole.Initialize(terminalSize,
             invocation.inheritCursor,
             parentInput.get(),
             parentOutput.get(),

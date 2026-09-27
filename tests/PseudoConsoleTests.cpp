@@ -55,9 +55,6 @@ constexpr DWORD ProbeReadyTimeoutMilliseconds = 5'000;
 
     std::vector<std::wstring> arguments {
         L"--internal-pseudoconsole-host",
-        L"--size",
-        L"120",
-        L"30",
         L"--pipe-in",
         pipes.input,
         L"--pipe-out",

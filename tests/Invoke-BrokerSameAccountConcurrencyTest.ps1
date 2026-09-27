@@ -262,8 +262,6 @@ function New-BrokerSession {
                 pipeIn     = "$dataPipePrefix-in"
                 pipeOut    = "$dataPipePrefix-out"
                 pipeResize = "$dataPipePrefix-resize"
-                cols       = 120
-                rows       = 30
             }
         } | ConvertTo-Json -Compress
 

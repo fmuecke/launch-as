@@ -209,7 +209,7 @@ Invoke-Launcher `
     -ExpectedOutput 'Usage:'
 Invoke-Launcher `
     -Name 'Internal pseudoconsole host switch is rejected' `
-    -Arguments @('--internal-pseudoconsole-host', '--size', '120', '30') `
+    -Arguments @('--internal-pseudoconsole-host') `
     -ExpectedExitCodes 87 `
     -ExpectedOutput 'Usage:'
 Invoke-Launcher `

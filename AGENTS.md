@@ -38,7 +38,8 @@ Organize `src/` by ownership:
 - `common/`: low-level utilities
 
 Keep dependencies directed toward `common`, `protocol`, and `terminal`; entry-point
-modules must not depend on one another. Keep CMake-configured version templates in
+modules must not depend on one another. `broker` is also a library: `admin` may link
+`launch_as::broker` for account provisioning, audit, caller policy, and data-directory setup. Keep CMake-configured version templates in
 `resources/`, tests in `tests/`, and generated output in uncommitted `out/build/`.
 
 Each source folder owns its production target in `src/<module>/CMakeLists.txt`. Link

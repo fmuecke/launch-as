@@ -192,8 +192,8 @@ That first gate passed in a fresh Windows Sandbox guest: a session-1, non-admini
 non-elevated standard-account process added and removed one exact synthetic logon-SID ACE on both
 `WinSta0` and `Default`; all Win32 results and the native exit code were zero, and both final DACLs
 were semantically identical to their originals. The launcher or a small caller-owned background
-coordinator may therefore hold the ACL lease. It receives only a nonce, desktop name, and child
-logon SID. The detailed alternatives, evidence boundary, and retained-run path are recorded in
+coordinator may therefore hold the ACL lease. It receives only a nonce and child logon SID; the
+desktop is always `WinSta0\Default`. The detailed alternatives, evidence boundary, and retained-run path are recorded in
 [Interactive mode session coordination](discovery/Spike%20-%20interactive%20mode%20session%20coordination.md).
 
 The first production slice implements the caller-owned `InteractiveDesktopAclLease` primitive. The
@@ -274,7 +274,7 @@ Impersonation failure is a **hard failure** (otherwise the request would proceed
     "pipeIn":  "\\\\.\\pipe\\launch-as-<rnd>-in",
     "pipeOut": "\\\\.\\pipe\\launch-as-<rnd>-out",
     "pipeResize": "\\\\.\\pipe\\launch-as-<rnd>-resize",
-    "cols": 120, "rows": 30
+    "inheritCursor": false
   }
 }
 ```
@@ -659,8 +659,8 @@ takeover.
 - `forget` is the safe handoff: it removes only launch-as metadata. `delete` is the destructive
   teardown and never removes profile data implicitly.
 - Takeover and delete require client confirmation. Plain create needs no confirmation because it
-  fails rather than modifying an existing account. The service receives confirmation separately
-  from the explicit takeover `force` bit, so a normal confirmation cannot silently authorize a
+  fails rather than modifying an existing account. Confirmation stays in the client; the service
+  accepts the `force` bit only on takeover, so a normal confirmation cannot silently authorize a
   re-enable.
 
 ### Implementation todos after those decisions

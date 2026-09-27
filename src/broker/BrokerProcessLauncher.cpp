@@ -150,6 +150,7 @@ class UserEnvironmentBlock final
     void* environment_ = nullptr;
 };
 
+#ifdef LAUNCH_AS_TESTING
 [[nodiscard]] DWORD GetProbeExecutablePath(std::wstring& path)
 {
     std::vector<wchar_t> directory(MAX_PATH);
@@ -175,6 +176,7 @@ class UserEnvironmentBlock final
         directory.resize(directory.size() * 2);
     }
 }
+#endif
 
 [[nodiscard]] DWORD GetBrokerConhostExecutablePath(std::wstring& path)
 {
@@ -1148,74 +1150,6 @@ DWORD LaunchBrokerInteractiveProcess(HANDLE token, std::wstring_view accountName
         return releaseAfterFailure(validationError);
     }
     return ERROR_SUCCESS;
-}
-
-DWORD LaunchFixedBrokerProbe(HANDLE token, BrokerChildProcess& child)
-{
-    if (token == nullptr)
-    {
-        return ERROR_INVALID_HANDLE;
-    }
-    const DWORD jobError = CreateBrokerJob(child);
-    if (jobError != ERROR_SUCCESS)
-    {
-        return jobError;
-    }
-    EnabledProcessPrivileges privileges;
-    const DWORD privilegeError = privileges.EnableRequired();
-    if (privilegeError != ERROR_SUCCESS)
-    {
-        child.Reset();
-        return privilegeError;
-    }
-    std::wstring executablePath;
-    const DWORD executableError = GetProbeExecutablePath(executablePath);
-    if (executableError != ERROR_SUCCESS)
-    {
-        child.Reset();
-        return executableError;
-    }
-    std::wstring commandLine = L"\"" + executablePath + L"\" /d /c timeout /t 30 /nobreak >nul";
-    std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
-    mutableCommandLine.push_back(L'\0');
-    STARTUPINFOW startupInfo {};
-    startupInfo.cb = sizeof(startupInfo);
-    PROCESS_INFORMATION processInfo {};
-    if (!CreateProcessAsUserW(token,
-            executablePath.c_str(),
-            mutableCommandLine.data(),
-            nullptr,
-            nullptr,
-            FALSE,
-            CREATE_NO_WINDOW | CREATE_SUSPENDED,
-            nullptr,
-            nullptr,
-            &startupInfo,
-            &processInfo))
-    {
-        const DWORD processError = GetLastError();
-        child.Reset();
-        return processError;
-    }
-    if (!AssignProcessToJobObject(child.job_, processInfo.hProcess))
-    {
-        const DWORD assignmentError = GetLastError();
-        if (TerminateProcess(processInfo.hProcess, ERROR_CANCELLED))
-        {
-            static_cast<void>(WaitForSingleObject(processInfo.hProcess, INFINITE));
-        }
-        CloseHandle(processInfo.hThread);
-        CloseHandle(processInfo.hProcess);
-        child.Reset();
-        return assignmentError;
-    }
-    child.SetProcess(processInfo.hProcess, processInfo.hThread);
-    const DWORD resumeError = child.Resume();
-    if (resumeError != ERROR_SUCCESS)
-    {
-        child.TerminateAndWaitForExitConfirmed();
-    }
-    return resumeError;
 }
 
 DWORD GetTokenLogonSid(HANDLE token, std::vector<BYTE>& logonSid)

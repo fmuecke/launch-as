@@ -22,6 +22,11 @@ inline constexpr std::wstring_view ControlPipeName = L"\\\\.\\pipe\\launch-as-br
 inline constexpr std::size_t MaximumMessageBytes = 64 * 1024;
 inline constexpr std::size_t MaximumArguments = 64;
 
+[[nodiscard]] bool IsInteractiveLeasePipeName(std::wstring_view value) noexcept;
+// Reads or writes one complete message on a message-mode pipe.
+[[nodiscard]] DWORD ReadPipeMessage(HANDLE pipe, std::string& message);
+[[nodiscard]] DWORD WritePipeMessage(HANDLE pipe, std::string_view message);
+
 struct ConsoleRequest
 {
     std::wstring pipeIn;
@@ -86,8 +91,7 @@ struct InteractiveLeaseRequest
 enum class ParseResult
 {
     Success,
-    InvalidRequest,
-    ModeNotSupported
+    InvalidRequest
 };
 
 [[nodiscard]] ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request);

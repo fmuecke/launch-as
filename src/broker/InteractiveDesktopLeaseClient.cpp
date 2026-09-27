@@ -8,7 +8,6 @@
 
 #include <Sddl.h>
 #include <Windows.h>
-#include <array>
 #include <string>
 #include <utility>
 
@@ -18,13 +17,6 @@ namespace
 {
 
 constexpr DWORD ConnectTimeoutMilliseconds = 5'000;
-
-[[nodiscard]] bool IsInteractiveLeasePipeName(std::wstring_view value) noexcept
-{
-    constexpr std::wstring_view prefix = L"\\\\.\\pipe\\launch-as-interactive-";
-    return value.size() > prefix.size() && value.size() <= 256 && value.starts_with(prefix) &&
-           value.find_first_of(L"\\/", prefix.size()) == std::wstring_view::npos;
-}
 
 [[nodiscard]] DWORD OpenInteractiveLeasePipe(std::wstring_view pipeName, HANDLE& pipe)
 {
@@ -65,35 +57,6 @@ constexpr DWORD ConnectTimeoutMilliseconds = 5'000;
         static_cast<void>(WaitNamedPipeW(name.c_str(), 50));
     } while (GetTickCount64() < deadline);
     return lastError;
-}
-
-[[nodiscard]] DWORD WriteMessage(HANDLE pipe, std::string_view message)
-{
-    DWORD bytesWritten = 0;
-    if (!WriteFile(
-            pipe, message.data(), static_cast<DWORD>(message.size()), &bytesWritten, nullptr))
-    {
-        const DWORD writeError = GetLastError();
-        return writeError;
-    }
-    return bytesWritten == message.size() ? ERROR_SUCCESS : ERROR_WRITE_FAULT;
-}
-
-[[nodiscard]] DWORD ReadMessage(HANDLE pipe, std::string& message)
-{
-    std::array<char, MaximumMessageBytes> buffer {};
-    DWORD bytesRead = 0;
-    if (!ReadFile(pipe, buffer.data(), static_cast<DWORD>(buffer.size()), &bytesRead, nullptr))
-    {
-        const DWORD readError = GetLastError();
-        return readError;
-    }
-    if (bytesRead == 0)
-    {
-        return ERROR_BROKEN_PIPE;
-    }
-    message.assign(buffer.data(), bytesRead);
-    return ERROR_SUCCESS;
 }
 
 } // namespace
@@ -159,14 +122,14 @@ DWORD AcquireInteractiveDesktopLease(std::wstring_view pipeName, std::wstring_vi
     }
     connection.pipe_ = pipe;
     connection.nonce_ = nonce;
-    const DWORD writeError = WriteMessage(connection.pipe_, request);
+    const DWORD writeError = WritePipeMessage(connection.pipe_, request);
     if (writeError != ERROR_SUCCESS)
     {
         connection.Reset();
         return writeError;
     }
     std::string response;
-    const DWORD readError = ReadMessage(connection.pipe_, response);
+    const DWORD readError = ReadPipeMessage(connection.pipe_, response);
     if (readError != ERROR_SUCCESS)
     {
         connection.Reset();
@@ -193,14 +156,14 @@ DWORD ReleaseInteractiveDesktopLease(InteractiveDesktopLeaseConnection& connecti
         return ERROR_INVALID_HANDLE;
     }
     const std::string request = BuildInteractiveLeaseReleaseRequest(connection.nonce_);
-    const DWORD writeError = WriteMessage(connection.pipe_, request);
+    const DWORD writeError = WritePipeMessage(connection.pipe_, request);
     if (writeError != ERROR_SUCCESS)
     {
         connection.Reset();
         return writeError;
     }
     std::string response;
-    const DWORD readError = ReadMessage(connection.pipe_, response);
+    const DWORD readError = ReadPipeMessage(connection.pipe_, response);
     if (readError != ERROR_SUCCESS)
     {
         connection.Reset();

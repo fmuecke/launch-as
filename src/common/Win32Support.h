@@ -91,6 +91,31 @@ template <typename T> class LocalAllocation final
     T value_ = nullptr;
 };
 
+class ServiceHandle final
+{
+  public:
+    explicit ServiceHandle(SC_HANDLE value = nullptr) noexcept : value_(value) {}
+    ~ServiceHandle()
+    {
+        if (value_ != nullptr)
+        {
+            CloseServiceHandle(value_);
+        }
+    }
+
+    ServiceHandle(const ServiceHandle&) = delete;
+    ServiceHandle& operator=(const ServiceHandle&) = delete;
+
+    [[nodiscard]] SC_HANDLE get() const noexcept { return value_; }
+    [[nodiscard]] explicit operator bool() const noexcept { return value_ != nullptr; }
+
+  private:
+    SC_HANDLE value_ = nullptr;
+};
+
 [[nodiscard]] std::wstring FormatWindowsError(DWORD error);
+
+// Creates a random GUID formatted as 36 characters without braces.
+[[nodiscard]] bool CreateGuidString(std::wstring& text);
 
 } // namespace launch_as

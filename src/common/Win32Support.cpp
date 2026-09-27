@@ -4,6 +4,8 @@
 
 #include "Win32Support.h"
 
+#include <iterator>
+#include <objbase.h>
 #include <string>
 
 namespace launch_as
@@ -33,6 +35,23 @@ std::wstring FormatWindowsError(DWORD error)
         message.pop_back();
     }
     return message + L" (" + std::to_wstring(error) + L")";
+}
+
+bool CreateGuidString(std::wstring& text)
+{
+    text.clear();
+    GUID identifier {};
+    if (FAILED(CoCreateGuid(&identifier)))
+    {
+        return false;
+    }
+    wchar_t formatted[39] {};
+    if (StringFromGUID2(identifier, formatted, static_cast<int>(std::size(formatted))) != 39)
+    {
+        return false;
+    }
+    text.assign(formatted + 1, 36);
+    return true;
 }
 
 } // namespace launch_as

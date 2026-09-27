@@ -35,28 +35,6 @@ constexpr wchar_t BrokerRequiredPrivileges[] =
     L"SeBackupPrivilege\0SeRestorePrivilege\0SeTcbPrivilege\0\0";
 constexpr DWORD ServiceStopTimeoutMilliseconds = 10'000;
 
-class ServiceHandle final
-{
-  public:
-    explicit ServiceHandle(SC_HANDLE value = nullptr) noexcept : value_(value) {}
-    ~ServiceHandle()
-    {
-        if (value_ != nullptr)
-        {
-            CloseServiceHandle(value_);
-        }
-    }
-
-    ServiceHandle(const ServiceHandle&) = delete;
-    ServiceHandle& operator=(const ServiceHandle&) = delete;
-
-    [[nodiscard]] SC_HANDLE get() const noexcept { return value_; }
-    [[nodiscard]] explicit operator bool() const noexcept { return value_ != nullptr; }
-
-  private:
-    SC_HANDLE value_;
-};
-
 using LocalAcl = launch_as::LocalAllocation<PACL>;
 using LocalSecurityDescriptor = launch_as::LocalAllocation<PSECURITY_DESCRIPTOR>;
 

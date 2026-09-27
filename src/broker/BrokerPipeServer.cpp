@@ -310,12 +310,7 @@ void ServeControlPipeRequest(HANDLE pipe, HANDLE stopEvent,
     {
         response = BuildErrorResponse(L"", "caller_identity", ERROR_ACCESS_DENIED);
     }
-    else if (const ParseResult parseResult = ParseBrokerRequest(message, request);
-        parseResult == ParseResult::ModeNotSupported)
-    {
-        response = BuildErrorResponse(request.requestId, "mode_not_supported", ERROR_NOT_SUPPORTED);
-    }
-    else if (parseResult != ParseResult::Success)
+    else if (ParseBrokerRequest(message, request) != ParseResult::Success)
     {
         response = BuildErrorResponse(L"", "invalid_request", ERROR_INVALID_DATA);
     }

@@ -18,13 +18,6 @@ namespace launch_as
 namespace
 {
 
-[[nodiscard]] bool IsInteractiveLeasePipeName(std::wstring_view value) noexcept
-{
-    constexpr std::wstring_view prefix = L"\\\\.\\pipe\\launch-as-interactive-";
-    return value.size() > prefix.size() && value.size() <= 256 && value.starts_with(prefix) &&
-           value.find_first_of(L"\\/", prefix.size()) == std::wstring_view::npos;
-}
-
 [[nodiscard]] DWORD ValidateLocalSystemToken(HANDLE token)
 {
     DWORD userBytes = 0;
@@ -107,41 +100,12 @@ namespace
     return clientSessionId == 0 ? ERROR_SUCCESS : ERROR_ACCESS_DENIED;
 }
 
-[[nodiscard]] DWORD ReadMessage(HANDLE pipe, std::string& message)
-{
-    std::array<char, broker::MaximumMessageBytes> buffer {};
-    DWORD bytesRead = 0;
-    if (!ReadFile(pipe, buffer.data(), static_cast<DWORD>(buffer.size()), &bytesRead, nullptr))
-    {
-        const DWORD readError = GetLastError();
-        return readError;
-    }
-    if (bytesRead == 0)
-    {
-        return ERROR_BROKEN_PIPE;
-    }
-    message.assign(buffer.data(), bytesRead);
-    return ERROR_SUCCESS;
-}
-
-[[nodiscard]] DWORD WriteMessage(HANDLE pipe, std::string_view message)
-{
-    DWORD bytesWritten = 0;
-    if (!WriteFile(
-            pipe, message.data(), static_cast<DWORD>(message.size()), &bytesWritten, nullptr))
-    {
-        const DWORD writeError = GetLastError();
-        return writeError;
-    }
-    return bytesWritten == message.size() ? ERROR_SUCCESS : ERROR_WRITE_FAULT;
-}
-
 } // namespace
 
 DWORD CreateInteractiveDesktopLeasePipe(std::wstring_view pipeName, HANDLE& pipe)
 {
     pipe = nullptr;
-    if (!IsInteractiveLeasePipeName(pipeName))
+    if (!broker::IsInteractiveLeasePipeName(pipeName))
     {
         return ERROR_INVALID_NAME;
     }
@@ -231,7 +195,7 @@ DWORD ServeInteractiveDesktopLease(HANDLE connectedPipe, std::wstring_view expec
         return peerError;
     }
     std::string requestMessage;
-    const DWORD readAcquireError = ReadMessage(connectedPipe, requestMessage);
+    const DWORD readAcquireError = broker::ReadPipeMessage(connectedPipe, requestMessage);
     if (readAcquireError != ERROR_SUCCESS)
     {
         return readAcquireError;
@@ -253,14 +217,14 @@ DWORD ServeInteractiveDesktopLease(HANDLE connectedPipe, std::wstring_view expec
     LocalFree(logonSid);
     const std::string acquireResponse = broker::BuildInteractiveLeaseResponse(
         broker::InteractiveLeaseOperation::Acquire, expectedNonce, acquireError);
-    const DWORD writeAcquireError = WriteMessage(connectedPipe, acquireResponse);
+    const DWORD writeAcquireError = broker::WritePipeMessage(connectedPipe, acquireResponse);
     if (writeAcquireError != ERROR_SUCCESS || acquireError != ERROR_SUCCESS)
     {
         return writeAcquireError != ERROR_SUCCESS ? writeAcquireError : acquireError;
     }
 
     requestMessage.clear();
-    const DWORD readReleaseError = ReadMessage(connectedPipe, requestMessage);
+    const DWORD readReleaseError = broker::ReadPipeMessage(connectedPipe, requestMessage);
     if (readReleaseError != ERROR_SUCCESS)
     {
         return readReleaseError;
@@ -273,7 +237,7 @@ DWORD ServeInteractiveDesktopLease(HANDLE connectedPipe, std::wstring_view expec
     const DWORD releaseError = lease.Release();
     const std::string releaseResponse = broker::BuildInteractiveLeaseResponse(
         broker::InteractiveLeaseOperation::Release, expectedNonce, releaseError);
-    const DWORD writeReleaseError = WriteMessage(connectedPipe, releaseResponse);
+    const DWORD writeReleaseError = broker::WritePipeMessage(connectedPipe, releaseResponse);
     return writeReleaseError == ERROR_SUCCESS ? releaseError : writeReleaseError;
 }
 

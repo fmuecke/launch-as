@@ -58,7 +58,6 @@ class BrokerChildProcess final
         DWORD targetSessionId, std::wstring_view leasePipeName, std::wstring_view leaseNonce,
         const std::vector<BYTE>& callerLogonSid, BrokerChildProcess& child,
         InteractiveDesktopLeaseConnection& lease);
-    friend DWORD LaunchFixedBrokerProbe(HANDLE token, BrokerChildProcess& child);
 #ifdef LAUNCH_AS_TESTING
     friend DWORD LaunchBrokerChildForTesting(std::wstring_view command, BrokerChildProcess& child);
     friend DWORD LaunchQuickBrokerChildForTesting(BrokerChildProcess& child);
@@ -76,7 +75,6 @@ class BrokerChildProcess final
     DWORD targetSessionId, std::wstring_view leasePipeName, std::wstring_view leaseNonce,
     const std::vector<BYTE>& callerLogonSid, BrokerChildProcess& child,
     InteractiveDesktopLeaseConnection& lease);
-[[nodiscard]] DWORD LaunchFixedBrokerProbe(HANDLE token, BrokerChildProcess& child);
 [[nodiscard]] DWORD GetTokenLogonSid(HANDLE token, std::vector<BYTE>& logonSid);
 [[nodiscard]] DWORD ValidateChildLogonSid(HANDLE process, const std::vector<BYTE>& callerLogonSid);
 [[nodiscard]] DWORD SetBrokerTokenSessionId(HANDLE token, DWORD sessionId);

@@ -7,10 +7,10 @@
 #include "BrokerControlPipe.h"
 #include "BrokerProtocol.h"
 #include "Utf8.h"
+#include "Win32Support.h"
 
 #include <Windows.h>
 #include <array>
-#include <objbase.h>
 #include <string>
 #include <utility>
 #include <vector>
@@ -66,24 +66,6 @@ namespace
                ",\"rows\":" + std::to_string(terminalSize.Y) +
                ",\"inheritCursor\":" + (inheritCursor ? "true" : "false") + "}}";
     return request.size() <= broker::MaximumMessageBytes;
-}
-
-[[nodiscard]] DWORD CreateRequestId(std::wstring& requestId)
-{
-    requestId.clear();
-    GUID identifier {};
-    if (FAILED(CoCreateGuid(&identifier)))
-    {
-        return ERROR_GEN_FAILURE;
-    }
-    wchar_t requestIdBuffer[39] {};
-    if (StringFromGUID2(
-            identifier, requestIdBuffer, static_cast<int>(std::size(requestIdBuffer))) != 39)
-    {
-        return ERROR_GEN_FAILURE;
-    }
-    requestId.assign(requestIdBuffer + 1, 36);
-    return ERROR_SUCCESS;
 }
 
 [[nodiscard]] DWORD SendLaunchRequest(std::wstring requestId, const std::string& request,
@@ -199,10 +181,9 @@ DWORD LaunchBrokerInteractive(std::wstring_view profileId, std::span<const std::
     connection.Reset();
     processId = 0;
     std::wstring requestId;
-    const DWORD requestIdError = CreateRequestId(requestId);
-    if (requestIdError != ERROR_SUCCESS)
+    if (!CreateGuidString(requestId))
     {
-        return requestIdError;
+        return ERROR_GEN_FAILURE;
     }
     std::string request;
     if (!BuildInteractiveLaunchRequest(
@@ -220,10 +201,9 @@ DWORD LaunchBrokerConsole(std::wstring_view profileId, std::span<const std::wstr
     connection.Reset();
     processId = 0;
     std::wstring requestId;
-    const DWORD requestIdError = CreateRequestId(requestId);
-    if (requestIdError != ERROR_SUCCESS)
+    if (!CreateGuidString(requestId))
     {
-        return requestIdError;
+        return ERROR_GEN_FAILURE;
     }
     std::string request;
     if (!BuildLaunchRequest(requestId,

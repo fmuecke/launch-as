@@ -13,7 +13,6 @@
 #include <array>
 #include <filesystem>
 #include <iostream>
-#include <objbase.h>
 #include <optional>
 #include <sddl.h>
 #include <thread>
@@ -229,19 +228,12 @@ ExitCode RunBrokerInteractive(const AccountIdentity& account, const Options& opt
     arguments.insert(
         arguments.end(), options.processArguments.begin(), options.processArguments.end());
 
-    GUID identifier {};
-    if (FAILED(CoCreateGuid(&identifier)))
+    std::wstring nonce;
+    if (!CreateGuidString(nonce))
     {
         std::wcerr << L"Could not create the interactive lease identifier.\n";
         return ExitFailure;
     }
-    wchar_t nonceBuffer[39] {};
-    if (StringFromGUID2(identifier, nonceBuffer, static_cast<int>(std::size(nonceBuffer))) != 39)
-    {
-        std::wcerr << L"Could not format the interactive lease identifier.\n";
-        return ExitFailure;
-    }
-    const std::wstring nonce(nonceBuffer + 1, 36);
     std::wstring pipeSuffix;
     pipeSuffix.reserve(nonce.size());
     for (const wchar_t character : nonce)

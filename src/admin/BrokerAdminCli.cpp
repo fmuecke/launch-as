@@ -14,39 +14,22 @@
 #include <Windows.h>
 #include <array>
 #include <iostream>
-#include <objbase.h>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace
 {
-[[nodiscard]] std::optional<std::wstring> CreateRequestId()
-{
-    GUID identifier {};
-    if (FAILED(CoCreateGuid(&identifier)))
-    {
-        return std::nullopt;
-    }
-    wchar_t formatted[39] {};
-    if (StringFromGUID2(identifier, formatted, static_cast<int>(std::size(formatted))) != 39)
-    {
-        return std::nullopt;
-    }
-    return std::wstring(formatted + 1, 36);
-}
-
 [[nodiscard]] DWORD ForwardManagementRequest(launch_as::broker::RequestOperation operation,
     std::wstring_view accountName, bool confirmed, bool force, std::vector<std::wstring>* accounts)
 {
-    const std::optional<std::wstring> requestId = CreateRequestId();
-    if (!requestId)
+    std::wstring requestId;
+    if (!launch_as::CreateGuidString(requestId))
     {
         return ERROR_GEN_FAILURE;
     }
     const std::string request = launch_as::broker::BuildManagementRequest(
-        operation, *requestId, accountName, confirmed, force);
+        operation, requestId, accountName, confirmed, force);
 
     HANDLE rawPipe = nullptr;
     const DWORD openError = launch_as::broker::OpenBrokerControlPipe(rawPipe);
@@ -81,17 +64,17 @@ namespace
     if (operation == launch_as::broker::RequestOperation::List)
     {
         return accounts != nullptr &&
-                       launch_as::broker::ParseListResponse(response, *requestId, *accounts)
+                       launch_as::broker::ParseListResponse(response, requestId, *accounts)
                    ? ERROR_SUCCESS
                    : ERROR_INVALID_DATA;
     }
     if (response == launch_as::broker::BuildSuccessResponse(
-                        *requestId, launch_as::broker::RequestOperationSuccessReason(operation)))
+                        requestId, launch_as::broker::RequestOperationSuccessReason(operation)))
     {
         return ERROR_SUCCESS;
     }
     DWORD brokerError = ERROR_INVALID_DATA;
-    if (launch_as::broker::ParseErrorResponse(response, *requestId, brokerError))
+    if (launch_as::broker::ParseErrorResponse(response, requestId, brokerError))
     {
         return brokerError;
     }

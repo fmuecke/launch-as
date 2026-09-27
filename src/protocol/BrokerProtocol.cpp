@@ -9,6 +9,7 @@
 #include <Lmcons.h>
 #include <Windows.h>
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cstddef>
 #include <cwchar>
@@ -315,13 +316,6 @@ class JsonReader final
            value.find_first_of(L"\\/", prefix.size()) == std::wstring::npos;
 }
 
-[[nodiscard]] bool IsInteractiveLeasePipeName(const std::wstring& value)
-{
-    constexpr std::wstring_view prefix = L"\\\\.\\pipe\\launch-as-interactive-";
-    return value.size() > prefix.size() && value.starts_with(prefix) && value.size() <= 256 &&
-           value.find_first_of(L"\\/", prefix.size()) == std::wstring_view::npos;
-}
-
 [[nodiscard]] bool ReadArguments(JsonReader& reader, std::vector<std::wstring>& arguments)
 {
     if (!reader.Consume('['))
@@ -572,6 +566,42 @@ template <typename ParseAdditionalField>
 }
 
 } // namespace
+
+bool IsInteractiveLeasePipeName(std::wstring_view value) noexcept
+{
+    constexpr std::wstring_view prefix = L"\\\\.\\pipe\\launch-as-interactive-";
+    return value.size() > prefix.size() && value.starts_with(prefix) && value.size() <= 256 &&
+           value.find_first_of(L"\\/", prefix.size()) == std::wstring_view::npos;
+}
+
+DWORD ReadPipeMessage(HANDLE pipe, std::string& message)
+{
+    std::array<char, MaximumMessageBytes> buffer {};
+    DWORD bytesRead = 0;
+    if (!ReadFile(pipe, buffer.data(), static_cast<DWORD>(buffer.size()), &bytesRead, nullptr))
+    {
+        const DWORD readError = GetLastError();
+        return readError;
+    }
+    if (bytesRead == 0)
+    {
+        return ERROR_BROKEN_PIPE;
+    }
+    message.assign(buffer.data(), bytesRead);
+    return ERROR_SUCCESS;
+}
+
+DWORD WritePipeMessage(HANDLE pipe, std::string_view message)
+{
+    DWORD bytesWritten = 0;
+    if (!WriteFile(
+            pipe, message.data(), static_cast<DWORD>(message.size()), &bytesWritten, nullptr))
+    {
+        const DWORD writeError = GetLastError();
+        return writeError;
+    }
+    return bytesWritten == message.size() ? ERROR_SUCCESS : ERROR_WRITE_FAULT;
+}
 
 void AppendJsonString(std::string& output, std::wstring_view value)
 {
@@ -858,27 +888,18 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
     {
         return ParseResult::InvalidRequest;
     }
-    if (operationName == L"create")
+    if (operationName == L"create" || operationName == L"takeover" || operationName == L"forget" ||
+        operationName == L"delete")
     {
         if (modeSeen || argumentsSeen || workingDirectorySeen || consoleSeen || interactiveSeen ||
             !confirmedSeen || !confirmed)
         {
             return ParseResult::InvalidRequest;
         }
-        request.operation = RequestOperation::Create;
-        return ParseResult::Success;
-    }
-    if (operationName == L"takeover" || operationName == L"forget" || operationName == L"delete")
-    {
-        if (modeSeen || argumentsSeen || workingDirectorySeen || consoleSeen || interactiveSeen ||
-            !confirmedSeen || !confirmed)
-        {
-            return ParseResult::InvalidRequest;
-        }
-        request.operation = operationName == L"takeover" ? RequestOperation::TakeOver
-                            : operationName == L"forget" ? RequestOperation::Forget
-                            : operationName == L"delete" ? RequestOperation::Delete
-                                                         : RequestOperation::ConsoleLaunch;
+        request.operation = operationName == L"create"     ? RequestOperation::Create
+                            : operationName == L"takeover" ? RequestOperation::TakeOver
+                            : operationName == L"forget"   ? RequestOperation::Forget
+                                                           : RequestOperation::Delete;
         return ParseResult::Success;
     }
     if (forceSeen)

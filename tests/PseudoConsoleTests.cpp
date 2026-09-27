@@ -3,6 +3,7 @@
 // Project: https://github.com/fmuecke/launch-as
 
 #include "TerminalBridge.h"
+#include "TestSupport.h"
 #include "Win32Support.h"
 #include "WindowsCommandLine.h"
 
@@ -42,6 +43,15 @@ constexpr DWORD ProbeReadyTimeoutMilliseconds = 5'000;
     }
     reportRead.reset(rawReportRead);
     UniqueHandle reportWrite(rawReportWrite);
+    UniqueHandle hostInput(launch_as::test::OpenInheritableNul(GENERIC_READ));
+    UniqueHandle hostError(launch_as::test::DuplicateInheritableStandardError());
+    if (!SetHandleInformation(reportRead.get(), HANDLE_FLAG_INHERIT, 0) || !hostInput || !hostError)
+    {
+        const DWORD handleError = GetLastError();
+        std::wcerr << L"Could not prepare the host standard handles: "
+                   << FormatWindowsError(handleError) << L"\n";
+        return false;
+    }
 
     std::vector<std::wstring> arguments {
         L"--internal-pseudoconsole-host",
@@ -62,7 +72,9 @@ constexpr DWORD ProbeReadyTimeoutMilliseconds = 5'000;
     STARTUPINFOW startupInformation {};
     startupInformation.cb = sizeof(startupInformation);
     startupInformation.dwFlags = STARTF_USESTDHANDLES;
+    startupInformation.hStdInput = hostInput.get();
     startupInformation.hStdOutput = reportWrite.get();
+    startupInformation.hStdError = hostError.get();
     PROCESS_INFORMATION processInformation {};
     if (!CreateProcessW(hostPath.c_str(),
             commandLine.data(),

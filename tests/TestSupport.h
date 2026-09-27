@@ -60,4 +60,39 @@ class TemporaryDirectory final
     bool created_ = false;
 };
 
+// Inheritable standard handles for a child started with STARTF_USESTDHANDLES. The CRT needs a
+// valid stream in every slot; unset slots leave the child's stdin/stderr unusable. Input reads
+// from NUL, and errors reach this process's stderr (or NUL if it has none), so child diagnostics
+// land in the test log. Returns nullptr on failure; the caller owns the handle.
+[[nodiscard]] inline HANDLE OpenInheritableNul(DWORD access)
+{
+    SECURITY_ATTRIBUTES inheritable {.nLength = sizeof(inheritable), .bInheritHandle = TRUE};
+    const HANDLE nul = CreateFileW(L"NUL",
+        access,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        &inheritable,
+        OPEN_EXISTING,
+        0,
+        nullptr);
+    return nul == INVALID_HANDLE_VALUE ? nullptr : nul;
+}
+
+[[nodiscard]] inline HANDLE DuplicateInheritableStandardError()
+{
+    const HANDLE source = GetStdHandle(STD_ERROR_HANDLE);
+    HANDLE duplicate = nullptr;
+    if (source != nullptr && source != INVALID_HANDLE_VALUE &&
+        DuplicateHandle(GetCurrentProcess(),
+            source,
+            GetCurrentProcess(),
+            &duplicate,
+            0,
+            TRUE,
+            DUPLICATE_SAME_ACCESS))
+    {
+        return duplicate;
+    }
+    return OpenInheritableNul(GENERIC_WRITE);
+}
+
 } // namespace launch_as::test

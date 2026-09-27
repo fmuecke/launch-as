@@ -21,7 +21,7 @@ int wmain()
     std::string encoded;
     launch_as::broker::BrokerRequest parsed;
 
-    const bool built = launch_as::BuildInteractiveLaunchRequest(
+    const bool built = launch_as::broker::BuildInteractiveLaunchRequest(
         requestId, L"LaunchAsUser", arguments, L"C:\\work", leasePipe, nonce, encoded);
     launch_as::BrokerControlConnection invalidConnection;
     DWORD invalidProcessId = 42;

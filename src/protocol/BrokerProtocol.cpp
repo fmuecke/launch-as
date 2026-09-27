@@ -713,9 +713,6 @@ std::string BuildManagementRequest(RequestOperation operation, std::wstring_view
     {
         request += ",\"profileId\":";
         AppendJsonString(request, profileId);
-    }
-    if (operation != RequestOperation::List)
-    {
         request += confirmed ? ",\"confirmed\":true" : ",\"confirmed\":false";
     }
     if (force)
@@ -724,6 +721,86 @@ std::string BuildManagementRequest(RequestOperation operation, std::wstring_view
     }
     request += '}';
     return request;
+}
+
+namespace
+{
+
+// Validates the fields shared by both launch modes and writes the request up to the mode block.
+[[nodiscard]] bool BeginLaunchRequest(std::wstring_view requestId, std::wstring_view profileId,
+    std::string_view mode, std::span<const std::wstring> arguments,
+    std::wstring_view workingDirectory, std::string& request)
+{
+    if (requestId.empty() || profileId.empty() || arguments.empty() || workingDirectory.empty() ||
+        !IsValidUtf16(requestId) || !IsValidUtf16(profileId) || !IsValidUtf16(workingDirectory) ||
+        !std::all_of(arguments.begin(),
+            arguments.end(),
+            [](const std::wstring& argument) { return IsValidUtf16(argument); }))
+    {
+        return false;
+    }
+    request = "{\"version\":1,\"requestId\":";
+    AppendJsonString(request, requestId);
+    request += ",\"operation\":\"launch\",\"profileId\":";
+    AppendJsonString(request, profileId);
+    request += ",\"mode\":\"";
+    request += mode;
+    request += "\",\"arguments\":[";
+    for (std::size_t index = 0; index < arguments.size(); ++index)
+    {
+        if (index != 0)
+        {
+            request.push_back(',');
+        }
+        AppendJsonString(request, arguments[index]);
+    }
+    request += "],\"workingDirectory\":";
+    AppendJsonString(request, workingDirectory);
+    return true;
+}
+
+} // namespace
+
+bool BuildConsoleLaunchRequest(std::wstring_view requestId, std::wstring_view profileId,
+    std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
+    std::wstring_view pipeIn, std::wstring_view pipeOut, std::wstring_view pipeResize,
+    COORD terminalSize, bool inheritCursor, std::string& request)
+{
+    if (pipeIn.empty() || pipeOut.empty() || pipeResize.empty() || terminalSize.X <= 0 ||
+        terminalSize.Y <= 0 || !IsValidUtf16(pipeIn) || !IsValidUtf16(pipeOut) ||
+        !IsValidUtf16(pipeResize) ||
+        !BeginLaunchRequest(requestId, profileId, "console", arguments, workingDirectory, request))
+    {
+        return false;
+    }
+    request += ",\"console\":{\"pipeIn\":";
+    AppendJsonString(request, pipeIn);
+    request += ",\"pipeOut\":";
+    AppendJsonString(request, pipeOut);
+    request += ",\"pipeResize\":";
+    AppendJsonString(request, pipeResize);
+    request += ",\"cols\":" + std::to_string(terminalSize.X) +
+               ",\"rows\":" + std::to_string(terminalSize.Y) +
+               ",\"inheritCursor\":" + (inheritCursor ? "true" : "false") + "}}";
+    return request.size() <= MaximumMessageBytes;
+}
+
+bool BuildInteractiveLaunchRequest(std::wstring_view requestId, std::wstring_view profileId,
+    std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
+    std::wstring_view leasePipe, std::wstring_view nonce, std::string& request)
+{
+    if (leasePipe.empty() || nonce.empty() || !IsValidUtf16(leasePipe) || !IsValidUtf16(nonce) ||
+        !BeginLaunchRequest(
+            requestId, profileId, "interactive", arguments, workingDirectory, request))
+    {
+        return false;
+    }
+    request += ",\"interactive\":{\"leasePipe\":";
+    AppendJsonString(request, leasePipe);
+    request += ",\"nonce\":";
+    AppendJsonString(request, nonce);
+    request += "}}";
+    return request.size() <= MaximumMessageBytes;
 }
 
 ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)

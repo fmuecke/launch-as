@@ -31,57 +31,6 @@ namespace
 
 constexpr DWORD ProcessTerminationTimeoutMilliseconds = 5'000;
 
-[[nodiscard]] bool PrepareResizeInput(HANDLE source, HANDLE output, bool redirectDiagnostics,
-    UniqueHandle& resizeInput, std::wstring& error)
-{
-    if (!IsUsableHandle(source) || !IsUsableHandle(output))
-    {
-        error = L"The pseudoconsole host did not receive usable output and resize handles.";
-        return false;
-    }
-
-    // STARTUPINFO's stderr slot transports the resize pipe. Retain it before _dup2
-    // redirects CRT stderr to stdout, because _dup2 closes the old descriptor.
-    HANDLE rawResizeInput = nullptr;
-    if (!DuplicateHandle(GetCurrentProcess(),
-            source,
-            GetCurrentProcess(),
-            &rawResizeInput,
-            0,
-            FALSE,
-            DUPLICATE_SAME_ACCESS))
-    {
-        const DWORD duplicateError = GetLastError();
-        error = L"Could not retain the pseudoconsole resize handle: " +
-                FormatWindowsError(duplicateError);
-        return false;
-    }
-    resizeInput.reset(rawResizeInput);
-
-    if (!redirectDiagnostics)
-    {
-        return true;
-    }
-    if (_dup2(_fileno(stdout), _fileno(stderr)) != 0)
-    {
-        error = L"Could not redirect pseudoconsole host diagnostics.";
-        return false;
-    }
-    if (!SetStdHandle(STD_ERROR_HANDLE, output))
-    {
-        const DWORD redirectError = GetLastError();
-        error = L"Could not redirect the pseudoconsole host error handle: " +
-                FormatWindowsError(redirectError);
-        return false;
-    }
-    if (_setmode(_fileno(stderr), _O_U8TEXT) == -1)
-    {
-        error = L"Could not configure pseudoconsole host diagnostics for UTF-8.";
-        return false;
-    }
-    return true;
-}
-
 [[nodiscard]] bool OpenPipeClient(
     std::wstring_view pipeName, DWORD access, UniqueHandle& pipe, std::wstring& error)
 {
@@ -114,35 +63,23 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
         return ExitUsage;
     }
 
-    UniqueHandle brokerInput;
-    UniqueHandle brokerOutput;
-    UniqueHandle brokerResize;
-    const bool brokerPipes = !invocation.pipeIn.empty();
-    if (brokerPipes && _setmode(_fileno(stderr), _O_U8TEXT) == -1)
+    if (_setmode(_fileno(stderr), _O_U8TEXT) == -1)
     {
         std::wcerr << L"Could not configure pseudoconsole host diagnostics for UTF-8.\n";
         return ExitFailure;
     }
+    UniqueHandle parentInput;
+    UniqueHandle parentOutput;
+    UniqueHandle resizeInput;
     std::wstring pipeError;
-    if (brokerPipes &&
-        (!OpenPipeClient(invocation.pipeIn, GENERIC_READ, brokerInput, pipeError) ||
-            !OpenPipeClient(invocation.pipeOut, GENERIC_WRITE, brokerOutput, pipeError) ||
-            !OpenPipeClient(invocation.pipeResize, GENERIC_READ, brokerResize, pipeError)))
+    if (!OpenPipeClient(invocation.pipeIn, GENERIC_READ, parentInput, pipeError) ||
+        !OpenPipeClient(invocation.pipeOut, GENERIC_WRITE, parentOutput, pipeError) ||
+        !OpenPipeClient(invocation.pipeResize, GENERIC_READ, resizeInput, pipeError))
     {
         std::wcerr << pipeError << L"\n";
         return ExitFailure;
     }
-    const HANDLE parentInput = brokerPipes ? brokerInput.get() : GetStdHandle(STD_INPUT_HANDLE);
-    const HANDLE parentOutput = brokerPipes ? brokerOutput.get() : GetStdHandle(STD_OUTPUT_HANDLE);
-    const HANDLE resizeSource = brokerPipes ? brokerResize.get() : GetStdHandle(STD_ERROR_HANDLE);
-    UniqueHandle resizeInput;
-    std::wstring streamError;
-    if (!PrepareResizeInput(resizeSource, parentOutput, !brokerPipes, resizeInput, streamError))
-    {
-        std::wcerr << streamError << L"\n";
-        return ExitFailure;
-    }
-    if (brokerPipes && !ReadTerminalSize(resizeInput.get(), invocation.terminalSize))
+    if (!ReadTerminalSize(resizeInput.get(), invocation.terminalSize))
     {
         std::wcerr << L"Could not read the initial broker terminal size.\n";
         return ExitFailure;
@@ -160,8 +97,8 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
     std::wstring terminalError;
     if (!pseudoConsole.Initialize(invocation.terminalSize,
             invocation.inheritCursor,
-            parentInput,
-            parentOutput,
+            parentInput.get(),
+            parentOutput.get(),
             resizeInput.get(),
             terminalError))
     {
@@ -264,29 +201,25 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
                    << FormatWindowsError(exitCodeError) << L"\n";
         return ExitFailure;
     }
-    if (brokerPipes)
+    const PseudoConsoleHostExitReport report {.childExitCode = childExitCode};
+    DWORD bytesWritten = 0;
+    const HANDLE reportPipe = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD reportError = reportPipe == INVALID_HANDLE_VALUE || reportPipe == nullptr ? GetLastError()
+                                                                                    : ERROR_SUCCESS;
+    if (reportError == ERROR_SUCCESS &&
+        !WriteFile(reportPipe, &report, sizeof(report), &bytesWritten, nullptr))
     {
-        const PseudoConsoleHostExitReport report {.childExitCode = childExitCode};
-        DWORD bytesWritten = 0;
-        const HANDLE reportPipe = GetStdHandle(STD_OUTPUT_HANDLE);
-        DWORD reportError = reportPipe == INVALID_HANDLE_VALUE || reportPipe == nullptr
-                                ? GetLastError()
-                                : ERROR_SUCCESS;
-        if (reportError == ERROR_SUCCESS &&
-            !WriteFile(reportPipe, &report, sizeof(report), &bytesWritten, nullptr))
+        reportError = GetLastError();
+    }
+    if (reportError != ERROR_SUCCESS || bytesWritten != sizeof(report))
+    {
+        if (reportError == ERROR_SUCCESS)
         {
-            reportError = GetLastError();
+            reportError = ERROR_WRITE_FAULT;
         }
-        if (reportError != ERROR_SUCCESS || bytesWritten != sizeof(report))
-        {
-            if (reportError == ERROR_SUCCESS)
-            {
-                reportError = ERROR_WRITE_FAULT;
-            }
-            std::wcerr << L"Could not report the pseudoconsole child exit code: "
-                       << FormatWindowsError(reportError) << L"\n";
-            return ExitFailure;
-        }
+        std::wcerr << L"Could not report the pseudoconsole child exit code: "
+                   << FormatWindowsError(reportError) << L"\n";
+        return ExitFailure;
     }
     return childExitCode;
 }

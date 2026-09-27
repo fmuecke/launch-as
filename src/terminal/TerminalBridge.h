@@ -27,25 +27,18 @@ class TerminalBridge final
     TerminalBridge(TerminalBridge&&) = delete;
     TerminalBridge& operator=(TerminalBridge&&) = delete;
 
-    [[nodiscard]] bool Initialize(STARTUPINFOW& childStartupInformation, std::wstring& error);
     [[nodiscard]] bool InitializeForBroker(
         std::wstring_view childSid, TerminalPipeNames& pipeNames, std::wstring& error);
-    [[nodiscard]] bool PrepareChildProcessCreation(std::wstring& error);
-    [[nodiscard]] bool CompleteChildProcessCreation(bool processCreated, std::wstring& error);
     [[nodiscard]] bool ConnectBrokerChild(std::wstring& error);
     [[nodiscard]] bool Start(std::wstring& error);
     [[nodiscard]] DWORD WaitForOutput(DWORD& waitError) const noexcept;
     void Stop() noexcept;
 
-    [[nodiscard]] bool SendResize(COORD size) noexcept;
     [[nodiscard]] bool SendResize(COORD size, DWORD& error) noexcept;
     [[nodiscard]] COORD terminalSize() const noexcept;
     [[nodiscard]] bool supportsCursorInheritance() const noexcept;
 
   private:
-    UniqueHandle childInputRead_;
-    UniqueHandle childOutputWrite_;
-    UniqueHandle childResizeRead_;
     UniqueHandle inputWrite_;
     UniqueHandle outputRead_;
     UniqueHandle resizeWrite_;
@@ -53,8 +46,7 @@ class TerminalBridge final
     HANDLE parentInput_ = nullptr;
     HANDLE parentOutput_ = nullptr;
     TerminalMode terminalMode_;
-    bool childHandlesInheritable_ = false;
-    bool childProcessCreated_ = false;
+    bool childConnected_ = false;
     bool started_ = false;
     std::jthread inputRelay_;
     std::jthread outputRelay_;

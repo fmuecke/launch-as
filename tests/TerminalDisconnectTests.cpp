@@ -18,58 +18,11 @@ namespace
 using launch_as::BuildWindowsCommandLine;
 using launch_as::FormatWindowsError;
 using launch_as::TerminalBridge;
+using launch_as::TerminalPipeNames;
 using launch_as::UniqueHandle;
 
 constexpr DWORD ProcessTimeoutMilliseconds = 10'000;
 constexpr DWORD ExpectedChildExitCode = 7;
-
-class StandardInputOverride final
-{
-  public:
-    explicit StandardInputOverride(HANDLE replacement) noexcept
-        : original_(GetStdHandle(STD_INPUT_HANDLE))
-    {
-        active_ = SetStdHandle(STD_INPUT_HANDLE, replacement) != FALSE;
-        if (!active_)
-        {
-            error_ = GetLastError();
-        }
-    }
-
-    ~StandardInputOverride()
-    {
-        if (active_)
-        {
-            SetStdHandle(STD_INPUT_HANDLE, original_);
-        }
-    }
-
-    StandardInputOverride(const StandardInputOverride&) = delete;
-    StandardInputOverride& operator=(const StandardInputOverride&) = delete;
-
-    [[nodiscard]] bool active() const noexcept { return active_; }
-    [[nodiscard]] DWORD error() const noexcept { return error_; }
-
-    [[nodiscard]] bool Restore() noexcept
-    {
-        if (!active_)
-        {
-            return true;
-        }
-        if (!SetStdHandle(STD_INPUT_HANDLE, original_))
-        {
-            error_ = GetLastError();
-            return false;
-        }
-        active_ = false;
-        return true;
-    }
-
-  private:
-    HANDLE original_ = nullptr;
-    DWORD error_ = ERROR_SUCCESS;
-    bool active_ = false;
-};
 
 } // namespace
 
@@ -77,16 +30,16 @@ int wmain(int argumentCount, wchar_t* arguments[])
 {
     if (argumentCount != 3)
     {
-        std::wcerr << L"Expected the launcher and exit-code probe paths.\n";
+        std::wcerr << L"Expected the pseudoconsole host and exit-code probe paths.\n";
         return 1;
     }
 
-    const std::filesystem::path launcherPath(arguments[1]);
+    const std::filesystem::path hostPath(arguments[1]);
     const std::filesystem::path exitCodeProbe(arguments[2]);
-    if (!launcherPath.is_absolute() || !std::filesystem::is_regular_file(launcherPath) ||
+    if (!hostPath.is_absolute() || !std::filesystem::is_regular_file(hostPath) ||
         !exitCodeProbe.is_absolute() || !std::filesystem::is_regular_file(exitCodeProbe))
     {
-        std::wcerr << L"The launcher or exit-code probe path is invalid.\n";
+        std::wcerr << L"The pseudoconsole host or exit-code probe path is invalid.\n";
         return 1;
     }
 
@@ -102,23 +55,23 @@ int wmain(int argumentCount, wchar_t* arguments[])
     UniqueHandle terminalInputRead(rawTerminalInputRead);
     UniqueHandle terminalInputWrite(rawTerminalInputWrite);
 
-    StandardInputOverride inputOverride(terminalInputRead.get());
-    if (!inputOverride.active())
+    const HANDLE originalInput = GetStdHandle(STD_INPUT_HANDLE);
+    if (!SetStdHandle(STD_INPUT_HANDLE, terminalInputRead.get()))
     {
+        const DWORD inputError = GetLastError();
         std::wcerr << L"Could not install the simulated terminal input: "
-                   << FormatWindowsError(inputOverride.error()) << L"\n";
+                   << FormatWindowsError(inputError) << L"\n";
         return 1;
     }
-
-    STARTUPINFOW startupInformation {};
-    startupInformation.cb = sizeof(startupInformation);
     TerminalBridge terminalBridge;
+    TerminalPipeNames pipeNames;
     std::wstring terminalError;
-    const bool initialized = terminalBridge.Initialize(startupInformation, terminalError);
-    if (!inputOverride.Restore())
+    const bool initialized = terminalBridge.InitializeForBroker(L"", pipeNames, terminalError);
+    if (!SetStdHandle(STD_INPUT_HANDLE, originalInput))
     {
+        const DWORD inputError = GetLastError();
         std::wcerr << L"Could not restore the test process input: "
-                   << FormatWindowsError(inputOverride.error()) << L"\n";
+                   << FormatWindowsError(inputError) << L"\n";
         return 1;
     }
     if (!initialized)
@@ -127,66 +80,67 @@ int wmain(int argumentCount, wchar_t* arguments[])
         return 1;
     }
 
-    const std::vector<std::wstring> helperArguments {
+    // The host's stdout carries the broker exit report; without it the host fails its report.
+    SECURITY_ATTRIBUTES inheritable {.nLength = sizeof(inheritable), .bInheritHandle = TRUE};
+    HANDLE rawReportRead = nullptr;
+    HANDLE rawReportWrite = nullptr;
+    if (!CreatePipe(&rawReportRead, &rawReportWrite, &inheritable, 0))
+    {
+        const DWORD pipeError = GetLastError();
+        std::wcerr << L"Could not create the host report pipe: " << FormatWindowsError(pipeError)
+                   << L"\n";
+        return 1;
+    }
+    UniqueHandle reportRead(rawReportRead);
+    UniqueHandle reportWrite(rawReportWrite);
+
+    const std::vector<std::wstring> hostArguments {
         L"--internal-pseudoconsole-host",
         L"--size",
         L"120",
         L"30",
+        L"--pipe-in",
+        pipeNames.input,
+        L"--pipe-out",
+        pipeNames.output,
+        L"--pipe-resize",
+        pipeNames.resize,
         L"--",
         exitCodeProbe.native(),
         L"1000",
         L"7"
     };
-    std::wstring commandLine = BuildWindowsCommandLine(launcherPath.native(), helperArguments);
-
+    std::wstring commandLine = BuildWindowsCommandLine(hostPath.native(), hostArguments);
+    STARTUPINFOW startupInformation {};
+    startupInformation.cb = sizeof(startupInformation);
+    startupInformation.dwFlags = STARTF_USESTDHANDLES;
+    startupInformation.hStdOutput = reportWrite.get();
     PROCESS_INFORMATION processInformation {};
-    if (!terminalBridge.PrepareChildProcessCreation(terminalError))
-    {
-        std::wcerr << terminalError << L"\n";
-        return 1;
-    }
-    if (!CreateProcessW(launcherPath.c_str(),
+    if (!CreateProcessW(hostPath.c_str(),
             commandLine.data(),
             nullptr,
             nullptr,
             TRUE,
-            CREATE_SUSPENDED | CREATE_NO_WINDOW,
+            CREATE_NO_WINDOW,
             nullptr,
             nullptr,
             &startupInformation,
             &processInformation))
     {
         const DWORD processError = GetLastError();
-        if (!terminalBridge.CompleteChildProcessCreation(false, terminalError))
-        {
-            std::wcerr << terminalError << L"\n";
-            return 1;
-        }
-        std::wcerr << L"Could not start the disconnect-test helper: "
+        std::wcerr << L"Could not start the disconnect-test host: "
                    << FormatWindowsError(processError) << L"\n";
         return 1;
     }
     UniqueHandle process(processInformation.hProcess);
     UniqueHandle thread(processInformation.hThread);
-    if (!terminalBridge.CompleteChildProcessCreation(true, terminalError))
+    reportWrite.reset();
+
+    if (!terminalBridge.ConnectBrokerChild(terminalError) || !terminalBridge.Start(terminalError))
     {
         TerminateProcess(process.get(), 1);
+        WaitForSingleObject(process.get(), ProcessTimeoutMilliseconds);
         std::wcerr << terminalError << L"\n";
-        return 1;
-    }
-    if (!terminalBridge.Start(terminalError))
-    {
-        TerminateProcess(process.get(), 1);
-        std::wcerr << terminalError << L"\n";
-        return 1;
-    }
-    if (ResumeThread(thread.get()) == static_cast<DWORD>(-1))
-    {
-        const DWORD resumeError = GetLastError();
-        TerminateProcess(process.get(), 1);
-        terminalBridge.Stop();
-        std::wcerr << L"Could not resume the disconnect-test helper: "
-                   << FormatWindowsError(resumeError) << L"\n";
         return 1;
     }
 
@@ -216,13 +170,13 @@ int wmain(int argumentCount, wchar_t* arguments[])
     if (!GetExitCodeProcess(process.get(), &exitCode))
     {
         const DWORD exitCodeError = GetLastError();
-        std::wcerr << L"Could not read the disconnect-test helper exit code: "
+        std::wcerr << L"Could not read the disconnect-test host exit code: "
                    << FormatWindowsError(exitCodeError) << L"\n";
         return 1;
     }
     if (exitCode != ExpectedChildExitCode)
     {
-        std::wcerr << L"The helper returned " << exitCode << L"; expected " << ExpectedChildExitCode
+        std::wcerr << L"The host returned " << exitCode << L"; expected " << ExpectedChildExitCode
                    << L".\n";
         return 1;
     }

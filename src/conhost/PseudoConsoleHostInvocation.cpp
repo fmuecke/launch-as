@@ -99,10 +99,8 @@ bool ParsePseudoConsoleHostInvocation(
     {
         invocation.processArguments.emplace_back(arguments[index]);
     }
-    return (invocation.pipeIn.empty() && invocation.pipeOut.empty() &&
-               invocation.pipeResize.empty()) ||
-           (!invocation.pipeIn.empty() && !invocation.pipeOut.empty() &&
-               !invocation.pipeResize.empty());
+    return !invocation.pipeIn.empty() && !invocation.pipeOut.empty() &&
+           !invocation.pipeResize.empty();
 }
 
 } // namespace launch_as

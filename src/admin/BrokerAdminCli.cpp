@@ -39,28 +39,17 @@ namespace
         return openError;
     }
 
-    DWORD bytesWritten = 0;
-    const BOOL wroteRequest = WriteFile(
-        pipe.get(), request.data(), static_cast<DWORD>(request.size()), &bytesWritten, nullptr);
-    const DWORD writeError = wroteRequest ? ERROR_SUCCESS : GetLastError();
-    if (!wroteRequest || bytesWritten != request.size())
+    const DWORD writeError = launch_as::broker::WritePipeMessage(pipe.get(), request);
+    if (writeError != ERROR_SUCCESS)
     {
-        return wroteRequest ? ERROR_WRITE_FAULT : writeError;
+        return writeError;
     }
-
-    std::array<char, launch_as::broker::MaximumMessageBytes> responseBuffer {};
-    DWORD bytesRead = 0;
-    const BOOL readResponse = ReadFile(pipe.get(),
-        responseBuffer.data(),
-        static_cast<DWORD>(responseBuffer.size()),
-        &bytesRead,
-        nullptr);
-    const DWORD readError = readResponse ? ERROR_SUCCESS : GetLastError();
-    if (!readResponse)
+    std::string response;
+    const DWORD readError = launch_as::broker::ReadPipeMessage(pipe.get(), response);
+    if (readError != ERROR_SUCCESS)
     {
         return readError;
     }
-    const std::string response(responseBuffer.data(), bytesRead);
     if (operation == launch_as::broker::RequestOperation::List)
     {
         return accounts != nullptr &&

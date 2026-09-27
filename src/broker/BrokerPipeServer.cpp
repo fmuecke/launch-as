@@ -194,17 +194,9 @@ void WaitForControlConnectionClose(HANDLE pipe, HANDLE stopEvent)
         return false;
     }
 
-    DWORD tokenUserBytes = 0;
-    GetTokenInformation(token.get(), TokenUser, nullptr, 0, &tokenUserBytes);
-    const DWORD sizeError = GetLastError();
-    if (tokenError != ERROR_SUCCESS || sizeError != ERROR_INSUFFICIENT_BUFFER ||
-        tokenUserBytes == 0)
-    {
-        return false;
-    }
-    std::vector<BYTE> tokenUser(tokenUserBytes);
-    if (!GetTokenInformation(
-            token.get(), TokenUser, tokenUser.data(), tokenUserBytes, &tokenUserBytes))
+    std::vector<BYTE> tokenUser;
+    if (tokenError != ERROR_SUCCESS ||
+        QueryTokenInformation(token.get(), TokenUser, tokenUser) != ERROR_SUCCESS)
     {
         return false;
     }
@@ -260,19 +252,8 @@ void WaitForControlConnectionClose(HANDLE pipe, HANDLE stopEvent)
     }
     UniqueHandle clientToken(rawClientToken);
 
-    DWORD clientTokenUserBytes = 0;
-    GetTokenInformation(clientToken.get(), TokenUser, nullptr, 0, &clientTokenUserBytes);
-    const DWORD clientSizeError = GetLastError();
-    if (clientSizeError != ERROR_INSUFFICIENT_BUFFER || clientTokenUserBytes == 0)
-    {
-        return false;
-    }
-    std::vector<BYTE> clientTokenUser(clientTokenUserBytes);
-    if (!GetTokenInformation(clientToken.get(),
-            TokenUser,
-            clientTokenUser.data(),
-            clientTokenUserBytes,
-            &clientTokenUserBytes))
+    std::vector<BYTE> clientTokenUser;
+    if (QueryTokenInformation(clientToken.get(), TokenUser, clientTokenUser) != ERROR_SUCCESS)
     {
         return false;
     }

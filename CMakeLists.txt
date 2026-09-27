@@ -819,6 +819,8 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
         src/broker/BrokerPassword.h
         src/broker/BrokerRegistration.cpp
         src/broker/BrokerRegistration.h
+        src/common/Win32Support.cpp
+        src/common/Win32Support.h
     )
     target_link_libraries(LauncherBrokerAccountProvisioningTests PRIVATE
         Bcrypt
@@ -837,6 +839,8 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
         src/broker/BrokerDataDirectory.h
         src/admin/BrokerServiceInstaller.cpp
         src/admin/BrokerServiceInstaller.h
+        src/common/Win32Support.cpp
+        src/common/Win32Support.h
     )
     target_link_libraries(LauncherBrokerServiceInstallerTests PRIVATE
         Advapi32

@@ -6,6 +6,7 @@
 
 #include "BrokerProtocol.h"
 #include "InteractiveDesktopAclLease.h"
+#include "Win32Support.h"
 
 #include <Sddl.h>
 #include <Windows.h>
@@ -20,17 +21,10 @@ namespace
 
 [[nodiscard]] DWORD ValidateLocalSystemToken(HANDLE token)
 {
-    DWORD userBytes = 0;
-    GetTokenInformation(token, TokenUser, nullptr, 0, &userBytes);
-    const DWORD sizeError = GetLastError();
-    if (sizeError != ERROR_INSUFFICIENT_BUFFER || userBytes == 0)
+    std::vector<BYTE> userBuffer;
+    const DWORD userError = QueryTokenInformation(token, TokenUser, userBuffer);
+    if (userError != ERROR_SUCCESS)
     {
-        return sizeError;
-    }
-    std::vector<BYTE> userBuffer(userBytes);
-    if (!GetTokenInformation(token, TokenUser, userBuffer.data(), userBytes, &userBytes))
-    {
-        const DWORD userError = GetLastError();
         return userError;
     }
     std::array<BYTE, SECURITY_MAX_SID_SIZE> systemSid {};

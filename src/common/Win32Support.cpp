@@ -37,6 +37,27 @@ std::wstring FormatWindowsError(DWORD error)
     return message + L" (" + std::to_wstring(error) + L")";
 }
 
+DWORD QueryTokenInformation(
+    HANDLE token, TOKEN_INFORMATION_CLASS informationClass, std::vector<BYTE>& buffer)
+{
+    buffer.clear();
+    DWORD bytes = 0;
+    GetTokenInformation(token, informationClass, nullptr, 0, &bytes);
+    const DWORD sizeError = GetLastError();
+    if (sizeError != ERROR_INSUFFICIENT_BUFFER || bytes == 0)
+    {
+        return sizeError == ERROR_SUCCESS ? ERROR_INVALID_DATA : sizeError;
+    }
+    buffer.resize(bytes);
+    if (!GetTokenInformation(token, informationClass, buffer.data(), bytes, &bytes))
+    {
+        const DWORD readError = GetLastError();
+        buffer.clear();
+        return readError;
+    }
+    return ERROR_SUCCESS;
+}
+
 bool CreateGuidString(std::wstring& text)
 {
     text.clear();

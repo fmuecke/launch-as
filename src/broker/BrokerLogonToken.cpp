@@ -4,6 +4,8 @@
 
 #include "BrokerLogonToken.h"
 
+#include "Win32Support.h"
+
 #include <algorithm>
 #include <array>
 #include <ntsecapi.h>
@@ -58,18 +60,10 @@ namespace
 
 [[nodiscard]] DWORD ValidateTokenUser(HANDLE token, std::vector<BYTE>& expectedSid)
 {
-    DWORD tokenUserBytes = 0;
-    GetTokenInformation(token, TokenUser, nullptr, 0, &tokenUserBytes);
-    const DWORD tokenUserSizeError = GetLastError();
-    if (tokenUserSizeError != ERROR_INSUFFICIENT_BUFFER || tokenUserBytes == 0)
+    std::vector<BYTE> tokenUserBuffer;
+    const DWORD tokenUserError = QueryTokenInformation(token, TokenUser, tokenUserBuffer);
+    if (tokenUserError != ERROR_SUCCESS)
     {
-        return tokenUserSizeError;
-    }
-    std::vector<BYTE> tokenUserBuffer(tokenUserBytes);
-    if (!GetTokenInformation(
-            token, TokenUser, tokenUserBuffer.data(), tokenUserBytes, &tokenUserBytes))
-    {
-        const DWORD tokenUserError = GetLastError();
         return tokenUserError;
     }
     const auto* tokenUser = reinterpret_cast<const TOKEN_USER*>(tokenUserBuffer.data());
@@ -93,18 +87,10 @@ namespace
         const DWORD administratorsSidError = GetLastError();
         return administratorsSidError;
     }
-    DWORD tokenGroupsBytes = 0;
-    GetTokenInformation(token, TokenGroups, nullptr, 0, &tokenGroupsBytes);
-    const DWORD tokenGroupsSizeError = GetLastError();
-    if (tokenGroupsSizeError != ERROR_INSUFFICIENT_BUFFER || tokenGroupsBytes == 0)
+    std::vector<BYTE> tokenGroupsBuffer;
+    const DWORD tokenGroupsError = QueryTokenInformation(token, TokenGroups, tokenGroupsBuffer);
+    if (tokenGroupsError != ERROR_SUCCESS)
     {
-        return tokenGroupsSizeError;
-    }
-    std::vector<BYTE> tokenGroupsBuffer(tokenGroupsBytes);
-    if (!GetTokenInformation(
-            token, TokenGroups, tokenGroupsBuffer.data(), tokenGroupsBytes, &tokenGroupsBytes))
-    {
-        const DWORD tokenGroupsError = GetLastError();
         return tokenGroupsError;
     }
     const auto* tokenGroups = reinterpret_cast<const TOKEN_GROUPS*>(tokenGroupsBuffer.data());
@@ -157,21 +143,11 @@ constexpr std::array<LPCWSTR, 5> AllowedTokenPrivilegeNames {
         }
     }
 
-    DWORD tokenPrivilegesBytes = 0;
-    GetTokenInformation(token, TokenPrivileges, nullptr, 0, &tokenPrivilegesBytes);
-    const DWORD sizeError = GetLastError();
-    if (sizeError != ERROR_INSUFFICIENT_BUFFER || tokenPrivilegesBytes == 0)
+    std::vector<BYTE> tokenPrivilegesBuffer;
+    const DWORD tokenPrivilegesError =
+        QueryTokenInformation(token, TokenPrivileges, tokenPrivilegesBuffer);
+    if (tokenPrivilegesError != ERROR_SUCCESS)
     {
-        return sizeError;
-    }
-    std::vector<BYTE> tokenPrivilegesBuffer(tokenPrivilegesBytes);
-    if (!GetTokenInformation(token,
-            TokenPrivileges,
-            tokenPrivilegesBuffer.data(),
-            tokenPrivilegesBytes,
-            &tokenPrivilegesBytes))
-    {
-        const DWORD tokenPrivilegesError = GetLastError();
         return tokenPrivilegesError;
     }
     const auto* tokenPrivileges =
@@ -193,18 +169,10 @@ constexpr std::array<LPCWSTR, 5> AllowedTokenPrivilegeNames {
 
 [[nodiscard]] DWORD ValidateMediumIntegrityLevel(HANDLE token)
 {
-    DWORD integrityBytes = 0;
-    GetTokenInformation(token, TokenIntegrityLevel, nullptr, 0, &integrityBytes);
-    const DWORD integritySizeError = GetLastError();
-    if (integritySizeError != ERROR_INSUFFICIENT_BUFFER || integrityBytes == 0)
+    std::vector<BYTE> integrityBuffer;
+    const DWORD integrityError = QueryTokenInformation(token, TokenIntegrityLevel, integrityBuffer);
+    if (integrityError != ERROR_SUCCESS)
     {
-        return integritySizeError;
-    }
-    std::vector<BYTE> integrityBuffer(integrityBytes);
-    if (!GetTokenInformation(
-            token, TokenIntegrityLevel, integrityBuffer.data(), integrityBytes, &integrityBytes))
-    {
-        const DWORD integrityError = GetLastError();
         return integrityError;
     }
     const auto* integrity = reinterpret_cast<const TOKEN_MANDATORY_LABEL*>(integrityBuffer.data());
@@ -234,21 +202,11 @@ constexpr std::array<LPCWSTR, 5> AllowedTokenPrivilegeNames {
         const DWORD lookupError = GetLastError();
         return lookupError;
     }
-    DWORD tokenPrivilegesBytes = 0;
-    GetTokenInformation(token, TokenPrivileges, nullptr, 0, &tokenPrivilegesBytes);
-    const DWORD sizeError = GetLastError();
-    if (sizeError != ERROR_INSUFFICIENT_BUFFER || tokenPrivilegesBytes == 0)
+    std::vector<BYTE> tokenPrivilegesBuffer;
+    const DWORD tokenPrivilegesError =
+        QueryTokenInformation(token, TokenPrivileges, tokenPrivilegesBuffer);
+    if (tokenPrivilegesError != ERROR_SUCCESS)
     {
-        return sizeError;
-    }
-    std::vector<BYTE> tokenPrivilegesBuffer(tokenPrivilegesBytes);
-    if (!GetTokenInformation(token,
-            TokenPrivileges,
-            tokenPrivilegesBuffer.data(),
-            tokenPrivilegesBytes,
-            &tokenPrivilegesBytes))
-    {
-        const DWORD tokenPrivilegesError = GetLastError();
         return tokenPrivilegesError;
     }
     const auto* tokenPrivileges =

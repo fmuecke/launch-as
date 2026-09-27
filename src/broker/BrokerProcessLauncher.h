@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "Win32Support.h"
+
 #include <Windows.h>
 #include <span>
 #include <string>
@@ -37,17 +39,20 @@ class BrokerChildProcess final
 
   private:
     void Reset() noexcept;
-    void SetProcess(HANDLE process, HANDLE thread) noexcept;
-    void SetUserProfile(HANDLE token, HANDLE profile) noexcept;
-    void SetPseudoConsoleHostReports(HANDLE exitReport, HANDLE diagnostics) noexcept;
+    // Loads the account profile, creates the process suspended, and assigns it to the job. On
+    // success this object owns the process, its thread, and the loaded profile.
+    [[nodiscard]] DWORD CreateSuspendedInJob(HANDLE token, std::wstring_view accountName,
+        const std::wstring& executable, std::vector<wchar_t>& commandLine,
+        const std::wstring& directory, BOOL inheritHandles, DWORD creationFlags,
+        STARTUPINFOW& startupInfo);
 
-    HANDLE job_ = nullptr;
-    HANDLE process_ = nullptr;
-    HANDLE thread_ = nullptr;
-    HANDLE profileToken_ = nullptr;
+    UniqueHandle job_;
+    UniqueHandle process_;
+    UniqueHandle thread_;
+    UniqueHandle profileToken_;
     HANDLE profile_ = nullptr;
-    HANDLE exitReport_ = nullptr;
-    HANDLE diagnostics_ = nullptr;
+    UniqueHandle exitReport_;
+    UniqueHandle diagnostics_;
 
     friend DWORD CreateBrokerJob(BrokerChildProcess& child);
     friend DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,

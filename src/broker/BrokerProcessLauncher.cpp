@@ -7,6 +7,7 @@
 #include "InteractiveDesktopLeaseClient.h"
 #include "PseudoConsoleHostReport.h"
 #include "Utf8.h"
+#include "Win32Support.h"
 #include "WindowsCommandLine.h"
 
 #include <algorithm>
@@ -14,6 +15,7 @@
 #include <filesystem>
 #include <string>
 #include <userenv.h>
+#include <utility>
 #include <vector>
 
 namespace launch_as::broker
@@ -45,21 +47,19 @@ class EnabledProcessPrivileges final
     {
         for (DWORD index = 0; index < enabledCount_; ++index)
         {
-            AdjustTokenPrivileges(token_, FALSE, &previous_[index], 0, nullptr, nullptr);
-        }
-        if (token_ != nullptr)
-        {
-            CloseHandle(token_);
+            AdjustTokenPrivileges(token_.get(), FALSE, &previous_[index], 0, nullptr, nullptr);
         }
     }
 
     [[nodiscard]] DWORD EnableRequired()
     {
-        if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &token_))
+        HANDLE token = nullptr;
+        if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &token))
         {
             const DWORD tokenError = GetLastError();
             return tokenError;
         }
+        token_.reset(token);
         // LoadUserProfileW requires backup and restore rights; CreateProcessAsUserW requires the
         // token-assignment and quota rights below. Enable them only for this launch operation.
         const DWORD backupError = Enable(SE_BACKUP_NAME);
@@ -99,7 +99,7 @@ class EnabledProcessPrivileges final
         requested.Privileges[0].Luid = privilege;
         requested.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
         DWORD returnedBytes = 0;
-        if (!AdjustTokenPrivileges(token_,
+        if (!AdjustTokenPrivileges(token_.get(),
                 FALSE,
                 &requested,
                 sizeof(previous_[enabledCount_]),
@@ -118,7 +118,7 @@ class EnabledProcessPrivileges final
         return ERROR_SUCCESS;
     }
 
-    HANDLE token_ = nullptr;
+    UniqueHandle token_;
     std::array<TOKEN_PRIVILEGES, 4> previous_ {};
     DWORD enabledCount_ = 0;
 };
@@ -223,58 +223,167 @@ class UserEnvironmentBlock final
     return true;
 }
 
-[[nodiscard]] bool CreateBrokerReportPipe(
-    HANDLE& readEnd, HANDLE& writeEnd, DWORD bufferSize, DWORD& error)
+class LoadedUserProfile final
 {
-    readEnd = nullptr;
-    writeEnd = nullptr;
+  public:
+    LoadedUserProfile() = default;
+    ~LoadedUserProfile()
+    {
+        if (profile_ != nullptr)
+        {
+            UnloadUserProfile(token_, profile_);
+        }
+    }
+
+    LoadedUserProfile(const LoadedUserProfile&) = delete;
+    LoadedUserProfile& operator=(const LoadedUserProfile&) = delete;
+
+    [[nodiscard]] DWORD Load(HANDLE token, std::wstring_view accountName)
+    {
+        std::wstring mutableAccountName(accountName);
+        PROFILEINFOW profileInfo {};
+        profileInfo.dwSize = sizeof(profileInfo);
+        profileInfo.lpUserName = mutableAccountName.data();
+        if (!LoadUserProfileW(token, &profileInfo))
+        {
+            const DWORD profileError = GetLastError();
+            return profileError;
+        }
+        token_ = token;
+        profile_ = profileInfo.hProfile;
+        return ERROR_SUCCESS;
+    }
+
+    [[nodiscard]] HANDLE release() noexcept { return std::exchange(profile_, nullptr); }
+
+  private:
+    HANDLE token_ = nullptr;
+    HANDLE profile_ = nullptr;
+};
+
+// Owns a process created suspended until it is handed over; otherwise terminates it.
+class SuspendedProcess final
+{
+  public:
+    SuspendedProcess() = default;
+    ~SuspendedProcess() { reset(); }
+
+    SuspendedProcess(const SuspendedProcess&) = delete;
+    SuspendedProcess& operator=(const SuspendedProcess&) = delete;
+
+    void reset() noexcept
+    {
+        if (information_.hProcess != nullptr)
+        {
+            if (TerminateProcess(information_.hProcess, ERROR_CANCELLED))
+            {
+                static_cast<void>(WaitForSingleObject(information_.hProcess, INFINITE));
+            }
+            CloseHandle(information_.hThread);
+            CloseHandle(information_.hProcess);
+        }
+        information_ = {};
+    }
+
+    [[nodiscard]] PROCESS_INFORMATION* out() noexcept { return &information_; }
+    [[nodiscard]] HANDLE process() const noexcept { return information_.hProcess; }
+    [[nodiscard]] PROCESS_INFORMATION release() noexcept
+    {
+        return std::exchange(information_, PROCESS_INFORMATION {});
+    }
+
+  private:
+    PROCESS_INFORMATION information_ {};
+};
+
+class ProcThreadAttributeList final
+{
+  public:
+    ProcThreadAttributeList() = default;
+    ~ProcThreadAttributeList()
+    {
+        if (initialized_)
+        {
+            DeleteProcThreadAttributeList(get());
+        }
+    }
+
+    ProcThreadAttributeList(const ProcThreadAttributeList&) = delete;
+    ProcThreadAttributeList& operator=(const ProcThreadAttributeList&) = delete;
+
+    [[nodiscard]] DWORD Initialize(DWORD attributeCount)
+    {
+        SIZE_T bytes = 0;
+        InitializeProcThreadAttributeList(nullptr, attributeCount, 0, &bytes);
+        const DWORD sizeError = GetLastError();
+        if (bytes == 0)
+        {
+            return sizeError;
+        }
+        buffer_.resize(bytes);
+        if (!InitializeProcThreadAttributeList(get(), attributeCount, 0, &bytes))
+        {
+            const DWORD initializeError = GetLastError();
+            return initializeError;
+        }
+        initialized_ = true;
+        return ERROR_SUCCESS;
+    }
+
+    [[nodiscard]] LPPROC_THREAD_ATTRIBUTE_LIST get() noexcept
+    {
+        return reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(buffer_.data());
+    }
+
+  private:
+    std::vector<BYTE> buffer_;
+    bool initialized_ = false;
+};
+
+[[nodiscard]] DWORD CreateBrokerReportPipe(
+    UniqueHandle& readEnd, UniqueHandle& writeEnd, DWORD bufferSize)
+{
     SECURITY_ATTRIBUTES attributes {};
     attributes.nLength = sizeof(attributes);
     attributes.bInheritHandle = TRUE;
-    if (!CreatePipe(&readEnd, &writeEnd, &attributes, bufferSize))
+    HANDLE rawRead = nullptr;
+    HANDLE rawWrite = nullptr;
+    if (!CreatePipe(&rawRead, &rawWrite, &attributes, bufferSize))
     {
-        error = GetLastError();
-        return false;
+        const DWORD pipeError = GetLastError();
+        return pipeError;
     }
-    if (!SetHandleInformation(readEnd, HANDLE_FLAG_INHERIT, 0))
+    readEnd.reset(rawRead);
+    writeEnd.reset(rawWrite);
+    if (!SetHandleInformation(readEnd.get(), HANDLE_FLAG_INHERIT, 0))
     {
-        error = GetLastError();
-        CloseHandle(readEnd);
-        CloseHandle(writeEnd);
-        readEnd = nullptr;
-        writeEnd = nullptr;
-        return false;
+        const DWORD inheritError = GetLastError();
+        readEnd.reset();
+        writeEnd.reset();
+        return inheritError;
     }
-    return true;
+    return ERROR_SUCCESS;
 }
 
-[[nodiscard]] HANDLE CreateInheritableNullInput(DWORD& error)
+[[nodiscard]] DWORD CreateInheritableNullInput(UniqueHandle& input)
 {
     SECURITY_ATTRIBUTES attributes {};
     attributes.nLength = sizeof(attributes);
     attributes.bInheritHandle = TRUE;
-    HANDLE input = CreateFileW(L"NUL",
+    HANDLE rawInput = CreateFileW(L"NUL",
         GENERIC_READ,
         FILE_SHARE_READ | FILE_SHARE_WRITE,
         &attributes,
         OPEN_EXISTING,
         FILE_ATTRIBUTE_NORMAL,
         nullptr);
-    if (input == INVALID_HANDLE_VALUE)
+    if (rawInput == INVALID_HANDLE_VALUE)
     {
-        error = GetLastError();
-        return nullptr;
+        const DWORD inputError = GetLastError();
+        return inputError;
     }
-    return input;
-}
-
-void CloseHandleIfPresent(HANDLE& handle) noexcept
-{
-    if (handle != nullptr)
-    {
-        CloseHandle(handle);
-        handle = nullptr;
-    }
+    input.reset(rawInput);
+    return ERROR_SUCCESS;
 }
 
 [[nodiscard]] bool QueryBrokerJobBasicAccountingInformation(
@@ -298,29 +407,27 @@ void CloseHandleIfPresent(HANDLE& handle) noexcept
 
 DWORD DisableBrokerProcessTcbPrivilege()
 {
-    HANDLE token = nullptr;
-    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &token))
+    HANDLE rawToken = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &rawToken))
     {
         return GetLastError();
     }
+    const UniqueHandle token(rawToken);
     TOKEN_PRIVILEGES requested {};
     requested.PrivilegeCount = 1;
     if (!LookupPrivilegeValueW(nullptr, SE_TCB_NAME, &requested.Privileges[0].Luid))
     {
         const DWORD lookupError = GetLastError();
-        CloseHandle(token);
         return lookupError;
     }
     // LocalSystem starts with TCB enabled. Keep it present for private thread-token copies,
     // but permanently disable it on the process token before any workers can use that token.
-    if (!AdjustTokenPrivileges(token, FALSE, &requested, 0, nullptr, nullptr))
+    if (!AdjustTokenPrivileges(token.get(), FALSE, &requested, 0, nullptr, nullptr))
     {
         const DWORD adjustmentError = GetLastError();
-        CloseHandle(token);
         return adjustmentError;
     }
     const DWORD adjustmentError = GetLastError();
-    CloseHandle(token);
     return adjustmentError;
 }
 
@@ -355,25 +462,25 @@ DWORD SetBrokerTokenSessionId(HANDLE token, DWORD sessionId)
         }
     } revertOnExit;
 
-    HANDLE threadToken = nullptr;
+    HANDLE rawThreadToken = nullptr;
     if (!OpenThreadToken(
-            GetCurrentThread(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, TRUE, &threadToken))
+            GetCurrentThread(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, TRUE, &rawThreadToken))
     {
         return GetLastError();
     }
+    UniqueHandle threadToken(rawThreadToken);
     TOKEN_PRIVILEGES requested {};
     requested.PrivilegeCount = 1;
     requested.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
     if (!LookupPrivilegeValueW(nullptr, SE_TCB_NAME, &requested.Privileges[0].Luid))
     {
         const DWORD lookupError = GetLastError();
-        CloseHandle(threadToken);
         return lookupError;
     }
     const BOOL adjusted =
-        AdjustTokenPrivileges(threadToken, FALSE, &requested, 0, nullptr, nullptr);
+        AdjustTokenPrivileges(threadToken.get(), FALSE, &requested, 0, nullptr, nullptr);
     const DWORD adjustmentError = GetLastError();
-    CloseHandle(threadToken);
+    threadToken.reset();
     if (!adjusted || adjustmentError != ERROR_SUCCESS)
     {
         return adjustmentError;
@@ -417,33 +524,34 @@ void SetBrokerJobQueryFailureForTesting(bool fail) noexcept { failBrokerJobQuery
     mutableCommandLine.push_back(L'\0');
     STARTUPINFOW startupInfo {};
     startupInfo.cb = sizeof(startupInfo);
-    PROCESS_INFORMATION processInfo {};
-    if (!CreateProcessW(executablePath.c_str(),
-            mutableCommandLine.data(),
-            nullptr,
-            nullptr,
-            FALSE,
-            CREATE_NO_WINDOW | CREATE_SUSPENDED,
-            nullptr,
-            nullptr,
-            &startupInfo,
-            &processInfo))
     {
-        const DWORD processError = GetLastError();
-        child.Reset();
-        return processError;
+        SuspendedProcess process;
+        if (!CreateProcessW(executablePath.c_str(),
+                mutableCommandLine.data(),
+                nullptr,
+                nullptr,
+                FALSE,
+                CREATE_NO_WINDOW | CREATE_SUSPENDED,
+                nullptr,
+                nullptr,
+                &startupInfo,
+                process.out()))
+        {
+            const DWORD processError = GetLastError();
+            child.Reset();
+            return processError;
+        }
+        if (!AssignProcessToJobObject(child.job_.get(), process.process()))
+        {
+            const DWORD assignmentError = GetLastError();
+            process.reset();
+            child.Reset();
+            return assignmentError;
+        }
+        const PROCESS_INFORMATION processInfo = process.release();
+        child.process_.reset(processInfo.hProcess);
+        child.thread_.reset(processInfo.hThread);
     }
-    if (!AssignProcessToJobObject(child.job_, processInfo.hProcess))
-    {
-        const DWORD assignmentError = GetLastError();
-        static_cast<void>(TerminateProcess(processInfo.hProcess, ERROR_CANCELLED));
-        static_cast<void>(WaitForSingleObject(processInfo.hProcess, INFINITE));
-        CloseHandle(processInfo.hThread);
-        CloseHandle(processInfo.hProcess);
-        child.Reset();
-        return assignmentError;
-    }
-    child.SetProcess(processInfo.hProcess, processInfo.hThread);
     const DWORD resumeError = child.Resume();
     if (resumeError != ERROR_SUCCESS)
     {
@@ -465,27 +573,24 @@ DWORD LaunchDelayedBrokerChildForTesting(BrokerChildProcess& child)
 
 BrokerChildProcess::~BrokerChildProcess() { Reset(); }
 
-HANDLE BrokerChildProcess::job() const noexcept { return job_; }
+HANDLE BrokerChildProcess::job() const noexcept { return job_.get(); }
 
-HANDLE BrokerChildProcess::process() const noexcept { return process_; }
+HANDLE BrokerChildProcess::process() const noexcept { return process_.get(); }
 
 DWORD BrokerChildProcess::processId() const noexcept
 {
-    return process_ == nullptr ? 0 : GetProcessId(process_);
+    return process_ ? GetProcessId(process_.get()) : 0;
 }
 
-BrokerChildProcess::operator bool() const noexcept
-{
-    return job_ != nullptr && process_ != nullptr && thread_ != nullptr;
-}
+BrokerChildProcess::operator bool() const noexcept { return job_ && process_ && thread_; }
 
 DWORD BrokerChildProcess::Resume() noexcept
 {
-    if (thread_ == nullptr)
+    if (!thread_)
     {
         return ERROR_INVALID_HANDLE;
     }
-    const DWORD suspendedCount = ResumeThread(thread_);
+    const DWORD suspendedCount = ResumeThread(thread_.get());
     if (suspendedCount == static_cast<DWORD>(-1))
     {
         const DWORD resumeError = GetLastError();
@@ -499,7 +604,7 @@ bool BrokerChildProcess::ReadPseudoConsoleHostResult(
 {
     childExitCode = 0;
     diagnostics.clear();
-    if (exitReport_ == nullptr || diagnostics_ == nullptr)
+    if (!exitReport_ || !diagnostics_)
     {
         return false;
     }
@@ -509,7 +614,7 @@ bool BrokerChildProcess::ReadPseudoConsoleHostResult(
     while (bytesRead < sizeof(report))
     {
         DWORD received = 0;
-        if (!ReadFile(exitReport_,
+        if (!ReadFile(exitReport_.get(),
                 reinterpret_cast<BYTE*>(&report) + bytesRead,
                 static_cast<DWORD>(sizeof(report) - bytesRead),
                 &received,
@@ -536,8 +641,11 @@ bool BrokerChildProcess::ReadPseudoConsoleHostResult(
     for (;;)
     {
         DWORD received = 0;
-        if (!ReadFile(
-                diagnostics_, buffer.data(), static_cast<DWORD>(buffer.size()), &received, nullptr))
+        if (!ReadFile(diagnostics_.get(),
+                buffer.data(),
+                static_cast<DWORD>(buffer.size()),
+                &received,
+                nullptr))
         {
             const DWORD diagnosticError = GetLastError();
             if (diagnosticError != ERROR_BROKEN_PIPE && diagnostics.empty())
@@ -580,18 +688,18 @@ bool BrokerChildProcess::ReadPseudoConsoleHostResult(
 
 bool BrokerChildProcess::TerminateAndWaitForExit() noexcept
 {
-    if (job_ == nullptr)
+    if (!job_)
     {
         Reset();
         return true;
     }
     const ULONGLONG deadline = GetTickCount64() + JobTerminationTimeoutMilliseconds;
-    static_cast<void>(TerminateJobObject(job_, ERROR_CANCELLED));
-    if (process_ != nullptr)
+    static_cast<void>(TerminateJobObject(job_.get(), ERROR_CANCELLED));
+    if (process_)
     {
         const ULONGLONG now = GetTickCount64();
         const DWORD remaining = now >= deadline ? 0 : static_cast<DWORD>(deadline - now);
-        if (WaitForSingleObject(process_, remaining) != WAIT_OBJECT_0)
+        if (WaitForSingleObject(process_.get(), remaining) != WAIT_OBJECT_0)
         {
             return false;
         }
@@ -616,7 +724,7 @@ void BrokerChildProcess::TerminateAndWaitForExitConfirmed() noexcept
 
 bool BrokerChildProcess::WaitForProcessTreeExit(DWORD timeoutMilliseconds) const noexcept
 {
-    if (job_ == nullptr)
+    if (!job_)
     {
         return false;
     }
@@ -625,7 +733,7 @@ bool BrokerChildProcess::WaitForProcessTreeExit(DWORD timeoutMilliseconds) const
     for (;;)
     {
         JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting {};
-        if (!QueryBrokerJobBasicAccountingInformation(job_, accounting))
+        if (!QueryBrokerJobBasicAccountingInformation(job_.get(), accounting))
         {
             return false;
         }
@@ -646,81 +754,37 @@ bool BrokerChildProcess::WaitForProcessTreeExit(DWORD timeoutMilliseconds) const
 
 void BrokerChildProcess::Reset() noexcept
 {
-    CloseHandleIfPresent(exitReport_);
-    CloseHandleIfPresent(diagnostics_);
-    if (job_ != nullptr)
-    {
-        CloseHandle(job_);
-    }
+    exitReport_.reset();
+    diagnostics_.reset();
+    job_.reset();
     if (profile_ != nullptr)
     {
-        UnloadUserProfile(profileToken_, profile_);
+        UnloadUserProfile(profileToken_.get(), profile_);
+        profile_ = nullptr;
     }
-    if (profileToken_ != nullptr)
-    {
-        CloseHandle(profileToken_);
-    }
-    if (thread_ != nullptr)
-    {
-        CloseHandle(thread_);
-    }
-    if (process_ != nullptr)
-    {
-        CloseHandle(process_);
-    }
-    job_ = nullptr;
-    process_ = nullptr;
-    thread_ = nullptr;
-    profileToken_ = nullptr;
-    profile_ = nullptr;
-}
-
-void BrokerChildProcess::SetProcess(HANDLE process, HANDLE thread) noexcept
-{
-    if (thread_ != nullptr)
-    {
-        CloseHandle(thread_);
-    }
-    if (process_ != nullptr)
-    {
-        CloseHandle(process_);
-    }
-    process_ = process;
-    thread_ = thread;
-}
-
-void BrokerChildProcess::SetUserProfile(HANDLE token, HANDLE profile) noexcept
-{
-    profileToken_ = token;
-    profile_ = profile;
-}
-
-void BrokerChildProcess::SetPseudoConsoleHostReports(HANDLE exitReport, HANDLE diagnostics) noexcept
-{
-    CloseHandleIfPresent(exitReport_);
-    CloseHandleIfPresent(diagnostics_);
-    exitReport_ = exitReport;
-    diagnostics_ = diagnostics;
+    profileToken_.reset();
+    thread_.reset();
+    process_.reset();
 }
 
 DWORD CreateBrokerJob(BrokerChildProcess& child)
 {
     child.Reset();
-    HANDLE job = CreateJobObjectW(nullptr, nullptr);
-    if (job == nullptr)
+    UniqueHandle job(CreateJobObjectW(nullptr, nullptr));
+    if (!job)
     {
         const DWORD jobError = GetLastError();
         return jobError;
     }
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits {};
     limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits)))
+    if (!SetInformationJobObject(
+            job.get(), JobObjectExtendedLimitInformation, &limits, sizeof(limits)))
     {
         const DWORD limitError = GetLastError();
-        CloseHandle(job);
         return limitError;
     }
-    child.job_ = job;
+    child.job_ = std::move(job);
     return ERROR_SUCCESS;
 }
 
@@ -763,6 +827,66 @@ DWORD ResolveBrokerWorkingDirectory(
     return ERROR_SUCCESS;
 }
 
+DWORD BrokerChildProcess::CreateSuspendedInJob(HANDLE token, std::wstring_view accountName,
+    const std::wstring& executable, std::vector<wchar_t>& commandLine,
+    const std::wstring& directory, BOOL inheritHandles, DWORD creationFlags,
+    STARTUPINFOW& startupInfo)
+{
+    // Declaration order is cleanup order on failure: terminate the process before unloading the
+    // profile it was created with.
+    LoadedUserProfile profile;
+    const DWORD profileError = profile.Load(token, accountName);
+    if (profileError != ERROR_SUCCESS)
+    {
+        return profileError;
+    }
+    UserEnvironmentBlock environment;
+    const DWORD environmentError = environment.Create(token);
+    if (environmentError != ERROR_SUCCESS)
+    {
+        return environmentError;
+    }
+    SuspendedProcess process;
+    if (!CreateProcessAsUserW(token,
+            executable.c_str(),
+            commandLine.data(),
+            nullptr,
+            nullptr,
+            inheritHandles,
+            creationFlags | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
+            environment.get(),
+            directory.c_str(),
+            &startupInfo,
+            process.out()))
+    {
+        const DWORD processError = GetLastError();
+        return processError;
+    }
+    if (!AssignProcessToJobObject(job_.get(), process.process()))
+    {
+        const DWORD assignmentError = GetLastError();
+        return assignmentError;
+    }
+    HANDLE profileToken = nullptr;
+    if (!DuplicateHandle(GetCurrentProcess(),
+            token,
+            GetCurrentProcess(),
+            &profileToken,
+            0,
+            FALSE,
+            DUPLICATE_SAME_ACCESS))
+    {
+        const DWORD duplicateError = GetLastError();
+        return duplicateError;
+    }
+    const PROCESS_INFORMATION processInfo = process.release();
+    process_.reset(processInfo.hProcess);
+    thread_.reset(processInfo.hThread);
+    profileToken_.reset(profileToken);
+    profile_ = profile.release();
+    return ERROR_SUCCESS;
+}
+
 DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
     BrokerChildProcess& child)
@@ -783,195 +907,90 @@ DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,
     {
         return jobError;
     }
-    EnabledProcessPrivileges privileges;
-    const DWORD privilegeError = privileges.EnableRequired();
-    if (privilegeError != ERROR_SUCCESS)
+    const DWORD launchError = [&]() -> DWORD
     {
-        child.Reset();
-        return privilegeError;
-    }
-    std::wstring conhostPath;
-    const DWORD conhostError = GetBrokerConhostExecutablePath(conhostPath);
-    if (conhostError != ERROR_SUCCESS)
-    {
-        child.Reset();
-        return conhostError;
-    }
-    std::wstring commandLine = BuildWindowsCommandLine(conhostPath, arguments);
-    std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
-    mutableCommandLine.push_back(L'\0');
-    DWORD handleError = ERROR_SUCCESS;
-    HANDLE nullInput = CreateInheritableNullInput(handleError);
-    HANDLE exitReportRead = nullptr;
-    HANDLE exitReportWrite = nullptr;
-    HANDLE diagnosticsRead = nullptr;
-    HANDLE diagnosticsWrite = nullptr;
-    if (nullInput == nullptr ||
-        !CreateBrokerReportPipe(
-            exitReportRead, exitReportWrite, sizeof(PseudoConsoleHostExitReport), handleError) ||
-        !CreateBrokerReportPipe(diagnosticsRead, diagnosticsWrite, 64 * 1024, handleError))
-    {
-        CloseHandleIfPresent(nullInput);
-        CloseHandleIfPresent(exitReportRead);
-        CloseHandleIfPresent(exitReportWrite);
-        CloseHandleIfPresent(diagnosticsRead);
-        CloseHandleIfPresent(diagnosticsWrite);
-        child.Reset();
-        return handleError;
-    }
-    SIZE_T attributeListBytes = 0;
-    InitializeProcThreadAttributeList(nullptr, 1, 0, &attributeListBytes);
-    const DWORD attributeListSizeError = GetLastError();
-    if (attributeListBytes == 0)
-    {
-        CloseHandleIfPresent(nullInput);
-        CloseHandleIfPresent(exitReportRead);
-        CloseHandleIfPresent(exitReportWrite);
-        CloseHandleIfPresent(diagnosticsRead);
-        CloseHandleIfPresent(diagnosticsWrite);
-        child.Reset();
-        return attributeListSizeError;
-    }
-    std::vector<BYTE> attributeListBuffer(attributeListBytes);
-    auto* attributeList =
-        reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attributeListBuffer.data());
-    if (!InitializeProcThreadAttributeList(attributeList, 1, 0, &attributeListBytes))
-    {
-        const DWORD attributeListError = GetLastError();
-        CloseHandleIfPresent(nullInput);
-        CloseHandleIfPresent(exitReportRead);
-        CloseHandleIfPresent(exitReportWrite);
-        CloseHandleIfPresent(diagnosticsRead);
-        CloseHandleIfPresent(diagnosticsWrite);
-        child.Reset();
-        return attributeListError;
-    }
-    std::array<HANDLE, 3> inheritedHandles {nullInput, exitReportWrite, diagnosticsWrite};
-    if (!UpdateProcThreadAttribute(attributeList,
-            0,
-            PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-            inheritedHandles.data(),
-            sizeof(inheritedHandles),
-            nullptr,
-            nullptr))
-    {
-        const DWORD attributeError = GetLastError();
-        DeleteProcThreadAttributeList(attributeList);
-        CloseHandleIfPresent(nullInput);
-        CloseHandleIfPresent(exitReportRead);
-        CloseHandleIfPresent(exitReportWrite);
-        CloseHandleIfPresent(diagnosticsRead);
-        CloseHandleIfPresent(diagnosticsWrite);
-        child.Reset();
-        return attributeError;
-    }
-    STARTUPINFOEXW startupInfo {};
-    startupInfo.StartupInfo.cb = sizeof(startupInfo);
-    startupInfo.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-    startupInfo.StartupInfo.hStdInput = nullInput;
-    startupInfo.StartupInfo.hStdOutput = exitReportWrite;
-    startupInfo.StartupInfo.hStdError = diagnosticsWrite;
-    startupInfo.lpAttributeList = attributeList;
-    PROCESS_INFORMATION processInfo {};
-    std::wstring mutableAccountName(accountName);
-    PROFILEINFOW profileInfo {};
-    profileInfo.dwSize = sizeof(profileInfo);
-    profileInfo.lpUserName = mutableAccountName.data();
-    if (!LoadUserProfileW(token, &profileInfo))
-    {
-        const DWORD profileError = GetLastError();
-        DeleteProcThreadAttributeList(attributeList);
-        CloseHandleIfPresent(nullInput);
-        CloseHandleIfPresent(exitReportRead);
-        CloseHandleIfPresent(exitReportWrite);
-        CloseHandleIfPresent(diagnosticsRead);
-        CloseHandleIfPresent(diagnosticsWrite);
-        child.Reset();
-        return profileError;
-    }
-    UserEnvironmentBlock environment;
-    const DWORD environmentError = environment.Create(token);
-    if (environmentError != ERROR_SUCCESS)
-    {
-        DeleteProcThreadAttributeList(attributeList);
-        CloseHandleIfPresent(nullInput);
-        CloseHandleIfPresent(exitReportRead);
-        CloseHandleIfPresent(exitReportWrite);
-        CloseHandleIfPresent(diagnosticsRead);
-        CloseHandleIfPresent(diagnosticsWrite);
-        UnloadUserProfile(token, profileInfo.hProfile);
-        child.Reset();
-        return environmentError;
-    }
-    const BOOL created = CreateProcessAsUserW(token,
-        conhostPath.c_str(),
-        mutableCommandLine.data(),
-        nullptr,
-        nullptr,
-        TRUE,
-        CREATE_NO_WINDOW | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT |
-            EXTENDED_STARTUPINFO_PRESENT,
-        environment.get(),
-        directory.c_str(),
-        &startupInfo.StartupInfo,
-        &processInfo);
-    const DWORD processError = created ? ERROR_SUCCESS : GetLastError();
-    DeleteProcThreadAttributeList(attributeList);
-    if (!created)
-    {
-        CloseHandleIfPresent(nullInput);
-        CloseHandleIfPresent(exitReportRead);
-        CloseHandleIfPresent(exitReportWrite);
-        CloseHandleIfPresent(diagnosticsRead);
-        CloseHandleIfPresent(diagnosticsWrite);
-        UnloadUserProfile(token, profileInfo.hProfile);
-        child.Reset();
-        return processError;
-    }
-    CloseHandleIfPresent(nullInput);
-    CloseHandleIfPresent(exitReportWrite);
-    CloseHandleIfPresent(diagnosticsWrite);
-    if (!AssignProcessToJobObject(child.job_, processInfo.hProcess))
-    {
-        const DWORD assignmentError = GetLastError();
-        if (TerminateProcess(processInfo.hProcess, ERROR_CANCELLED))
+        EnabledProcessPrivileges privileges;
+        const DWORD privilegeError = privileges.EnableRequired();
+        if (privilegeError != ERROR_SUCCESS)
         {
-            static_cast<void>(WaitForSingleObject(processInfo.hProcess, INFINITE));
+            return privilegeError;
         }
-        CloseHandle(processInfo.hThread);
-        CloseHandle(processInfo.hProcess);
-        CloseHandleIfPresent(exitReportRead);
-        CloseHandleIfPresent(diagnosticsRead);
-        UnloadUserProfile(token, profileInfo.hProfile);
-        child.Reset();
-        return assignmentError;
-    }
-    HANDLE profileToken = nullptr;
-    if (!DuplicateHandle(GetCurrentProcess(),
-            token,
-            GetCurrentProcess(),
-            &profileToken,
-            0,
-            FALSE,
-            DUPLICATE_SAME_ACCESS))
-    {
-        const DWORD duplicateError = GetLastError();
-        if (TerminateProcess(processInfo.hProcess, ERROR_CANCELLED))
+        std::wstring conhostPath;
+        const DWORD conhostError = GetBrokerConhostExecutablePath(conhostPath);
+        if (conhostError != ERROR_SUCCESS)
         {
-            static_cast<void>(WaitForSingleObject(processInfo.hProcess, INFINITE));
+            return conhostError;
         }
-        CloseHandle(processInfo.hThread);
-        CloseHandle(processInfo.hProcess);
-        CloseHandleIfPresent(exitReportRead);
-        CloseHandleIfPresent(diagnosticsRead);
-        UnloadUserProfile(token, profileInfo.hProfile);
+        std::wstring commandLine = BuildWindowsCommandLine(conhostPath, arguments);
+        std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
+        mutableCommandLine.push_back(L'\0');
+        UniqueHandle nullInput;
+        UniqueHandle exitReportRead;
+        UniqueHandle exitReportWrite;
+        UniqueHandle diagnosticsRead;
+        UniqueHandle diagnosticsWrite;
+        DWORD handleError = CreateInheritableNullInput(nullInput);
+        if (handleError == ERROR_SUCCESS)
+        {
+            handleError = CreateBrokerReportPipe(
+                exitReportRead, exitReportWrite, sizeof(PseudoConsoleHostExitReport));
+        }
+        if (handleError == ERROR_SUCCESS)
+        {
+            handleError = CreateBrokerReportPipe(diagnosticsRead, diagnosticsWrite, 64 * 1024);
+        }
+        if (handleError != ERROR_SUCCESS)
+        {
+            return handleError;
+        }
+        ProcThreadAttributeList attributeList;
+        const DWORD attributeListError = attributeList.Initialize(1);
+        if (attributeListError != ERROR_SUCCESS)
+        {
+            return attributeListError;
+        }
+        std::array<HANDLE, 3> inheritedHandles {
+            nullInput.get(), exitReportWrite.get(), diagnosticsWrite.get()
+        };
+        if (!UpdateProcThreadAttribute(attributeList.get(),
+                0,
+                PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                inheritedHandles.data(),
+                sizeof(inheritedHandles),
+                nullptr,
+                nullptr))
+        {
+            const DWORD attributeError = GetLastError();
+            return attributeError;
+        }
+        STARTUPINFOEXW startupInfo {};
+        startupInfo.StartupInfo.cb = sizeof(startupInfo);
+        startupInfo.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+        startupInfo.StartupInfo.hStdInput = nullInput.get();
+        startupInfo.StartupInfo.hStdOutput = exitReportWrite.get();
+        startupInfo.StartupInfo.hStdError = diagnosticsWrite.get();
+        startupInfo.lpAttributeList = attributeList.get();
+        const DWORD processError = child.CreateSuspendedInJob(token,
+            accountName,
+            conhostPath,
+            mutableCommandLine,
+            directory,
+            TRUE,
+            CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
+            startupInfo.StartupInfo);
+        if (processError != ERROR_SUCCESS)
+        {
+            return processError;
+        }
+        child.exitReport_ = std::move(exitReportRead);
+        child.diagnostics_ = std::move(diagnosticsRead);
+        return ERROR_SUCCESS;
+    }();
+    if (launchError != ERROR_SUCCESS)
+    {
         child.Reset();
-        return duplicateError;
     }
-    child.SetProcess(processInfo.hProcess, processInfo.hThread);
-    child.SetUserProfile(profileToken, profileInfo.hProfile);
-    child.SetPseudoConsoleHostReports(exitReportRead, diagnosticsRead);
-    return ERROR_SUCCESS;
+    return launchError;
 }
 
 DWORD LaunchBrokerInteractiveProcess(HANDLE token, std::wstring_view accountName,
@@ -1048,94 +1067,33 @@ DWORD LaunchBrokerInteractiveProcess(HANDLE token, std::wstring_view accountName
     STARTUPINFOW startupInfo {};
     startupInfo.cb = sizeof(startupInfo);
     startupInfo.lpDesktop = desktopName.data();
-    PROCESS_INFORMATION processInfo {};
-    std::wstring mutableAccountName(accountName);
-    PROFILEINFOW profileInfo {};
-    profileInfo.dwSize = sizeof(profileInfo);
-    profileInfo.lpUserName = mutableAccountName.data();
-    if (!LoadUserProfileW(token, &profileInfo))
+    const DWORD processError = child.CreateSuspendedInJob(
+        token, accountName, executable, mutableCommandLine, directory, FALSE, 0, startupInfo);
+    if (processError != ERROR_SUCCESS)
     {
-        const DWORD profileError = GetLastError();
-        child.Reset();
-        return releaseAfterFailure(profileError);
-    }
-    UserEnvironmentBlock environment;
-    const DWORD environmentError = environment.Create(token);
-    if (environmentError != ERROR_SUCCESS)
-    {
-        UnloadUserProfile(token, profileInfo.hProfile);
-        child.Reset();
-        return releaseAfterFailure(environmentError);
-    }
-    const BOOL created = CreateProcessAsUserW(token,
-        executable.c_str(),
-        mutableCommandLine.data(),
-        nullptr,
-        nullptr,
-        FALSE,
-        CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
-        environment.get(),
-        directory.c_str(),
-        &startupInfo,
-        &processInfo);
-    const DWORD processError = created ? ERROR_SUCCESS : GetLastError();
-    if (!created)
-    {
-        UnloadUserProfile(token, profileInfo.hProfile);
         child.Reset();
         return releaseAfterFailure(processError);
     }
-    if (!AssignProcessToJobObject(child.job_, processInfo.hProcess))
-    {
-        const DWORD assignmentError = GetLastError();
-        if (TerminateProcess(processInfo.hProcess, ERROR_CANCELLED))
-        {
-            static_cast<void>(WaitForSingleObject(processInfo.hProcess, INFINITE));
-        }
-        CloseHandle(processInfo.hThread);
-        CloseHandle(processInfo.hProcess);
-        UnloadUserProfile(token, profileInfo.hProfile);
-        child.Reset();
-        return releaseAfterFailure(assignmentError);
-    }
-    HANDLE profileToken = nullptr;
-    if (!DuplicateHandle(GetCurrentProcess(),
-            token,
-            GetCurrentProcess(),
-            &profileToken,
-            0,
-            FALSE,
-            DUPLICATE_SAME_ACCESS))
-    {
-        const DWORD duplicateError = GetLastError();
-        if (TerminateProcess(processInfo.hProcess, ERROR_CANCELLED))
-        {
-            static_cast<void>(WaitForSingleObject(processInfo.hProcess, INFINITE));
-        }
-        CloseHandle(processInfo.hThread);
-        CloseHandle(processInfo.hProcess);
-        UnloadUserProfile(token, profileInfo.hProfile);
-        child.Reset();
-        return releaseAfterFailure(duplicateError);
-    }
-    child.SetProcess(processInfo.hProcess, processInfo.hThread);
-    child.SetUserProfile(profileToken, profileInfo.hProfile);
 
-    HANDLE childToken = nullptr;
-    if (!OpenProcessToken(child.process(), TOKEN_QUERY, &childToken))
+    HANDLE rawChildToken = nullptr;
+    if (!OpenProcessToken(child.process(), TOKEN_QUERY, &rawChildToken))
     {
         const DWORD childTokenError = GetLastError();
         child.TerminateAndWaitForExitConfirmed();
         return releaseAfterFailure(childTokenError);
     }
+    UniqueHandle childToken(rawChildToken);
     std::vector<BYTE> launchedLogonSid;
-    const DWORD launchedLogonSidError = GetTokenLogonSid(childToken, launchedLogonSid);
+    const DWORD launchedLogonSidError = GetTokenLogonSid(childToken.get(), launchedLogonSid);
     DWORD launchedSessionId = MAXDWORD;
     DWORD returnedBytes = 0;
-    const BOOL readSession = GetTokenInformation(
-        childToken, TokenSessionId, &launchedSessionId, sizeof(launchedSessionId), &returnedBytes);
+    const BOOL readSession = GetTokenInformation(childToken.get(),
+        TokenSessionId,
+        &launchedSessionId,
+        sizeof(launchedSessionId),
+        &returnedBytes);
     const DWORD launchedSessionError = readSession ? ERROR_SUCCESS : GetLastError();
-    CloseHandle(childToken);
+    childToken.reset();
     const bool identityMatches =
         launchedLogonSidError == ERROR_SUCCESS &&
         EqualSid(childLogonSid.data(), launchedLogonSid.data()) != FALSE &&
@@ -1159,17 +1117,10 @@ DWORD GetTokenLogonSid(HANDLE token, std::vector<BYTE>& logonSid)
     {
         return ERROR_INVALID_HANDLE;
     }
-    DWORD groupBytes = 0;
-    GetTokenInformation(token, TokenGroups, nullptr, 0, &groupBytes);
-    const DWORD sizeError = GetLastError();
-    if (sizeError != ERROR_INSUFFICIENT_BUFFER || groupBytes == 0)
+    std::vector<BYTE> groups;
+    const DWORD groupsError = QueryTokenInformation(token, TokenGroups, groups);
+    if (groupsError != ERROR_SUCCESS)
     {
-        return sizeError;
-    }
-    std::vector<BYTE> groups(groupBytes);
-    if (!GetTokenInformation(token, TokenGroups, groups.data(), groupBytes, &groupBytes))
-    {
-        const DWORD groupsError = GetLastError();
         return groupsError;
     }
     const auto* tokenGroups = reinterpret_cast<const TOKEN_GROUPS*>(groups.data());
@@ -1191,15 +1142,15 @@ DWORD ValidateChildLogonSid(HANDLE process, const std::vector<BYTE>& callerLogon
     {
         return ERROR_INVALID_SID;
     }
-    HANDLE token = nullptr;
-    if (!OpenProcessToken(process, TOKEN_QUERY, &token))
+    HANDLE rawToken = nullptr;
+    if (!OpenProcessToken(process, TOKEN_QUERY, &rawToken))
     {
         const DWORD tokenError = GetLastError();
         return tokenError;
     }
+    const UniqueHandle token(rawToken);
     std::vector<BYTE> childLogonSid;
-    const DWORD logonSidError = GetTokenLogonSid(token, childLogonSid);
-    CloseHandle(token);
+    const DWORD logonSidError = GetTokenLogonSid(token.get(), childLogonSid);
     if (logonSidError != ERROR_SUCCESS)
     {
         return logonSidError;

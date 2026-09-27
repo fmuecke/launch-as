@@ -4,6 +4,8 @@
 
 #include "TerminalBridge.h"
 
+#include "Win32Support.h"
+
 #include <Aclapi.h>
 #include <Windows.h>
 #include <array>
@@ -60,20 +62,10 @@ enum class PipeDirection
     }
     UniqueHandle token(rawToken);
 
-    DWORD tokenBytes = 0;
-    GetTokenInformation(token.get(), TokenUser, nullptr, 0, &tokenBytes);
-    const DWORD tokenSizeError = GetLastError();
-    if (tokenSizeError != ERROR_INSUFFICIENT_BUFFER || tokenBytes == 0)
+    std::vector<BYTE> tokenStorage;
+    const DWORD tokenReadError = QueryTokenInformation(token.get(), TokenUser, tokenStorage);
+    if (tokenReadError != ERROR_SUCCESS)
     {
-        error = L"Could not size the launcher identity for terminal-pipe security: " +
-                FormatWindowsError(tokenSizeError);
-        return false;
-    }
-
-    std::vector<std::byte> tokenStorage(tokenBytes);
-    if (!GetTokenInformation(token.get(), TokenUser, tokenStorage.data(), tokenBytes, &tokenBytes))
-    {
-        const DWORD tokenReadError = GetLastError();
         error = L"Could not read the launcher identity for terminal-pipe security: " +
                 FormatWindowsError(tokenReadError);
         return false;
@@ -194,79 +186,6 @@ enum class PipeDirection
     return true;
 }
 
-[[nodiscard]] bool CreateTerminalPipePair(std::wstring_view purpose, PipeDirection direction,
-    PSECURITY_DESCRIPTOR descriptor, UniqueHandle& parentEndpoint, UniqueHandle& childEndpoint,
-    std::wstring& error)
-{
-    std::wstring pipeName;
-    if (!CreatePipeName(purpose, pipeName, error))
-    {
-        return false;
-    }
-
-    SECURITY_ATTRIBUTES serverSecurity {
-        .nLength = sizeof(serverSecurity),
-        .lpSecurityDescriptor = descriptor,
-        .bInheritHandle = FALSE
-    };
-    const DWORD serverAccess =
-        direction == PipeDirection::ParentWrites ? PIPE_ACCESS_OUTBOUND : PIPE_ACCESS_INBOUND;
-    HANDLE rawServer = CreateNamedPipeW(pipeName.c_str(),
-        serverAccess | FILE_FLAG_FIRST_PIPE_INSTANCE,
-        PipeMode,
-        1,
-        RelayBufferBytes,
-        RelayBufferBytes,
-        0,
-        &serverSecurity);
-    if (rawServer == INVALID_HANDLE_VALUE)
-    {
-        const DWORD serverError = GetLastError();
-        error = L"Could not create the terminal " + std::wstring(purpose) + L" server: " +
-                FormatWindowsError(serverError);
-        return false;
-    }
-    UniqueHandle server(rawServer);
-
-    SECURITY_ATTRIBUTES inheritableClient {
-        .nLength = sizeof(inheritableClient),
-        .lpSecurityDescriptor = nullptr,
-        .bInheritHandle = FALSE
-    };
-    const DWORD clientAccess =
-        direction == PipeDirection::ParentWrites ? GENERIC_READ : GENERIC_WRITE;
-    HANDLE rawClient = CreateFileW(pipeName.c_str(),
-        clientAccess,
-        0,
-        &inheritableClient,
-        OPEN_EXISTING,
-        SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS,
-        nullptr);
-    if (rawClient == INVALID_HANDLE_VALUE)
-    {
-        const DWORD clientError = GetLastError();
-        error = L"Could not connect the terminal " + std::wstring(purpose) + L" client: " +
-                FormatWindowsError(clientError);
-        return false;
-    }
-    UniqueHandle client(rawClient);
-
-    if (!ConnectNamedPipe(server.get(), nullptr))
-    {
-        const DWORD connectError = GetLastError();
-        if (connectError != ERROR_PIPE_CONNECTED)
-        {
-            error = L"Could not connect the terminal " + std::wstring(purpose) + L" server: " +
-                    FormatWindowsError(connectError);
-            return false;
-        }
-    }
-
-    parentEndpoint = std::move(server);
-    childEndpoint = std::move(client);
-    return true;
-}
-
 [[nodiscard]] bool CreateTerminalPipeServer(std::wstring_view purpose, PipeDirection direction,
     PSECURITY_DESCRIPTOR descriptor, UniqueHandle& parentEndpoint, std::wstring& childPipeName,
     std::wstring& error)
@@ -366,70 +285,6 @@ enum class PipeDirection
 
 TerminalBridge::~TerminalBridge() { Stop(); }
 
-bool TerminalBridge::Initialize(STARTUPINFOW& childStartupInformation, std::wstring& error)
-{
-    parentInput_ = GetStdHandle(STD_INPUT_HANDLE);
-    parentOutput_ = GetStdHandle(STD_OUTPUT_HANDLE);
-    const HANDLE parentError = GetStdHandle(STD_ERROR_HANDLE);
-    if (!IsUsableHandle(parentInput_) || !IsUsableHandle(parentOutput_) ||
-        !IsUsableHandle(parentError))
-    {
-        error = L"Terminal mode requires usable standard input, output, and error handles.";
-        return false;
-    }
-
-    outputCompleteEvent_.reset(CreateEventW(nullptr, TRUE, FALSE, nullptr));
-    if (!outputCompleteEvent_)
-    {
-        const DWORD eventError = GetLastError();
-        error = L"Could not create the terminal output completion event: " +
-                FormatWindowsError(eventError);
-        return false;
-    }
-
-    PipeSecurityDescriptor pipeSecurity;
-    if (!CreatePipeSecurityDescriptor(L"", pipeSecurity, error))
-    {
-        return false;
-    }
-
-    if (!CreateTerminalPipePair(L"input",
-            PipeDirection::ParentWrites,
-            pipeSecurity.get(),
-            inputWrite_,
-            childInputRead_,
-            error))
-    {
-        return false;
-    }
-
-    if (!CreateTerminalPipePair(L"output",
-            PipeDirection::ParentReads,
-            pipeSecurity.get(),
-            outputRead_,
-            childOutputWrite_,
-            error))
-    {
-        return false;
-    }
-
-    if (!CreateTerminalPipePair(L"resize",
-            PipeDirection::ParentWrites,
-            pipeSecurity.get(),
-            resizeWrite_,
-            childResizeRead_,
-            error))
-    {
-        return false;
-    }
-
-    childStartupInformation.dwFlags |= STARTF_USESTDHANDLES;
-    childStartupInformation.hStdInput = childInputRead_.get();
-    childStartupInformation.hStdOutput = childOutputWrite_.get();
-    childStartupInformation.hStdError = childResizeRead_.get();
-    return true;
-}
-
 bool TerminalBridge::InitializeForBroker(
     std::wstring_view childSid, TerminalPipeNames& pipeNames, std::wstring& error)
 {
@@ -480,102 +335,9 @@ bool TerminalBridge::InitializeForBroker(
     return true;
 }
 
-bool TerminalBridge::PrepareChildProcessCreation(std::wstring& error)
-{
-    if (!childInputRead_ || !childOutputWrite_ || !childResizeRead_ || childHandlesInheritable_ ||
-        childProcessCreated_)
-    {
-        error = L"The terminal bridge is not ready for child-process creation.";
-        return false;
-    }
-
-    if (!SetHandleInformation(childInputRead_.get(), HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT))
-    {
-        const DWORD inheritanceError = GetLastError();
-        error = L"Could not enable inheritance for the terminal input client: " +
-                FormatWindowsError(inheritanceError);
-        return false;
-    }
-    if (!SetHandleInformation(childOutputWrite_.get(), HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT))
-    {
-        const DWORD inheritanceError = GetLastError();
-        SetHandleInformation(childInputRead_.get(), HANDLE_FLAG_INHERIT, 0);
-        childInputRead_.reset();
-        childOutputWrite_.reset();
-        childResizeRead_.reset();
-        error = L"Could not enable inheritance for the terminal output client: " +
-                FormatWindowsError(inheritanceError);
-        return false;
-    }
-    if (!SetHandleInformation(childResizeRead_.get(), HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT))
-    {
-        const DWORD inheritanceError = GetLastError();
-        SetHandleInformation(childInputRead_.get(), HANDLE_FLAG_INHERIT, 0);
-        SetHandleInformation(childOutputWrite_.get(), HANDLE_FLAG_INHERIT, 0);
-        childInputRead_.reset();
-        childOutputWrite_.reset();
-        childResizeRead_.reset();
-        error = L"Could not enable inheritance for the terminal resize client: " +
-                FormatWindowsError(inheritanceError);
-        return false;
-    }
-
-    childHandlesInheritable_ = true;
-    return true;
-}
-
-bool TerminalBridge::CompleteChildProcessCreation(bool processCreated, std::wstring& error)
-{
-    if (!childHandlesInheritable_)
-    {
-        error = L"The terminal client handles were not prepared for process creation.";
-        return false;
-    }
-
-    childHandlesInheritable_ = false;
-    if (processCreated)
-    {
-        childInputRead_.reset();
-        childOutputWrite_.reset();
-        childResizeRead_.reset();
-        childProcessCreated_ = true;
-        return true;
-    }
-
-    DWORD inheritanceError = ERROR_SUCCESS;
-    if (!SetHandleInformation(childInputRead_.get(), HANDLE_FLAG_INHERIT, 0))
-    {
-        inheritanceError = GetLastError();
-    }
-    if (!SetHandleInformation(childOutputWrite_.get(), HANDLE_FLAG_INHERIT, 0) &&
-        inheritanceError == ERROR_SUCCESS)
-    {
-        inheritanceError = GetLastError();
-    }
-    if (!SetHandleInformation(childResizeRead_.get(), HANDLE_FLAG_INHERIT, 0))
-    {
-        const DWORD resizeInheritanceError = GetLastError();
-        if (inheritanceError == ERROR_SUCCESS)
-        {
-            inheritanceError = resizeInheritanceError;
-        }
-    }
-    if (inheritanceError != ERROR_SUCCESS)
-    {
-        childInputRead_.reset();
-        childOutputWrite_.reset();
-        childResizeRead_.reset();
-        error = L"Could not disable inheritance for the terminal clients: " +
-                FormatWindowsError(inheritanceError);
-        return false;
-    }
-    return true;
-}
-
 bool TerminalBridge::ConnectBrokerChild(std::wstring& error)
 {
-    if (childProcessCreated_ || childHandlesInheritable_ || !inputWrite_ || !outputRead_ ||
-        !resizeWrite_)
+    if (childConnected_ || !inputWrite_ || !outputRead_ || !resizeWrite_)
     {
         error = L"The terminal bridge is not ready for a broker child connection.";
         return false;
@@ -586,14 +348,13 @@ bool TerminalBridge::ConnectBrokerChild(std::wstring& error)
     {
         return false;
     }
-    childProcessCreated_ = true;
+    childConnected_ = true;
     return true;
 }
 
 bool TerminalBridge::Start(std::wstring& error)
 {
-    if (!childProcessCreated_ || childHandlesInheritable_ || !inputWrite_ || !outputRead_ ||
-        !resizeWrite_)
+    if (!childConnected_ || !inputWrite_ || !outputRead_ || !resizeWrite_)
     {
         error = L"The terminal bridge is not initialized.";
         return false;
@@ -716,12 +477,6 @@ void TerminalBridge::Stop() noexcept
 
     terminalMode_.Restore();
     started_ = false;
-}
-
-bool TerminalBridge::SendResize(COORD size) noexcept
-{
-    DWORD ignored = ERROR_SUCCESS;
-    return SendResize(size, ignored);
 }
 
 bool TerminalBridge::SendResize(COORD size, DWORD& error) noexcept

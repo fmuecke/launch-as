@@ -199,19 +199,10 @@ using LocalSecurityDescriptor = launch_as::LocalAllocation<PSECURITY_DESCRIPTOR>
         const DWORD tokenError = GetLastError();
         return tokenError;
     }
-    DWORD requiredBytes = 0;
-    GetTokenInformation(rawToken, TokenUser, nullptr, 0, &requiredBytes);
-    const DWORD sizeError = GetLastError();
-    if (sizeError != ERROR_INSUFFICIENT_BUFFER || requiredBytes == 0)
+    std::vector<BYTE> tokenUserBuffer;
+    const DWORD userError = QueryTokenInformation(rawToken, TokenUser, tokenUserBuffer);
+    if (userError != ERROR_SUCCESS)
     {
-        CloseHandle(rawToken);
-        return sizeError;
-    }
-    std::vector<BYTE> tokenUserBuffer(requiredBytes);
-    if (!GetTokenInformation(
-            rawToken, TokenUser, tokenUserBuffer.data(), requiredBytes, &requiredBytes))
-    {
-        const DWORD userError = GetLastError();
         CloseHandle(rawToken);
         return userError;
     }

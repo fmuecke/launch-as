@@ -6,11 +6,9 @@
 
 #include "BrokerControlPipe.h"
 #include "BrokerProtocol.h"
-#include "Utf8.h"
 #include "Win32Support.h"
 
 #include <Windows.h>
-#include <array>
 #include <string>
 #include <utility>
 #include <vector>
@@ -19,54 +17,6 @@ namespace launch_as
 {
 namespace
 {
-
-[[nodiscard]] bool BuildLaunchRequest(std::wstring_view requestId, std::wstring_view profileId,
-    std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
-    const TerminalPipeNames& pipes, COORD terminalSize, bool inheritCursor, std::string& request)
-{
-    if (profileId.empty() || arguments.empty() || workingDirectory.empty() || pipes.input.empty() ||
-        pipes.output.empty() || pipes.resize.empty() || terminalSize.X <= 0 || terminalSize.Y <= 0)
-    {
-        return false;
-    }
-    if (!IsValidUtf16(requestId) || !IsValidUtf16(profileId) || !IsValidUtf16(workingDirectory) ||
-        !IsValidUtf16(pipes.input) || !IsValidUtf16(pipes.output) || !IsValidUtf16(pipes.resize))
-    {
-        return false;
-    }
-    for (const std::wstring& argument : arguments)
-    {
-        if (!IsValidUtf16(argument))
-        {
-            return false;
-        }
-    }
-    request = "{\"version\":1,\"requestId\":";
-    broker::AppendJsonString(request, requestId);
-    request += ",\"operation\":\"launch\",\"profileId\":";
-    broker::AppendJsonString(request, profileId);
-    request += ",\"mode\":\"console\",\"arguments\":[";
-    for (std::size_t index = 0; index < arguments.size(); ++index)
-    {
-        if (index != 0)
-        {
-            request.push_back(',');
-        }
-        broker::AppendJsonString(request, arguments[index]);
-    }
-    request += "],\"workingDirectory\":";
-    broker::AppendJsonString(request, workingDirectory);
-    request += ",\"console\":{\"pipeIn\":";
-    broker::AppendJsonString(request, pipes.input);
-    request += ",\"pipeOut\":";
-    broker::AppendJsonString(request, pipes.output);
-    request += ",\"pipeResize\":";
-    broker::AppendJsonString(request, pipes.resize);
-    request += ",\"cols\":" + std::to_string(terminalSize.X) +
-               ",\"rows\":" + std::to_string(terminalSize.Y) +
-               ",\"inheritCursor\":" + (inheritCursor ? "true" : "false") + "}}";
-    return request.size() <= broker::MaximumMessageBytes;
-}
 
 [[nodiscard]] DWORD SendLaunchRequest(std::wstring requestId, const std::string& request,
     BrokerControlConnection& connection, DWORD& processId)
@@ -79,32 +29,19 @@ namespace
     }
     connection.Reset(rawPipe);
     connection.SetRequestId(std::move(requestId));
-    DWORD bytesWritten = 0;
-    const BOOL wroteRequest = WriteFile(connection.get(),
-        request.data(),
-        static_cast<DWORD>(request.size()),
-        &bytesWritten,
-        nullptr);
-    const DWORD writeError = wroteRequest ? ERROR_SUCCESS : GetLastError();
-    if (!wroteRequest || bytesWritten != request.size())
+    const DWORD writeError = broker::WritePipeMessage(connection.get(), request);
+    if (writeError != ERROR_SUCCESS)
     {
         connection.Reset();
-        return wroteRequest ? ERROR_WRITE_FAULT : writeError;
+        return writeError;
     }
-    std::array<char, broker::MaximumMessageBytes> responseBuffer {};
-    DWORD bytesRead = 0;
-    const BOOL readResponse = ReadFile(connection.get(),
-        responseBuffer.data(),
-        static_cast<DWORD>(responseBuffer.size()),
-        &bytesRead,
-        nullptr);
-    const DWORD readError = readResponse ? ERROR_SUCCESS : GetLastError();
-    if (!readResponse)
+    std::string response;
+    const DWORD readError = broker::ReadPipeMessage(connection.get(), response);
+    if (readError != ERROR_SUCCESS)
     {
         connection.Reset();
         return readError;
     }
-    const std::string_view response(responseBuffer.data(), bytesRead);
     if (broker::ParseLaunchSuccessResponse(response, connection.requestId(), processId))
     {
         return ERROR_SUCCESS;
@@ -120,47 +57,6 @@ namespace
 }
 
 } // namespace
-
-bool BuildInteractiveLaunchRequest(std::wstring_view requestId, std::wstring_view profileId,
-    std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
-    std::wstring_view leasePipe, std::wstring_view nonce, std::string& request)
-{
-    if (requestId.empty() || profileId.empty() || arguments.empty() || workingDirectory.empty() ||
-        leasePipe.empty() || nonce.empty() || !IsValidUtf16(requestId) ||
-        !IsValidUtf16(profileId) || !IsValidUtf16(workingDirectory) || !IsValidUtf16(leasePipe) ||
-        !IsValidUtf16(nonce))
-    {
-        return false;
-    }
-    for (const std::wstring& argument : arguments)
-    {
-        if (!IsValidUtf16(argument))
-        {
-            return false;
-        }
-    }
-    request = "{\"version\":1,\"requestId\":";
-    broker::AppendJsonString(request, requestId);
-    request += ",\"operation\":\"launch\",\"profileId\":";
-    broker::AppendJsonString(request, profileId);
-    request += ",\"mode\":\"interactive\",\"arguments\":[";
-    for (std::size_t index = 0; index < arguments.size(); ++index)
-    {
-        if (index != 0)
-        {
-            request.push_back(',');
-        }
-        broker::AppendJsonString(request, arguments[index]);
-    }
-    request += "],\"workingDirectory\":";
-    broker::AppendJsonString(request, workingDirectory);
-    request += ",\"interactive\":{\"leasePipe\":";
-    broker::AppendJsonString(request, leasePipe);
-    request += ",\"nonce\":";
-    broker::AppendJsonString(request, nonce);
-    request += "}}";
-    return request.size() <= broker::MaximumMessageBytes;
-}
 
 HANDLE BrokerControlConnection::get() const noexcept { return pipe_.get(); }
 
@@ -186,7 +82,7 @@ DWORD LaunchBrokerInteractive(std::wstring_view profileId, std::span<const std::
         return ERROR_GEN_FAILURE;
     }
     std::string request;
-    if (!BuildInteractiveLaunchRequest(
+    if (!broker::BuildInteractiveLaunchRequest(
             requestId, profileId, arguments, workingDirectory, leasePipe, nonce, request))
     {
         return ERROR_INVALID_PARAMETER;
@@ -206,11 +102,13 @@ DWORD LaunchBrokerConsole(std::wstring_view profileId, std::span<const std::wstr
         return ERROR_GEN_FAILURE;
     }
     std::string request;
-    if (!BuildLaunchRequest(requestId,
+    if (!broker::BuildConsoleLaunchRequest(requestId,
             profileId,
             arguments,
             workingDirectory,
-            pipes,
+            pipes.input,
+            pipes.output,
+            pipes.resize,
             terminalSize,
             inheritCursor,
             request))
@@ -229,19 +127,12 @@ DWORD WaitForBrokerConsoleExit(
     {
         return ERROR_INVALID_HANDLE;
     }
-    std::array<char, broker::MaximumMessageBytes> responseBuffer {};
-    DWORD bytesRead = 0;
-    const BOOL readResponse = ReadFile(connection.get(),
-        responseBuffer.data(),
-        static_cast<DWORD>(responseBuffer.size()),
-        &bytesRead,
-        nullptr);
-    const DWORD readError = readResponse ? ERROR_SUCCESS : GetLastError();
-    if (!readResponse)
+    std::string response;
+    const DWORD readError = broker::ReadPipeMessage(connection.get(), response);
+    if (readError != ERROR_SUCCESS)
     {
         return readError;
     }
-    const std::string_view response(responseBuffer.data(), bytesRead);
     if (broker::ParseLaunchExitResponse(response, connection.requestId(), exitCode))
     {
         return ERROR_SUCCESS;

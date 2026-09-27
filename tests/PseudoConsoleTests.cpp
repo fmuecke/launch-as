@@ -8,7 +8,6 @@
 
 #include <Windows.h>
 #include <array>
-#include <chrono>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -20,89 +19,69 @@ namespace
 using launch_as::BuildWindowsCommandLine;
 using launch_as::FormatWindowsError;
 using launch_as::TerminalBridge;
+using launch_as::TerminalPipeNames;
 using launch_as::UniqueHandle;
 
 constexpr DWORD ProcessTimeoutMilliseconds = 10'000;
 constexpr DWORD ProbeReadyTimeoutMilliseconds = 5'000;
-constexpr auto BridgeStopTimeout = std::chrono::seconds(2);
 
-[[nodiscard]] bool VerifyTargetReceivesOnlyPipeClients()
+// Starts the pseudoconsole host against the bridge's named pipes. Its stdout carries the
+// broker exit report, as in production; keep reportRead open until the host exits.
+[[nodiscard]] bool StartHost(const std::filesystem::path& hostPath, const TerminalPipeNames& pipes,
+    const std::vector<std::wstring>& target, UniqueHandle& process, UniqueHandle& reportRead)
 {
+    SECURITY_ATTRIBUTES inheritable {.nLength = sizeof(inheritable), .bInheritHandle = TRUE};
+    HANDLE rawReportRead = nullptr;
+    HANDLE rawReportWrite = nullptr;
+    if (!CreatePipe(&rawReportRead, &rawReportWrite, &inheritable, 0))
+    {
+        const DWORD pipeError = GetLastError();
+        std::wcerr << L"Could not create the host report pipe: " << FormatWindowsError(pipeError)
+                   << L"\n";
+        return false;
+    }
+    reportRead.reset(rawReportRead);
+    UniqueHandle reportWrite(rawReportWrite);
+
+    std::vector<std::wstring> arguments {
+        L"--internal-pseudoconsole-host",
+        L"--size",
+        L"120",
+        L"30",
+        L"--pipe-in",
+        pipes.input,
+        L"--pipe-out",
+        pipes.output,
+        L"--pipe-resize",
+        pipes.resize,
+        L"--"
+    };
+    arguments.insert(arguments.end(), target.begin(), target.end());
+    std::wstring commandLine = BuildWindowsCommandLine(hostPath.native(), arguments);
+
     STARTUPINFOW startupInformation {};
     startupInformation.cb = sizeof(startupInformation);
-
-    TerminalBridge bridge;
-    std::wstring error;
-    if (!bridge.Initialize(startupInformation, error))
+    startupInformation.dwFlags = STARTF_USESTDHANDLES;
+    startupInformation.hStdOutput = reportWrite.get();
+    PROCESS_INFORMATION processInformation {};
+    if (!CreateProcessW(hostPath.c_str(),
+            commandLine.data(),
+            nullptr,
+            nullptr,
+            TRUE,
+            CREATE_NO_WINDOW,
+            nullptr,
+            nullptr,
+            &startupInformation,
+            &processInformation))
     {
-        std::wcerr << error << L"\n";
+        const DWORD processError = GetLastError();
+        std::wcerr << L"Could not start the pseudoconsole host: "
+                   << FormatWindowsError(processError) << L"\n";
         return false;
     }
-
-    const std::array<HANDLE, 3> targetHandles {
-        startupInformation.hStdInput, startupInformation.hStdOutput, startupInformation.hStdError
-    };
-    for (const HANDLE handle : targetHandles)
-    {
-        DWORD flags = 0;
-        if (!GetNamedPipeInfo(handle, &flags, nullptr, nullptr, nullptr))
-        {
-            const DWORD pipeInfoError = GetLastError();
-            std::wcerr << L"Could not inspect a target terminal-pipe endpoint: "
-                       << FormatWindowsError(pipeInfoError) << L"\n";
-            return false;
-        }
-        if ((flags & PIPE_SERVER_END) != 0)
-        {
-            std::wcerr << L"The target received a terminal-pipe server endpoint.\n";
-            return false;
-        }
-        if (ImpersonateNamedPipeClient(handle))
-        {
-            RevertToSelf();
-            std::wcerr << L"A target terminal-pipe endpoint could impersonate its peer.\n";
-            return false;
-        }
-
-        DWORD handleFlags = 0;
-        if (!GetHandleInformation(handle, &handleFlags) || (handleFlags & HANDLE_FLAG_INHERIT) != 0)
-        {
-            std::wcerr << L"A target terminal-pipe client was inheritable outside the "
-                          L"process-creation window.\n";
-            return false;
-        }
-    }
-
-    if (!bridge.PrepareChildProcessCreation(error))
-    {
-        std::wcerr << error << L"\n";
-        return false;
-    }
-    for (const HANDLE handle : targetHandles)
-    {
-        DWORD handleFlags = 0;
-        if (!GetHandleInformation(handle, &handleFlags) || (handleFlags & HANDLE_FLAG_INHERIT) == 0)
-        {
-            std::wcerr << L"A terminal-pipe client was not inheritable during process "
-                          L"creation.\n";
-            return false;
-        }
-    }
-    if (!bridge.CompleteChildProcessCreation(false, error))
-    {
-        std::wcerr << error << L"\n";
-        return false;
-    }
-    for (const HANDLE handle : targetHandles)
-    {
-        DWORD handleFlags = 0;
-        if (!GetHandleInformation(handle, &handleFlags) || (handleFlags & HANDLE_FLAG_INHERIT) != 0)
-        {
-            std::wcerr << L"A terminal-pipe client remained inheritable after a failed "
-                          L"process creation.\n";
-            return false;
-        }
-    }
+    CloseHandle(processInformation.hThread);
+    process.reset(processInformation.hProcess);
     return true;
 }
 
@@ -112,16 +91,16 @@ int wmain(int argumentCount, wchar_t* arguments[])
 {
     if (argumentCount != 3)
     {
-        std::wcerr << L"Expected the launcher and terminal-size probe paths.\n";
+        std::wcerr << L"Expected the pseudoconsole host and terminal-size probe paths.\n";
         return 1;
     }
 
-    const std::filesystem::path launcherPath(arguments[1]);
+    const std::filesystem::path hostPath(arguments[1]);
     const std::filesystem::path terminalSizeProbe(arguments[2]);
-    if (!launcherPath.is_absolute() || !std::filesystem::is_regular_file(launcherPath) ||
+    if (!hostPath.is_absolute() || !std::filesystem::is_regular_file(hostPath) ||
         !terminalSizeProbe.is_absolute() || !std::filesystem::is_regular_file(terminalSizeProbe))
     {
-        std::wcerr << L"The launcher or terminal-size probe path is invalid.\n";
+        std::wcerr << L"The pseudoconsole host or terminal-size probe path is invalid.\n";
         return 1;
     }
     TerminalBridge unopenedBridge;
@@ -130,10 +109,6 @@ int wmain(int argumentCount, wchar_t* arguments[])
         resizeError != ERROR_INVALID_HANDLE)
     {
         std::wcerr << L"An unopened terminal bridge did not report its resize write error.\n";
-        return 1;
-    }
-    if (!VerifyTargetReceivesOnlyPipeClients())
-    {
         return 1;
     }
 
@@ -145,18 +120,6 @@ int wmain(int argumentCount, wchar_t* arguments[])
         std::wcerr << L"Could not create the terminal-size probe readiness event.\n";
         return 1;
     }
-    const std::vector<std::wstring> helperArguments {
-        L"--internal-pseudoconsole-host",
-        L"--size",
-        L"120",
-        L"30",
-        L"--",
-        terminalSizeProbe.native(),
-        L"91",
-        L"27",
-        readyEventName
-    };
-    std::wstring commandLine = BuildWindowsCommandLine(launcherPath.native(), helperArguments);
 
     HANDLE rawTerminalInputRead = nullptr;
     HANDLE rawTerminalInputWrite = nullptr;
@@ -178,12 +141,11 @@ int wmain(int argumentCount, wchar_t* arguments[])
                    << FormatWindowsError(inputError) << L"\n";
         return 1;
     }
-
-    STARTUPINFOW startupInformation {};
-    startupInformation.cb = sizeof(startupInformation);
     TerminalBridge terminalBridge;
+    TerminalPipeNames pipeNames;
     std::wstring terminalError;
-    const bool terminalInitialized = terminalBridge.Initialize(startupInformation, terminalError);
+    const bool terminalInitialized =
+        terminalBridge.InitializeForBroker(L"", pipeNames, terminalError);
     if (!SetStdHandle(STD_INPUT_HANDLE, originalInput))
     {
         const DWORD inputError = GetLastError();
@@ -197,86 +159,21 @@ int wmain(int argumentCount, wchar_t* arguments[])
         return 1;
     }
 
-    HANDLE rawRetainedOutputClient = nullptr;
-    if (!DuplicateHandle(GetCurrentProcess(),
-            startupInformation.hStdOutput,
-            GetCurrentProcess(),
-            &rawRetainedOutputClient,
-            0,
-            FALSE,
-            DUPLICATE_SAME_ACCESS))
+    UniqueHandle process;
+    UniqueHandle reportRead;
+    if (!StartHost(hostPath,
+            pipeNames,
+            {terminalSizeProbe.native(), L"91", L"27", readyEventName},
+            process,
+            reportRead))
     {
-        const DWORD duplicateError = GetLastError();
-        std::wcerr << L"Could not retain a test output client: "
-                   << FormatWindowsError(duplicateError) << L"\n";
         return 1;
     }
-    UniqueHandle retainedOutputClient(rawRetainedOutputClient);
-
-    PROCESS_INFORMATION processInformation {};
-    if (!terminalBridge.PrepareChildProcessCreation(terminalError))
-    {
-        std::wcerr << terminalError << L"\n";
-        return 1;
-    }
-    if (!CreateProcessW(launcherPath.c_str(),
-            commandLine.data(),
-            nullptr,
-            nullptr,
-            TRUE,
-            CREATE_SUSPENDED | CREATE_NO_WINDOW,
-            nullptr,
-            nullptr,
-            &startupInformation,
-            &processInformation))
-    {
-        const DWORD processError = GetLastError();
-        if (!terminalBridge.CompleteChildProcessCreation(false, terminalError))
-        {
-            std::wcerr << terminalError << L"\n";
-            return 1;
-        }
-        std::wcerr << L"Could not start the current-user ConPTY helper: "
-                   << FormatWindowsError(processError) << L"\n";
-        return 1;
-    }
-    if (!terminalBridge.CompleteChildProcessCreation(true, terminalError))
-    {
-        TerminateProcess(processInformation.hProcess, 1);
-        CloseHandle(processInformation.hProcess);
-        CloseHandle(processInformation.hThread);
-        std::wcerr << terminalError << L"\n";
-        return 1;
-    }
-    DWORD inheritedHandleFlags = 0;
-    if (GetHandleInformation(startupInformation.hStdInput, &inheritedHandleFlags) ||
-        GetHandleInformation(startupInformation.hStdOutput, &inheritedHandleFlags) ||
-        GetHandleInformation(startupInformation.hStdError, &inheritedHandleFlags))
-    {
-        TerminateProcess(processInformation.hProcess, 1);
-        CloseHandle(processInformation.hProcess);
-        CloseHandle(processInformation.hThread);
-        std::wcerr << L"The parent retained a target terminal-pipe client after process "
-                      L"creation.\n";
-        return 1;
-    }
-    UniqueHandle process(processInformation.hProcess);
-    UniqueHandle thread(processInformation.hThread);
-    if (!terminalBridge.Start(terminalError))
+    if (!terminalBridge.ConnectBrokerChild(terminalError) || !terminalBridge.Start(terminalError))
     {
         TerminateProcess(process.get(), 1);
         WaitForSingleObject(process.get(), ProcessTimeoutMilliseconds);
         std::wcerr << terminalError << L"\n";
-        return 1;
-    }
-    if (ResumeThread(thread.get()) == static_cast<DWORD>(-1))
-    {
-        const DWORD resumeError = GetLastError();
-        TerminateProcess(process.get(), 1);
-        WaitForSingleObject(process.get(), ProcessTimeoutMilliseconds);
-        terminalBridge.Stop();
-        std::wcerr << L"Could not resume the current-user ConPTY helper: "
-                   << FormatWindowsError(resumeError) << L"\n";
         return 1;
     }
 
@@ -286,7 +183,7 @@ int wmain(int argumentCount, wchar_t* arguments[])
             readyHandles.data(),
             FALSE,
             ProbeReadyTimeoutMilliseconds) != WAIT_OBJECT_0 ||
-        !terminalBridge.SendResize(COORD {91, 27}))
+        !terminalBridge.SendResize(COORD {91, 27}, resizeError))
     {
         TerminateProcess(process.get(), 1);
         WaitForSingleObject(process.get(), ProcessTimeoutMilliseconds);
@@ -299,28 +196,21 @@ int wmain(int argumentCount, wchar_t* arguments[])
     DWORD exitCode = 0;
     const bool exitCodeRead =
         waitResult == WAIT_OBJECT_0 && GetExitCodeProcess(process.get(), &exitCode);
-
     if (waitResult != WAIT_OBJECT_0)
     {
         TerminateProcess(process.get(), 1);
         WaitForSingleObject(process.get(), ProcessTimeoutMilliseconds);
     }
-    const auto stopStarted = std::chrono::steady_clock::now();
     terminalBridge.Stop();
-    if (std::chrono::steady_clock::now() - stopStarted > BridgeStopTimeout)
-    {
-        std::wcerr << L"The terminal bridge waited indefinitely for a retained output client.\n";
-        return 1;
-    }
 
     if (waitResult != WAIT_OBJECT_0)
     {
-        std::wcerr << L"The current-user ConPTY helper did not exit in time.\n";
+        std::wcerr << L"The pseudoconsole host did not exit in time.\n";
         return 1;
     }
     if (!exitCodeRead || exitCode != 0)
     {
-        std::wcerr << L"The current-user ConPTY helper returned " << exitCode << L"; expected 0.\n";
+        std::wcerr << L"The pseudoconsole host returned " << exitCode << L"; expected 0.\n";
         return 1;
     }
     std::wcout << L"Hidden current-user ConPTY helper completed.\n";

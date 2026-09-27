@@ -107,6 +107,14 @@ enum class ParseResult
     DWORD& win32Error);
 [[nodiscard]] std::string BuildManagementRequest(RequestOperation operation,
     std::wstring_view requestId, std::wstring_view profileId, bool confirmed, bool force = false);
+[[nodiscard]] bool BuildConsoleLaunchRequest(std::wstring_view requestId,
+    std::wstring_view profileId, std::span<const std::wstring> arguments,
+    std::wstring_view workingDirectory, std::wstring_view pipeIn, std::wstring_view pipeOut,
+    std::wstring_view pipeResize, COORD terminalSize, bool inheritCursor, std::string& request);
+[[nodiscard]] bool BuildInteractiveLaunchRequest(std::wstring_view requestId,
+    std::wstring_view profileId, std::span<const std::wstring> arguments,
+    std::wstring_view workingDirectory, std::wstring_view leasePipe, std::wstring_view nonce,
+    std::string& request);
 [[nodiscard]] std::string BuildErrorResponse(
     std::wstring_view requestId, std::string_view reasonCode, DWORD win32Error);
 [[nodiscard]] std::string BuildSuccessResponse(

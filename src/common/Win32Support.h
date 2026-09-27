@@ -7,6 +7,7 @@
 #include <Windows.h>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace launch_as
 {
@@ -34,6 +35,7 @@ class UniqueHandle final
     }
 
     [[nodiscard]] HANDLE get() const noexcept { return value_; }
+    [[nodiscard]] HANDLE release() noexcept { return std::exchange(value_, nullptr); }
 
     [[nodiscard]] explicit operator bool() const noexcept
     {
@@ -114,6 +116,10 @@ class ServiceHandle final
 };
 
 [[nodiscard]] std::wstring FormatWindowsError(DWORD error);
+
+// Reads variable-size token information into buffer; returns a Win32 error on failure.
+[[nodiscard]] DWORD QueryTokenInformation(
+    HANDLE token, TOKEN_INFORMATION_CLASS informationClass, std::vector<BYTE>& buffer);
 
 // Creates a random GUID formatted as 36 characters without braces.
 [[nodiscard]] bool CreateGuidString(std::wstring& text);

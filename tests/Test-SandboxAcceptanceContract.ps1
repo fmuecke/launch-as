@@ -141,7 +141,6 @@ foreach ($requiredText in @(
         '0x000F037F',
         '0x000F01FF',
         'SetUserObjectSecurity',
-        'RUNNING',
         'acceptance-phase=',
         'interactive-acceptance-result.txt',
         'Invoke-BrokerDemandStartTest.ps1',

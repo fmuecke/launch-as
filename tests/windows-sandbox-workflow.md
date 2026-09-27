@@ -61,6 +61,11 @@ Integration result files contain guest stdout/stderr. Acceptance also retains
 `fixture.log`, `demand-start.log`, and `interactive-acceptance.log`, copied after each
 phase and again in `finally`.
 
+Phase updates append to the acceptance transcript. The standard caller writes its
+result once, after completion and transcript cleanup. The supervisor waits for the
+process to exit before reading or copying its result and logs; it does not poll a
+live result file. A timeout terminates the process and waits for exit before collection.
+
 ## Coverage and maintenance
 
 Acceptance covers the scripted console and normal-completion GUI cases; the remaining

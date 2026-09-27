@@ -514,6 +514,22 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
     )
 
     add_test(
+        NAME launcher.sandbox_acceptance_results
+        COMMAND
+            powershell.exe
+            -NoProfile
+            -File
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Test-SandboxAcceptanceResults.ps1"
+            -DriverPath
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Run-LauncherAcceptanceInSandbox.ps1"
+            -AcceptancePath
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/Invoke-LauncherAcceptanceTest.ps1"
+    )
+    set_tests_properties(launcher.sandbox_acceptance_results PROPERTIES
+        LABELS "build;unit"
+    )
+
+    add_test(
         NAME launcher.acceptance_logon_compilation
         COMMAND
             powershell.exe

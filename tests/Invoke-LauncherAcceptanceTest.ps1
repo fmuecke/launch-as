@@ -22,7 +22,7 @@ param(
 
     [Parameter(Mandatory)]
     [ValidateNotNullOrEmpty()]
-    [string] $ProgressPath
+    [string] $ReportRoot
 )
 
 Set-StrictMode -Version Latest
@@ -57,10 +57,7 @@ $interactiveAcceptance = Join-Path $PSScriptRoot 'Invoke-BrokerInteractiveAccept
 $interactiveTarget = Join-Path $binaryDirectory 'LauncherInteractiveTargetProbe.exe'
 
 function Write-AcceptancePhase([string] $Name) {
-    @(
-        'RUNNING'
-        "acceptance-phase=$Name"
-    ) | Out-File -LiteralPath $ProgressPath -Encoding utf8
+    Write-Host "acceptance-phase=$Name"
 }
 
 Write-Host "Acceptance account: .\$TargetUser"
@@ -71,7 +68,7 @@ Write-Host 'Running the installed broker console identity and isolation checks.'
     -ExpectedExitCode 37 `
     -LauncherPath $resolvedLauncher.Path `
     -ProbePath $identityProbe `
-    -ReportRoot (Split-Path -Parent $ProgressPath) `
+    -ReportRoot $ReportRoot `
     -CallerWindowProcessId $CallerWindowProcessId
 
 Write-AcceptancePhase 'process-access-disconnect'
@@ -90,7 +87,7 @@ Write-Host 'Running the installed broker interactive GUI launch and lease checks
     -Account $TargetUser `
     -LauncherPath $resolvedLauncher.Path `
     -ProbePath $interactiveTarget `
-    -ReportRoot (Split-Path -Parent $ProgressPath)
+    -ReportRoot $ReportRoot
 
 Write-Host "`nAcceptance tests passed:"
 Write-Host '  - The broker launched the managed standard account through an independent logon session.'

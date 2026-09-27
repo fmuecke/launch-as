@@ -26,14 +26,12 @@ $ErrorActionPreference = 'Stop'
 
 $windowProcess = $null
 $transcriptStarted = $false
+$acceptanceExitCode = 0
 
 try {
     Start-Transcript -Path $LogPath -Force | Out-Null
     $transcriptStarted = $true
-    @(
-        'RUNNING'
-        'acceptance-phase=standard-caller-preflight'
-    ) | Out-File -LiteralPath $ResultPath -Encoding utf8
+    Write-Host 'acceptance-phase=standard-caller-preflight'
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     if (-not [string]::Equals(
             $identity.Name,
@@ -133,22 +131,22 @@ namespace LaunchAs
         -TargetUser $TargetUser `
         -LauncherPath $launcherPath `
         -CallerWindowProcessId $windowProcess.Id `
-        -ProgressPath $ResultPath
+        -ReportRoot (Split-Path -Parent $ResultPath)
 
-    @(
+    $result = @(
         'PASS'
         "Interactive acceptance passed from .\$ExpectedCaller for .\$TargetUser in Windows Sandbox."
-    ) | Out-File -LiteralPath $ResultPath -Encoding utf8
+    )
     Write-Host "`nAcceptance passed. This Sandbox will close automatically." -ForegroundColor Green
 }
 catch {
-    @(
+    $result = @(
         'FAIL'
         $_.Exception.Message
         $_.ScriptStackTrace
-    ) | Out-File -LiteralPath $ResultPath -Encoding utf8
+    )
     Write-Host "`nAcceptance failed: $($_.Exception.Message)" -ForegroundColor Red
-    exit 1
+    $acceptanceExitCode = 1
 }
 finally {
     if ($null -ne $windowProcess -and -not $windowProcess.HasExited) {
@@ -158,3 +156,6 @@ finally {
         Stop-Transcript | Out-Null
     }
 }
+
+$result | Out-File -LiteralPath $ResultPath -Encoding utf8
+exit $acceptanceExitCode

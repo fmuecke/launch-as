@@ -51,31 +51,18 @@ function Wait-GuestProcess {
 
         [Parameter(Mandatory)]
         [ValidateNotNullOrEmpty()]
-        [string] $Description,
-
-        [string] $ProgressPath,
-
-        [string] $SharedProgressPath
+        [string] $Description
     )
 
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     while (-not $Process.HasExited -and [DateTime]::UtcNow -lt $deadline) {
-        if (-not [string]::IsNullOrWhiteSpace($ProgressPath) -and
-            -not [string]::IsNullOrWhiteSpace($SharedProgressPath) -and
-            (Test-Path -LiteralPath $ProgressPath -PathType Leaf)) {
-            Copy-Item -LiteralPath $ProgressPath -Destination $SharedProgressPath -Force
-        }
         Start-Sleep -Milliseconds 250
         $Process.Refresh()
     }
     if (-not $Process.HasExited) {
-        Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
+        Stop-Process -Id $Process.Id -Force -ErrorAction Stop
+        $Process.WaitForExit()
         throw "$Description timed out after $TimeoutSeconds seconds."
-    }
-    if (-not [string]::IsNullOrWhiteSpace($ProgressPath) -and
-        -not [string]::IsNullOrWhiteSpace($SharedProgressPath) -and
-        (Test-Path -LiteralPath $ProgressPath -PathType Leaf)) {
-        Copy-Item -LiteralPath $ProgressPath -Destination $SharedProgressPath -Force
     }
 }
 
@@ -247,18 +234,16 @@ try {
     Wait-GuestProcess `
         -Process $acceptance `
         -TimeoutSeconds 300 `
-        -Description 'Interactive Sandbox acceptance' `
-        -ProgressPath $localResultPath `
-        -SharedProgressPath $sharedResultPath
+        -Description 'Interactive Sandbox acceptance'
     Copy-GuestLogs -Logs $phaseLogs[2]
     if (-not (Test-Path -LiteralPath $localResultPath -PathType Leaf)) {
         throw "The standard caller did not write its acceptance result: $localResultPath"
     }
-    Copy-Item -LiteralPath $localResultPath -Destination $sharedResultPath -Force
     $acceptanceResult = Get-Content -LiteralPath $localResultPath -Raw
     if ($acceptanceResult -notmatch '(?m)^PASS\s*$') {
         throw "Interactive Sandbox acceptance failed.`n$acceptanceResult"
     }
+    Copy-Item -LiteralPath $localResultPath -Destination $sharedResultPath -Force
 }
 catch {
     $failureResult = @('FAIL')

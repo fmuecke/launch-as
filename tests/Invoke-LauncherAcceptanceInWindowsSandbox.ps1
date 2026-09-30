@@ -58,6 +58,8 @@ $artifactPaths = @(
     (Join-Path $configurationDirectory 'launch-as-admin.exe')
     (Join-Path $configurationDirectory 'launch-as-broker.exe')
     (Join-Path $configurationDirectory 'launch-as-conhost.exe')
+    (Join-Path $configurationDirectory 'conpty.dll')
+    (Join-Path $configurationDirectory 'OpenConsole.exe')
     (Join-Path $configurationDirectory 'LauncherBrokerChildIdentityProbe.exe')
     (Join-Path $configurationDirectory 'LauncherBrokerProcessAccessProbe.exe')
     (Join-Path $configurationDirectory 'LauncherBrokerProcessLauncherTests.exe')

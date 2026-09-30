@@ -26,6 +26,17 @@ constexpr wchar_t LauncherExecutableName[] = L"launch-as.exe";
 constexpr wchar_t BrokerAdminExecutableName[] = L"launch-as-admin.exe";
 constexpr wchar_t BrokerExecutableName[] = L"launch-as-broker.exe";
 constexpr wchar_t BrokerConhostExecutableName[] = L"launch-as-conhost.exe";
+// The bundled ConPTY that launch-as-conhost loads; conpty.dll starts the OpenConsole.exe beside it.
+constexpr wchar_t ConptyLibraryName[] = L"conpty.dll";
+constexpr wchar_t ConptyHostExecutableName[] = L"OpenConsole.exe";
+// Files installed from beside launch-as-admin.exe, which installs itself separately.
+constexpr std::array<const wchar_t*, 5> InstalledSiblingNames {
+    BrokerExecutableName,
+    BrokerConhostExecutableName,
+    ConptyLibraryName,
+    ConptyHostExecutableName,
+    LauncherExecutableName
+};
 constexpr wchar_t BrokerServiceDisplayName[] = L"launch-as Broker";
 constexpr wchar_t BrokerServiceDescription[] =
     L"Launches managed accounts in isolated console and interactive sessions.";
@@ -108,31 +119,6 @@ using LocalSecurityDescriptor = launch_as::LocalAllocation<PSECURITY_DESCRIPTOR>
         return securityError;
     }
     return ERROR_SUCCESS;
-}
-
-[[nodiscard]] DWORD GetCurrentExecutablePath(std::wstring& path)
-{
-    std::vector<wchar_t> buffer(MAX_PATH);
-    for (;;)
-    {
-        const DWORD copiedCharacters =
-            GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
-        if (copiedCharacters == 0)
-        {
-            const DWORD moduleError = GetLastError();
-            return moduleError;
-        }
-        if (copiedCharacters < buffer.size() - 1)
-        {
-            path.assign(buffer.data(), copiedCharacters);
-            return ERROR_SUCCESS;
-        }
-        if (buffer.size() >= 32'768)
-        {
-            return ERROR_BUFFER_OVERFLOW;
-        }
-        buffer.resize(buffer.size() * 2);
-    }
 }
 
 [[nodiscard]] DWORD GetSiblingExecutablePath(
@@ -307,26 +293,16 @@ DWORD InstallBrokerService()
     {
         return sourceError;
     }
-    std::wstring sourceBrokerPath;
-    const DWORD sourceBrokerError =
-        GetSiblingExecutablePath(adminPath, BrokerExecutableName, sourceBrokerPath);
-    if (sourceBrokerError != ERROR_SUCCESS)
+    // Resolve every source before touching the install directory.
+    std::array<std::wstring, InstalledSiblingNames.size()> sourcePaths;
+    for (std::size_t index = 0; index < InstalledSiblingNames.size(); ++index)
     {
-        return sourceBrokerError;
-    }
-    std::wstring sourceLauncherPath;
-    const DWORD sourceLauncherError =
-        GetSiblingExecutablePath(adminPath, LauncherExecutableName, sourceLauncherPath);
-    if (sourceLauncherError != ERROR_SUCCESS)
-    {
-        return sourceLauncherError;
-    }
-    std::wstring sourceConhostPath;
-    const DWORD sourceConhostError =
-        GetSiblingExecutablePath(adminPath, BrokerConhostExecutableName, sourceConhostPath);
-    if (sourceConhostError != ERROR_SUCCESS)
-    {
-        return sourceConhostError;
+        const DWORD sourceFileError =
+            GetSiblingExecutablePath(adminPath, InstalledSiblingNames[index], sourcePaths[index]);
+        if (sourceFileError != ERROR_SUCCESS)
+        {
+            return sourceFileError;
+        }
     }
     std::wstring installDirectory;
     const DWORD directoryPathError = GetBrokerInstallDirectory(installDirectory);
@@ -339,33 +315,22 @@ DWORD InstallBrokerService()
     {
         return directoryError;
     }
-    const std::wstring installedPath = installDirectory + L"\\" + BrokerExecutableName;
-    const DWORD brokerCopyError = CopyAndSecureInstallFile(sourceBrokerPath, installedPath);
-    if (brokerCopyError != ERROR_SUCCESS)
+    for (std::size_t index = 0; index < InstalledSiblingNames.size(); ++index)
     {
-        return brokerCopyError;
+        const DWORD copyError = CopyAndSecureInstallFile(
+            sourcePaths[index], installDirectory + L"\\" + InstalledSiblingNames[index]);
+        if (copyError != ERROR_SUCCESS)
+        {
+            return copyError;
+        }
     }
-    const std::wstring installedConhostPath =
-        installDirectory + L"\\" + BrokerConhostExecutableName;
-    const DWORD conhostCopyError =
-        CopyAndSecureInstallFile(sourceConhostPath, installedConhostPath);
-    if (conhostCopyError != ERROR_SUCCESS)
-    {
-        return conhostCopyError;
-    }
-    const std::wstring installedLauncherPath = installDirectory + L"\\" + LauncherExecutableName;
-    const DWORD launcherCopyError =
-        CopyAndSecureInstallFile(sourceLauncherPath, installedLauncherPath);
-    if (launcherCopyError != ERROR_SUCCESS)
-    {
-        return launcherCopyError;
-    }
-    const std::wstring installedAdminPath = installDirectory + L"\\" + BrokerAdminExecutableName;
-    const DWORD adminCopyError = CopyAndSecureInstallFile(adminPath, installedAdminPath);
+    const DWORD adminCopyError =
+        CopyAndSecureInstallFile(adminPath, installDirectory + L"\\" + BrokerAdminExecutableName);
     if (adminCopyError != ERROR_SUCCESS)
     {
         return adminCopyError;
     }
+    const std::wstring installedPath = installDirectory + L"\\" + BrokerExecutableName;
     const DWORD serviceError = InstallDemandStartBrokerService(L"launch-as-broker", installedPath);
     if (serviceError != ERROR_SUCCESS)
     {
@@ -620,11 +585,10 @@ DWORD RemoveBrokerInstallFiles(std::wstring_view installDirectory)
         return ERROR_DIRECTORY;
     }
 
-    for (const wchar_t* fileName :
-        {LauncherExecutableName,
-            BrokerAdminExecutableName,
-            BrokerExecutableName,
-            BrokerConhostExecutableName})
+    std::vector<const wchar_t*> fileNames(
+        InstalledSiblingNames.begin(), InstalledSiblingNames.end());
+    fileNames.push_back(BrokerAdminExecutableName);
+    for (const wchar_t* fileName : fileNames)
     {
         const std::wstring path = directory + L"\\" + fileName;
         if (!DeleteFileW(path.c_str()))

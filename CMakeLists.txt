@@ -172,6 +172,51 @@ set_target_properties(launch_as_conhost PROPERTIES
     OUTPUT_NAME "launch-as-conhost"
 )
 
+# The inbox ConPTY repaints its whole viewport on resize, which garbles output when the caller's
+# terminal is itself a reflowing terminal. launch-as-conhost therefore loads the pinned
+# out-of-box ConPTY (conpty.dll + OpenConsole.exe) that must sit beside it.
+set(LAUNCH_AS_CONPTY_VERSION "1.24.260710001")
+set(LAUNCH_AS_CONPTY_SHA256 "175640566a3b59c4b132070ee96c2c77e5ab7edd2e92732a5eb3610bbf63d90e")
+if(CMAKE_CXX_COMPILER_ARCHITECTURE_ID STREQUAL "x64")
+    set(conpty_architecture "x64")
+elseif(CMAKE_CXX_COMPILER_ARCHITECTURE_ID STREQUAL "ARM64")
+    set(conpty_architecture "arm64")
+else()
+    message(FATAL_ERROR
+        "No ConPTY runtime for architecture '${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}'.")
+endif()
+set(conpty_package
+    "${CMAKE_CURRENT_BINARY_DIR}/_deps/microsoft.windows.console.conpty.${LAUNCH_AS_CONPTY_VERSION}.nupkg")
+# An offline build can place the package at this path; its hash is verified either way.
+if(NOT EXISTS "${conpty_package}")
+    file(DOWNLOAD
+        "https://api.nuget.org/v3-flatcontainer/microsoft.windows.console.conpty/${LAUNCH_AS_CONPTY_VERSION}/microsoft.windows.console.conpty.${LAUNCH_AS_CONPTY_VERSION}.nupkg"
+        "${conpty_package}"
+        STATUS conpty_download_status
+        TLS_VERIFY ON
+    )
+    list(GET conpty_download_status 0 conpty_download_code)
+    if(NOT conpty_download_code EQUAL 0)
+        file(REMOVE "${conpty_package}")
+        message(FATAL_ERROR "Could not download the ConPTY package: ${conpty_download_status}")
+    endif()
+endif()
+file(SHA256 "${conpty_package}" conpty_package_hash)
+if(NOT conpty_package_hash STREQUAL LAUNCH_AS_CONPTY_SHA256)
+    message(FATAL_ERROR "The ConPTY package at ${conpty_package} does not match the pinned hash.")
+endif()
+set(conpty_directory "${CMAKE_CURRENT_BINARY_DIR}/_deps/conpty-${LAUNCH_AS_CONPTY_VERSION}")
+if(NOT EXISTS "${conpty_directory}/runtimes")
+    file(ARCHIVE_EXTRACT INPUT "${conpty_package}" DESTINATION "${conpty_directory}")
+endif()
+add_custom_command(TARGET launch_as_conhost POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        "${conpty_directory}/runtimes/win-${conpty_architecture}/native/conpty.dll"
+        "${conpty_directory}/build/native/runtimes/${conpty_architecture}/OpenConsole.exe"
+        "$<TARGET_FILE_DIR:launch_as_conhost>"
+    VERBATIM
+)
+
 add_executable(launch_as_broker
     src/broker/BrokerService.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/LauncherBrokerVersion.rc"
@@ -973,6 +1018,29 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
         LABELS "broker;integration"
         SKIP_RETURN_CODE 77
         TIMEOUT 30
+    )
+
+    add_executable(LauncherTerminalResizeTests
+        tests/TerminalResizeTests.cpp
+        src/terminal/TerminalBridge.cpp
+        src/terminal/TerminalIO.cpp
+        src/common/Win32Support.cpp
+        src/common/WindowsCommandLine.cpp
+    )
+    configure_launch_as_test_target(LauncherTerminalResizeTests terminal common)
+    target_link_libraries(LauncherTerminalResizeTests PRIVATE
+        Advapi32
+        Ole32
+    )
+
+    add_test(
+        NAME launcher.terminal_resize
+        COMMAND "$<TARGET_FILE:LauncherTerminalResizeTests>" "$<TARGET_FILE:launch_as_conhost>"
+    )
+    set_tests_properties(launcher.terminal_resize PROPERTIES
+        LABELS "launcher;integration;terminal"
+        SKIP_RETURN_CODE 77
+        TIMEOUT 60
     )
 
     add_executable(LauncherTerminalDisconnectTests

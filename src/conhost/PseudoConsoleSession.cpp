@@ -6,6 +6,7 @@
 
 #include <Windows.h>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <utility>
@@ -272,24 +273,39 @@ void PseudoConsoleSession::StopRelays() noexcept
 
 bool PseudoConsoleSession::LoadApi(std::wstring& error)
 {
-    const HMODULE kernel = GetModuleHandleW(L"kernel32.dll");
-    if (kernel == nullptr)
+    // Load the bundled ConPTY rather than the inbox one: the inbox host repaints its whole
+    // viewport on resize, which garbles output inside a terminal that reflows on its own.
+    // conpty.dll starts the OpenConsole.exe beside it. Both come only from this executable's
+    // protected install directory, and conpty.dll's own dependencies only from System32.
+    std::wstring executablePath;
+    const DWORD pathError = GetCurrentExecutablePath(executablePath);
+    if (pathError != ERROR_SUCCESS)
     {
-        const DWORD moduleError = GetLastError();
-        error = L"Could not load the Windows pseudoconsole API: " + FormatWindowsError(moduleError);
+        error = L"Could not locate the bundled pseudoconsole: " + FormatWindowsError(pathError);
+        return false;
+    }
+    const std::wstring conptyPath =
+        (std::filesystem::path(executablePath).parent_path() / L"conpty.dll").native();
+    const HMODULE conpty =
+        LoadLibraryExW(conptyPath.c_str(), nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (conpty == nullptr)
+    {
+        const DWORD loadError = GetLastError();
+        error = L"Could not load the bundled pseudoconsole " + conptyPath + L": " +
+                FormatWindowsError(loadError);
         return false;
     }
 
+    // The module stays loaded for the rest of this short-lived host process.
     api_.create = reinterpret_cast<CreatePseudoConsoleFunction>(
-        GetProcAddress(kernel, "CreatePseudoConsole"));
+        GetProcAddress(conpty, "ConptyCreatePseudoConsole"));
     api_.resize = reinterpret_cast<ResizePseudoConsoleFunction>(
-        GetProcAddress(kernel, "ResizePseudoConsole"));
-    api_.close =
-        reinterpret_cast<ClosePseudoConsoleFunction>(GetProcAddress(kernel, "ClosePseudoConsole"));
+        GetProcAddress(conpty, "ConptyResizePseudoConsole"));
+    api_.close = reinterpret_cast<ClosePseudoConsoleFunction>(
+        GetProcAddress(conpty, "ConptyClosePseudoConsole"));
     if (api_.create == nullptr || api_.resize == nullptr || api_.close == nullptr)
     {
-        error = L"Terminal mode requires Windows pseudoconsole support (Windows 10 version 1809 or "
-                L"newer).";
+        error = L"The bundled pseudoconsole " + conptyPath + L" is missing required exports.";
         return false;
     }
     return true;

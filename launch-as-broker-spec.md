@@ -72,6 +72,7 @@ First version does **not** protect against:
 | Internal enrollment store | `%ProgramData%\launch-as\enrollments\` |
 | Service binary | `%ProgramFiles%\launch-as\launch-as-broker.exe` |
 | Console host helper | `%ProgramFiles%\launch-as\launch-as-conhost.exe` (console mode only) |
+| Bundled ConPTY | `%ProgramFiles%\launch-as\conpty.dll` and `OpenConsole.exe` (console mode only) |
 
 All configuration, internal enrollment-data, and binary paths: ACL `SYSTEM:F`, `Administrators:F`, `Users:RX` (the enrollment directory grants no `Users` access).
 

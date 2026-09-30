@@ -224,6 +224,8 @@ if ($PackageRelease) {
         'launch-as-admin.exe'
         'launch-as-broker.exe'
         'launch-as-conhost.exe'
+        'conpty.dll'
+        'OpenConsole.exe'
     )
     foreach ($releaseFile in $releaseFiles) {
         $sourcePath = Join-Path $buildDirectory "$Configuration\$releaseFile"
@@ -232,7 +234,7 @@ if ($PackageRelease) {
         }
         Copy-Item -LiteralPath $sourcePath -Destination $releaseStagingDirectory
     }
-    foreach ($documentationFile in @('Setup-LaunchAs.ps1', 'README.md', 'CHANGELOG.md', 'LICENSE')) {
+    foreach ($documentationFile in @('Setup-LaunchAs.ps1', 'README.md', 'CHANGELOG.md', 'LICENSE', 'THIRD-PARTY-NOTICES.md')) {
         Copy-Item -LiteralPath (Join-Path $projectRoot $documentationFile) `
             -Destination $releaseStagingDirectory
     }

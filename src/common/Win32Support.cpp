@@ -75,4 +75,29 @@ bool CreateGuidString(std::wstring& text)
     return true;
 }
 
+DWORD GetCurrentExecutablePath(std::wstring& path)
+{
+    std::vector<wchar_t> buffer(MAX_PATH);
+    for (;;)
+    {
+        const DWORD copiedCharacters =
+            GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (copiedCharacters == 0)
+        {
+            const DWORD moduleError = GetLastError();
+            return moduleError;
+        }
+        if (copiedCharacters < buffer.size() - 1)
+        {
+            path.assign(buffer.data(), copiedCharacters);
+            return ERROR_SUCCESS;
+        }
+        if (buffer.size() >= 32'768)
+        {
+            return ERROR_BUFFER_OVERFLOW;
+        }
+        buffer.resize(buffer.size() * 2);
+    }
+}
+
 } // namespace launch_as

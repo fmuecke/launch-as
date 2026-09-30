@@ -40,6 +40,10 @@ model.
 ### In scope
 
 - `launch-as.exe`, `launch-as-admin.exe`, `launch-as-broker.exe`, and `launch-as-conhost.exe`.
+- The bundled Microsoft ConPTY: `launch-as-conhost.exe` loads `conpty.dll` by absolute path from
+  the protected install directory (its dependencies only from System32), and `conpty.dll` starts
+  the `OpenConsole.exe` beside it as the target account. Both files inherit the install-directory
+  protection; their security fixes ship only with a launch-as update, not with Windows Update.
 - Installation and update through `Setup-LaunchAs.ps1` and the native installer.
 - Local control and terminal pipes, request parsing, caller authorization, account management,
   password handling, token validation, profile loading, ConPTY, and job teardown.

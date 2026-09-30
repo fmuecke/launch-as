@@ -180,30 +180,19 @@ class UserEnvironmentBlock final
 
 [[nodiscard]] DWORD GetBrokerConhostExecutablePath(std::wstring& path)
 {
-    std::vector<wchar_t> modulePath(512);
-    for (;;)
+    std::wstring brokerPath;
+    const DWORD moduleError = GetCurrentExecutablePath(brokerPath);
+    if (moduleError != ERROR_SUCCESS)
     {
-        const DWORD characters =
-            GetModuleFileNameW(nullptr, modulePath.data(), static_cast<DWORD>(modulePath.size()));
-        if (characters == 0)
-        {
-            const DWORD moduleError = GetLastError();
-            return moduleError;
-        }
-        if (characters < modulePath.size())
-        {
-            const std::filesystem::path brokerPath(
-                std::wstring(modulePath.data(), static_cast<std::size_t>(characters)));
-            path = (brokerPath.parent_path() / L"launch-as-conhost.exe").native();
-            std::error_code pathError;
-            if (!std::filesystem::is_regular_file(path, pathError))
-            {
-                return pathError ? static_cast<DWORD>(pathError.value()) : ERROR_FILE_NOT_FOUND;
-            }
-            return ERROR_SUCCESS;
-        }
-        modulePath.resize(modulePath.size() * 2);
+        return moduleError;
     }
+    path = (std::filesystem::path(brokerPath).parent_path() / L"launch-as-conhost.exe").native();
+    std::error_code pathError;
+    if (!std::filesystem::is_regular_file(path, pathError))
+    {
+        return pathError ? static_cast<DWORD>(pathError.value()) : ERROR_FILE_NOT_FOUND;
+    }
+    return ERROR_SUCCESS;
 }
 
 [[nodiscard]] bool CopyValidSid(PSID source, std::vector<BYTE>& destination)

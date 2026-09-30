@@ -238,6 +238,10 @@ int wmain(int argumentCount, wchar_t* arguments[])
         std::wcerr << L"The launcher path is invalid.\n";
         return 1;
     }
+    // The console-stdin test kills the host while its cmd.exe target may still be attaching to
+    // the pseudoconsole. That target then fails DLL initialization; the inherited error mode keeps
+    // Windows from showing an "Application Error" dialog for this expected failure.
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
     launch_as::TerminalBridge terminalBridge;
     launch_as::TerminalPipeNames pipeNames;
     std::wstring error;

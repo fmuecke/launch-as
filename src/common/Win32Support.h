@@ -124,4 +124,7 @@ class ServiceHandle final
 // Creates a random GUID formatted as 36 characters without braces.
 [[nodiscard]] bool CreateGuidString(std::wstring& text);
 
+// Returns the full path of the running executable, or a Win32 error.
+[[nodiscard]] DWORD GetCurrentExecutablePath(std::wstring& path);
+
 } // namespace launch_as

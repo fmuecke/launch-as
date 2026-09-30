@@ -40,9 +40,9 @@ reinstall.
 ```
 
 The package contains `launch-as.exe`, `launch-as-admin.exe`, `launch-as-broker.exe`,
-`launch-as-conhost.exe`, this README, the setup script, and the license. Keep all four executables
-together while installing; setup copies them to `%ProgramFiles%\launch-as` with protected
-permissions. That directory is deliberately not added to `PATH`; invoke the installed client by
+`launch-as-conhost.exe`, Microsoft's ConPTY (`conpty.dll` and `OpenConsole.exe`), this README, the
+setup script, the license, and the third-party notices. Keep all binaries together while
+installing; setup copies them to `%ProgramFiles%\launch-as` with protected permissions. That directory is deliberately not added to `PATH`; invoke the installed client by
 its full path or add it to your own user `PATH` if desired.
 
 For non-interactive automation, select an action explicitly and use `-Force` to accept the

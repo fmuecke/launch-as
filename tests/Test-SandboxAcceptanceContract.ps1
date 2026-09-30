@@ -155,6 +155,8 @@ foreach ($requiredText in @(
         'launch-as-admin.exe',
         'launch-as-broker.exe',
         'launch-as-conhost.exe',
+        'conpty.dll',
+        'OpenConsole.exe',
         'launch-as.exe')) {
     if ($scriptText -notmatch [regex]::Escape($requiredText)) {
         throw "The interactive Sandbox runner must contain: $requiredText"

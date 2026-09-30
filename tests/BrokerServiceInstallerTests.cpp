@@ -16,6 +16,14 @@
 namespace
 {
 
+constexpr std::array<const wchar_t*, 6> InstalledFileNames {
+    L"launch-as.exe",
+    L"launch-as-admin.exe",
+    L"launch-as-broker.exe",
+    L"launch-as-conhost.exe",
+    L"conpty.dll",
+    L"OpenConsole.exe"
+};
 constexpr wchar_t BrokerServiceDisplayName[] = L"launch-as Broker";
 constexpr wchar_t BrokerServiceDescription[] =
     L"Launches managed accounts in isolated console and interactive sessions.";
@@ -216,6 +224,33 @@ class TestService final
     return attributes != INVALID_FILE_ATTRIBUTES;
 }
 
+[[nodiscard]] bool CreateInstalledFiles(const std::filesystem::path& directory)
+{
+    for (const wchar_t* fileName : InstalledFileNames)
+    {
+        if (!CreateEmptyFile(directory / fileName))
+        {
+            std::wcerr << L"Could not create temporary file " << fileName << L".\n";
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] bool VerifyInstalledFilesRemoved(
+    const std::filesystem::path& directory, const wchar_t* context)
+{
+    for (const wchar_t* fileName : InstalledFileNames)
+    {
+        if (FileExists(directory / fileName))
+        {
+            std::wcerr << L"Uninstall retained " << fileName << context << L".\n";
+            return false;
+        }
+    }
+    return true;
+}
+
 [[nodiscard]] bool VerifyInstallFilesAreRemoved()
 {
     launch_as::test::TemporaryDirectory directory;
@@ -224,24 +259,15 @@ class TestService final
         std::wcerr << L"Could not create a temporary install directory.\n";
         return false;
     }
-    const std::filesystem::path launcher = directory.path() / L"launch-as.exe";
-    const std::filesystem::path admin = directory.path() / L"launch-as-admin.exe";
-    const std::filesystem::path broker = directory.path() / L"launch-as-broker.exe";
-    const std::filesystem::path conhost = directory.path() / L"launch-as-conhost.exe";
-    if (!CreateEmptyFile(launcher) || !CreateEmptyFile(admin) || !CreateEmptyFile(broker) ||
-        !CreateEmptyFile(conhost))
+    if (!CreateInstalledFiles(directory.path()))
     {
-        std::wcerr << L"Could not create temporary broker files.\n";
         return false;
     }
 
     const DWORD removalError =
         launch_as::broker::RemoveBrokerInstallFiles(directory.path().native());
     if (!Expect(removalError == ERROR_SUCCESS, L"Could not remove the installed broker files.") ||
-        !Expect(!FileExists(launcher), L"Uninstall retained launch-as.exe.") ||
-        !Expect(!FileExists(admin), L"Uninstall retained launch-as-admin.exe.") ||
-        !Expect(!FileExists(broker), L"Uninstall retained launch-as-broker.exe.") ||
-        !Expect(!FileExists(conhost), L"Uninstall retained launch-as-conhost.exe.") ||
+        !VerifyInstalledFilesRemoved(directory.path(), L"") ||
         !Expect(!FileExists(directory.path()), L"Uninstall retained the empty install directory."))
     {
         return false;
@@ -253,8 +279,7 @@ class TestService final
         return false;
     }
     const std::filesystem::path unrelated = directory.path() / L"unrelated.txt";
-    if (!CreateEmptyFile(launcher) || !CreateEmptyFile(admin) || !CreateEmptyFile(broker) ||
-        !CreateEmptyFile(conhost) || !CreateEmptyFile(unrelated))
+    if (!CreateInstalledFiles(directory.path()) || !CreateEmptyFile(unrelated))
     {
         std::wcerr << L"Could not create the second temporary broker file set.\n";
         return false;
@@ -262,14 +287,7 @@ class TestService final
     return Expect(launch_as::broker::RemoveBrokerInstallFiles(directory.path().native()) ==
                       ERROR_SUCCESS,
                L"Could not remove the broker files from a nonempty directory.") &&
-           Expect(!FileExists(launcher),
-               L"Uninstall retained launch-as.exe in a nonempty directory.") &&
-           Expect(!FileExists(admin),
-               L"Uninstall retained launch-as-admin.exe in a nonempty directory.") &&
-           Expect(!FileExists(broker),
-               L"Uninstall retained launch-as-broker.exe in a nonempty directory.") &&
-           Expect(!FileExists(conhost),
-               L"Uninstall retained launch-as-conhost.exe in a nonempty directory.") &&
+           VerifyInstalledFilesRemoved(directory.path(), L" in a nonempty directory") &&
            Expect(FileExists(unrelated), L"Uninstall removed an unrelated install-directory file.");
 }
 

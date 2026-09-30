@@ -2,6 +2,12 @@
 
 ## [unreleased] - 2026-09-21
 
+- Fixed: Resizing the terminal no longer duplicates or overwrites earlier output (visible with
+  full-width content such as Claude Code diffs). `launch-as-conhost.exe` now hosts the target with
+  Microsoft's ConPTY 1.24 (`conpty.dll` and `OpenConsole.exe`), which setup installs beside it,
+  instead of the inbox Windows ConPTY, which repaints its whole viewport on every resize.
+- Security: The installed trust boundary now includes the bundled `conpty.dll` and
+  `OpenConsole.exe`; updates to them ship with launch-as, not Windows Update.
 - Added: Public `--mode interactive` launches GUI targets on the authenticated caller's shared
   `WinSta0\Default` desktop while retaining an independent managed-account logon SID.
 - Security: The launcher holds an exact child-logon-SID desktop ACL lease until the broker reports

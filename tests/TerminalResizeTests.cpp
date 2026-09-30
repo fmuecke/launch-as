@@ -13,7 +13,6 @@
 #include "WindowsCommandLine.h"
 
 #include <Windows.h>
-#include <array>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -238,21 +237,21 @@ int RunWriter()
     int markerRows = 0;
     bool writerDone = false;
     bool writerResized = false;
-    std::array<int, 4> frameRows {};
+    std::wstring visibleText;
     for (const std::wstring& row : rows)
     {
         markerRows += row == L"marker-0" ? 1 : 0;
         writerDone = writerDone || row == L"writer-done";
         writerResized = writerResized || row == L"writer-resized-" + std::to_wstring(NarrowWidth);
-        for (int frame = 0; frame < static_cast<int>(frameRows.size()); ++frame)
-        {
-            frameRows[frame] += row.starts_with(L"frame-" + std::to_wstring(frame) + L" ") ? 1 : 0;
-        }
+        visibleText += row;
     }
     bool framesOnce = true;
-    for (const int count : frameRows)
+    for (int frame = 0; frame < 4; ++frame)
     {
-        framesOnce = framesOnce && count == 1;
+        const std::wstring label = L"frame-" + std::to_wstring(frame);
+        const std::size_t first = visibleText.find(label);
+        framesOnce = framesOnce && first != std::wstring::npos &&
+                     visibleText.find(label, first + label.size()) == std::wstring::npos;
     }
     const bool passed =
         narrowed && hostExited && writerDone && writerResized && markerRows == 1 && framesOnce;

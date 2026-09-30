@@ -52,7 +52,7 @@ jobs:
 
   # On a version tag, attest the provenance of the tested package and the launch-as binaries in
   # it, and publish the package as a release described by the tag's CHANGELOG section (a tag
-  # v1.2.0 needs a "## [1.2.0]" heading). The package is named after the version build.ps1
+  # v1.3.0 needs a "## [1.3.0]" heading). The package is named after the version build.ps1
   # derives from CMakeLists.txt, so the tag must match it, including any "-preview" suffix.
   # Kept separate so the write permissions never reach the job that runs the build and tests.
   # Verify a download (zip or extracted launch-as*.exe) with:

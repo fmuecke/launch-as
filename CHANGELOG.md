@@ -104,6 +104,7 @@
 - Added: `--terminal` for Windows Terminal and VS Code panes.
 - Changed: Direct invocation is supported alongside the explicit `run` subcommand.
 
+[1.3.0]: https://github.com/fmuecke/launch-as/releases/tag/v1.3.0-preview
 [1.2.0-preview]: https://github.com/fmuecke/launch-as/releases/tag/v1.2.0-preview
 [1.1.0]: https://github.com/fmuecke/launch-as/releases/tag/v1.1.0
 [1.1.0-preview]: https://github.com/fmuecke/launch-as/releases/tag/v1.1.0-preview

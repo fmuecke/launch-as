@@ -4,14 +4,14 @@
 
 Launch-as is currently used in [agent-win-sandbox](https://github.com/fmuecke/agent-win-sandbox) to create a least-privilege session for a coding agent like Claude Code or GitHub Copilot CLI.
 
-The current stable version is still v0.3.2. [Browse the stable v0.3.2 version](https://github.com/fmuecke/launch-as/tree/v0.3.2). It creates the session via `CreateProcessWithLogonW` from the current user. However, this has some security implications due to derived logon session tokens:
+The old stable version was v0.3.2. [Browse old stable v0.3.2 version](https://github.com/fmuecke/launch-as/tree/v0.3.2). It creates the session via `CreateProcessWithLogonW` from the current user. However, this has some security implications due to derived logon session tokens:
 
 - Session user will be able to see and interact with the regular user's desktop.
 - For regular-user processes that retain the normal logon-SID default-DACL ACE, the session user
   can obtain `PROCESS_VM_READ` and `PROCESS_TERMINATE`, allowing memory reads and termination.
   Protected processes or processes with custom DACLs may not be accessible.
 
-**1.2.0-preview · Windows x64 · console and shared-desktop GUI programs**
+**1.3.0 · Windows x64 · console and shared-desktop GUI programs**
 
 `launch-as` starts a program as a **launch-as-managed local standard account** through the
 `launch-as-broker` Windows service. The client never accepts, reads, stores, or transmits the
@@ -26,7 +26,7 @@ intentionally possible even though the target retains an independent logon SID.
 
 ## Install the binary package
 
-Extract `launch-as-v1.2.0-preview-win64.zip` and run the bundled setup script from its extracted
+Extract `launch-as-v1.3.0-win64.zip` and run the bundled setup script from its extracted
 directory. It elevates when needed, installs or updates the demand-start service and all four
 executables into `%ProgramFiles%\launch-as`, and can create a default account. Updating takes over
 that account and replaces its broker-owned password. The user who runs a fresh `install` becomes the
@@ -186,4 +186,4 @@ shared-desktop adapters, their different lifetimes, and their security boundarie
 ## License
 
 `launch-as` is licensed under the [GNU General Public License version 3 only](LICENSE). Source for
-this preview is available at <https://github.com/fmuecke/launch-as/tree/v1.2.0-preview>.
+this preview is available at <https://github.com/fmuecke/launch-as/tree/v1.3.0>.

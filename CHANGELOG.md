@@ -1,6 +1,6 @@
 # Changelog
 
-## [unreleased] - 2026-09-21
+## [1.3.0] - 2026-09-21
 
 - Fixed: Resizing the terminal no longer duplicates or overwrites earlier output (visible with
   full-width content such as Claude Code diffs). `launch-as-conhost.exe` now hosts the target with
@@ -21,6 +21,7 @@
   as test environment.
 - Changed: (internal) Restructured source according to the different aspects (admin, broker, common,
   conhost, launcher, protocol, and terminal) to improve maintainability.
+- Added: full automated github release workflow
 
 ## [1.2.0-preview] - 2026-09-15
 

@@ -27,7 +27,7 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -36,7 +36,7 @@ jobs:
         run: .\build.ps1 -Configuration Release -RunTests -PackageRelease -SkipFormatting
 
       - name: Upload release package
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: launch-as-msvc-x64-release
           path: out/launch-as-v*-win64.zip
@@ -44,8 +44,73 @@ jobs:
 
       - name: Upload test logs
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: launch-as-test-logs
           path: out/release-build/Testing/Temporary/
           if-no-files-found: ignore
+
+  # On a version tag, attest the provenance of the tested package and the launch-as binaries in
+  # it, and publish the package as a release described by the tag's CHANGELOG section (a tag
+  # v1.2.0 needs a "## [1.2.0]" heading). The package is named after the version build.ps1
+  # derives from CMakeLists.txt, so the tag must match it, including any "-preview" suffix.
+  # Kept separate so the write permissions never reach the job that runs the build and tests.
+  # Verify a download (zip or extracted launch-as*.exe) with:
+  #   gh attestation verify <file> -R fmuecke/launch-as
+  release:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write     # create the release
+      id-token: write     # sign the attestation
+      attestations: write # store the attestation
+    env:
+      PACKAGE: launch-as-${{ github.ref_name }}-win64.zip
+    steps:
+      - name: Download release package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: launch-as-msvc-x64-release
+          path: dist
+
+      - name: Unpack release package
+        run: |
+          if [ ! -f "dist/$PACKAGE" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match the built package: $(ls dist)"
+            exit 1
+          fi
+          unzip -q "dist/$PACKAGE" -d package
+
+      - name: Extract release notes
+        run: |
+          awk -v heading="## [${GITHUB_REF_NAME#v}]" \
+            'index($0, heading) == 1 { found = 1; next } found && /^## / { exit } found' \
+            package/CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "::error::CHANGELOG.md has no entries under '## [${GITHUB_REF_NAME#v}]'"
+            exit 1
+          fi
+          printf '\nFull changelog: %s/%s/blob/%s/CHANGELOG.md\n' \
+            "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" >> notes.md
+
+      # conpty.dll and OpenConsole.exe are Microsoft binaries and are covered only by the zip.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/${{ env.PACKAGE }}
+            package/launch-as*.exe
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          case "$GITHUB_REF_NAME" in
+            *-*) prerelease=--prerelease ;;
+            *) prerelease= ;;
+          esac
+          gh release create "$GITHUB_REF_NAME" "dist/$PACKAGE" --repo "$GITHUB_REPOSITORY" \
+            --notes-file notes.md $prerelease

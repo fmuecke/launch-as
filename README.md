@@ -4,7 +4,7 @@
 
 Launch-as is currently used in [agent-win-sandbox](https://github.com/fmuecke/agent-win-sandbox) to create a least-privilege session for a coding agent like Claude Code or GitHub Copilot CLI.
 
-The old stable version was v0.3.2. [Browse old stable v0.3.2 version](https://github.com/fmuecke/launch-as/tree/v0.3.2). It creates the session via `CreateProcessWithLogonW` from the current user. However, this has some security implications due to derived logon session tokens:
+The first version was v0.3.2. [Browse old stable v0.3.2 version](https://github.com/fmuecke/launch-as/tree/v0.3.2). It creates the session via `CreateProcessWithLogonW` from the current user. However, this has some security implications due to derived logon session tokens:
 
 - Session user will be able to see and interact with the regular user's desktop.
 - For regular-user processes that retain the normal logon-SID default-DACL ACE, the session user
@@ -23,6 +23,23 @@ launch-as-managed account and any absolute executable. It is blast-radius reduct
 it does not protect against a local administrator or kernel-level attacker. Interactive mode puts
 the target on the caller's shared desktop, so screen, window, clipboard, and input interaction are
 intentionally possible even though the target retains an independent logon SID.
+
+## Why not PsExec or `runas.exe`?
+
+Both `PsExec` and `runas.exe` can start the agent under a dedicated Windows user, but they do not 
+provide the isolation required by `launch-as`.
+
+In testing, both approaches retain the interactive user's **logon SID** in the child token.
+Consequently, the sandboxed process can still access processes belonging to the interactive 
+user (`OpenProcess`/`VM_READ`) and, when launched interactively, shares the user's desktop.
+Identity separation therefore does **not** establish the intended security boundary.
+
+They also provide poor terminal integration: launching under the other user creates a separate 
+console window rather than attaching the process cleanly to the existing terminal. This makes 
+them unsuitable for workflows such as running an agent directly inside a VS Code integrated terminal.
+
+`launch-as` instead creates an **independent logon session with its own logon SID** and provides
+ terminal integration while preserving that boundary.
 
 ## Install the binary package
 

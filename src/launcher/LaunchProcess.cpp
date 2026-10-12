@@ -113,7 +113,8 @@ ExitCode RunBrokerConsole(const AccountIdentity& account, const Options& options
     TerminalBridge terminalBridge;
     TerminalPipeNames pipeNames;
     std::wstring terminalError;
-    if (!terminalBridge.InitializeForBroker(account.sid, pipeNames, terminalError))
+    if (!terminalBridge.InitializeForBroker(
+            account.sid, pipeNames, terminalError, options.lowIntegrity))
     {
         std::wcerr << terminalError << L"\n";
         return ExitFailure;
@@ -143,7 +144,9 @@ ExitCode RunBrokerConsole(const AccountIdentity& account, const Options& options
         pipeNames,
         terminalBridge.supportsCursorInheritance(),
         connection,
-        processId);
+        processId,
+        options.restrictWrites,
+        options.lowIntegrity);
     if (launchError != ERROR_SUCCESS)
     {
         if (launchError == ERROR_PIPE_BUSY)
@@ -273,7 +276,9 @@ ExitCode RunBrokerInteractive(const AccountIdentity& account, const Options& opt
                 pipeName,
                 nonce,
                 connection,
-                processId);
+                processId,
+                options.restrictWrites,
+                options.lowIntegrity);
             SetEvent(launchCompleted.get());
         });
     const DWORD coordinatorError =

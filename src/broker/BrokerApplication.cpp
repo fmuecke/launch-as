@@ -55,6 +55,8 @@ void AuditRequest(BrokerAuditEvent event, WORD type, const BrokerRequest& reques
         AuditProfileId(L"account", request.profileId),
         L"callerSid=" + AuditCallerSid(caller),
         L"callerSession=" + std::to_wstring(caller.sessionId),
+        L"restrictWrites=" + std::wstring(request.restrictWrites ? L"true" : L"false"),
+        L"lowIntegrity=" + std::wstring(request.lowIntegrity ? L"true" : L"false"),
         L"result=" + std::wstring(result == ERROR_SUCCESS ? L"allowed" : L"rejected"),
         L"processId=" + std::to_wstring(processId),
         L"win32Error=" + std::to_wstring(result),
@@ -237,7 +239,9 @@ DWORD BrokerApplication::Launch(
             request.interactive.nonce,
             caller.logonSid,
             child,
-            lease);
+            lease,
+            request.restrictWrites,
+            request.lowIntegrity);
         if (launchError != ERROR_SUCCESS)
         {
             return complete(launchError);
@@ -268,8 +272,13 @@ DWORD BrokerApplication::Launch(
             L"--"});
     conhostArguments.insert(
         conhostArguments.end(), request.arguments.begin(), request.arguments.end());
-    const DWORD launchError = LaunchBrokerConsoleHost(
-        token.get(), request.profileId, conhostArguments, request.workingDirectory, child);
+    const DWORD launchError = LaunchBrokerConsoleHost(token.get(),
+        request.profileId,
+        conhostArguments,
+        request.workingDirectory,
+        child,
+        request.restrictWrites,
+        request.lowIntegrity);
     if (launchError != ERROR_SUCCESS)
     {
         return complete(launchError);

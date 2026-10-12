@@ -72,7 +72,7 @@ void BrokerControlConnection::Reset(HANDLE pipe) noexcept
 
 DWORD LaunchBrokerInteractive(std::wstring_view profileId, std::span<const std::wstring> arguments,
     std::wstring_view workingDirectory, std::wstring_view leasePipe, std::wstring_view nonce,
-    BrokerControlConnection& connection, DWORD& processId)
+    BrokerControlConnection& connection, DWORD& processId, bool restrictWrites, bool lowIntegrity)
 {
     connection.Reset();
     processId = 0;
@@ -82,8 +82,15 @@ DWORD LaunchBrokerInteractive(std::wstring_view profileId, std::span<const std::
         return ERROR_GEN_FAILURE;
     }
     std::string request;
-    if (!broker::BuildInteractiveLaunchRequest(
-            requestId, profileId, arguments, workingDirectory, leasePipe, nonce, request))
+    if (!broker::BuildInteractiveLaunchRequest(requestId,
+            profileId,
+            arguments,
+            workingDirectory,
+            leasePipe,
+            nonce,
+            request,
+            restrictWrites,
+            lowIntegrity))
     {
         return ERROR_INVALID_PARAMETER;
     }
@@ -92,7 +99,7 @@ DWORD LaunchBrokerInteractive(std::wstring_view profileId, std::span<const std::
 
 DWORD LaunchBrokerConsole(std::wstring_view profileId, std::span<const std::wstring> arguments,
     std::wstring_view workingDirectory, const TerminalPipeNames& pipes, bool inheritCursor,
-    BrokerControlConnection& connection, DWORD& processId)
+    BrokerControlConnection& connection, DWORD& processId, bool restrictWrites, bool lowIntegrity)
 {
     connection.Reset();
     processId = 0;
@@ -110,7 +117,9 @@ DWORD LaunchBrokerConsole(std::wstring_view profileId, std::span<const std::wstr
             pipes.output,
             pipes.resize,
             inheritCursor,
-            request))
+            request,
+            restrictWrites,
+            lowIntegrity))
     {
         return ERROR_INVALID_PARAMETER;
     }

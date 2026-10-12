@@ -22,11 +22,15 @@ void PrintUsage()
   launch-as.exe [run] --user <launch-as-user>
                       [--mode console|interactive]
                       [--working-directory <directory>]
+                      [--restrict-writes] [--low-integrity]
                       -- <absolute-executable> [arguments...]
 
   Starts a console session by default, or a GUI process on the caller's shared desktop in
   interactive mode, through launch-as-broker. Create or take over the account first with the
   elevated launch-as-admin command. The client never accepts or stores passwords.
+  --restrict-writes uses a write-restricted token without changing its integrity level.
+  --low-integrity lowers token integrity and persistently labels the target user's profile
+  and working directory Low, where account permissions allow. The flags are independent.
 
 )usage";
     std::wcerr << std::endl;
@@ -56,6 +60,24 @@ std::optional<Options> ParseOptions(std::span<wchar_t*> arguments)
                 options.processArguments.emplace_back(arguments[index]);
             }
             break;
+        }
+        if (name == L"--restrict-writes")
+        {
+            if (options.restrictWrites)
+            {
+                return std::nullopt;
+            }
+            options.restrictWrites = true;
+            continue;
+        }
+        if (name == L"--low-integrity")
+        {
+            if (options.lowIntegrity)
+            {
+                return std::nullopt;
+            }
+            options.lowIntegrity = true;
+            continue;
         }
         if (index + 1 >= arguments.size())
         {

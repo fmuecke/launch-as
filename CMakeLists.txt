@@ -304,6 +304,7 @@ if(BUILD_TESTING)
 
     add_executable(LauncherBrokerPipeTests
         tests/BrokerPipeTests.cpp
+        src/broker/BrokerWriteScope.cpp
         src/broker/BrokerProcessLauncher.cpp
         src/broker/BrokerProcessLauncher.h
         src/broker/InteractiveDesktopLeaseClient.cpp
@@ -335,6 +336,7 @@ if(BUILD_TESTING)
 
     add_executable(LauncherBrokerCommandTests
         tests/BrokerCommandTests.cpp
+        src/broker/BrokerWriteScope.cpp
         src/protocol/BrokerControlPipe.cpp
         src/protocol/BrokerControlPipe.h
         src/broker/BrokerProcessLauncher.cpp
@@ -603,6 +605,7 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
             Invoke-BrokerProbeAcceptanceTest.ps1
             Invoke-BrokerSameAccountConcurrencyTest.ps1
             Invoke-BrokerInteractiveAcceptanceTest.ps1
+            Invoke-BrokerWriteScopeAcceptanceTest.ps1
             Run-InteractiveSessionProbeInSandbox.ps1
             WindowsSandboxAcceptanceSupport.psm1)
         string(REGEX REPLACE "\\.psm?1$" "" script_test_name "${script_name}")
@@ -717,6 +720,7 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
 
     add_executable(LauncherBrokerProcessLauncherTests
         tests/BrokerProcessLauncherTests.cpp
+        src/broker/BrokerWriteScope.cpp
         src/broker/BrokerProcessLauncher.cpp
         src/broker/BrokerProcessLauncher.h
         src/broker/InteractiveDesktopLeaseClient.cpp
@@ -742,6 +746,22 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
     set_tests_properties(launcher.broker_process_launcher PROPERTIES
         LABELS "broker;integration"
     )
+
+    add_executable(LauncherBrokerWriteScopeTests
+        tests/BrokerWriteScopeTests.cpp
+        src/broker/BrokerWriteScope.cpp
+    )
+    target_link_libraries(LauncherBrokerWriteScopeTests PRIVATE launch_as::common Advapi32 Ole32)
+    configure_launch_as_test_target(LauncherBrokerWriteScopeTests broker common)
+    target_compile_definitions(LauncherBrokerWriteScopeTests PRIVATE LAUNCH_AS_TESTING)
+    add_test(NAME launcher.broker_write_scope
+        COMMAND "$<TARGET_FILE:LauncherBrokerWriteScopeTests>")
+    set_tests_properties(launcher.broker_write_scope PROPERTIES LABELS "broker;integration"
+        TIMEOUT 60)
+
+    add_executable(LauncherBrokerWriteScopeProbe tests/BrokerWriteScopeProbe.cpp)
+    configure_launch_as_test_target(LauncherBrokerWriteScopeProbe common)
+    target_link_libraries(LauncherBrokerWriteScopeProbe PRIVATE launch_as::common Advapi32 Bcrypt Ole32)
 
     add_executable(LauncherBrokerAuditTests
         tests/BrokerAuditTests.cpp

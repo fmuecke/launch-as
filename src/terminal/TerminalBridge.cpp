@@ -39,6 +39,7 @@ struct PipeSecurityDescriptor final
 {
     SECURITY_DESCRIPTOR value {};
     UniqueLocalMemory dacl;
+    UniqueLocalMemory lowLabel;
 
     [[nodiscard]] PSECURITY_DESCRIPTOR get() noexcept { return &value; }
 };
@@ -49,8 +50,8 @@ enum class PipeDirection
     ParentReads
 };
 
-[[nodiscard]] bool CreatePipeSecurityDescriptor(
-    std::wstring_view childSid, PipeSecurityDescriptor& descriptor, std::wstring& error)
+[[nodiscard]] bool CreatePipeSecurityDescriptor(std::wstring_view childSid,
+    PipeSecurityDescriptor& descriptor, std::wstring& error, bool lowIntegrity)
 {
     HANDLE rawToken = nullptr;
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &rawToken))
@@ -157,6 +158,29 @@ enum class PipeDirection
         return false;
     }
     descriptor.dacl = std::move(dacl);
+    if (lowIntegrity)
+    {
+        PSECURITY_DESCRIPTOR labelDescriptor = nullptr;
+        if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                L"S:(ML;;NW;;;LW)", SDDL_REVISION_1, &labelDescriptor, nullptr))
+        {
+            const DWORD labelError = GetLastError();
+            error = L"Could not create Low terminal-pipe label: " + FormatWindowsError(labelError);
+            return false;
+        }
+        descriptor.lowLabel.reset(labelDescriptor);
+        PACL label = nullptr;
+        BOOL present = FALSE;
+        BOOL defaulted = FALSE;
+        if (!GetSecurityDescriptorSacl(labelDescriptor, &present, &label, &defaulted) ||
+            !SetSecurityDescriptorSacl(descriptor.get(), TRUE, label, FALSE))
+        {
+            const DWORD labelError = GetLastError();
+            error =
+                L"Could not configure Low terminal-pipe label: " + FormatWindowsError(labelError);
+            return false;
+        }
+    }
     return true;
 }
 
@@ -285,8 +309,8 @@ enum class PipeDirection
 
 TerminalBridge::~TerminalBridge() { Stop(); }
 
-bool TerminalBridge::InitializeForBroker(
-    std::wstring_view childSid, TerminalPipeNames& pipeNames, std::wstring& error)
+bool TerminalBridge::InitializeForBroker(std::wstring_view childSid, TerminalPipeNames& pipeNames,
+    std::wstring& error, bool lowIntegrity)
 {
     pipeNames = {};
     parentInput_ = GetStdHandle(STD_INPUT_HANDLE);
@@ -307,7 +331,7 @@ bool TerminalBridge::InitializeForBroker(
         return false;
     }
     PipeSecurityDescriptor pipeSecurity;
-    if (!CreatePipeSecurityDescriptor(childSid, pipeSecurity, error))
+    if (!CreatePipeSecurityDescriptor(childSid, pipeSecurity, error, lowIntegrity))
     {
         return false;
     }

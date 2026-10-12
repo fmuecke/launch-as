@@ -36,11 +36,11 @@ class BrokerControlConnection final
 [[nodiscard]] DWORD LaunchBrokerInteractive(std::wstring_view profileId,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
     std::wstring_view leasePipe, std::wstring_view nonce, BrokerControlConnection& connection,
-    DWORD& processId);
+    DWORD& processId, bool restrictWrites = false, bool lowIntegrity = false);
 [[nodiscard]] DWORD LaunchBrokerConsole(std::wstring_view profileId,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
     const TerminalPipeNames& pipes, bool inheritCursor, BrokerControlConnection& connection,
-    DWORD& processId);
+    DWORD& processId, bool restrictWrites = false, bool lowIntegrity = false);
 [[nodiscard]] DWORD WaitForBrokerConsoleExit(
     BrokerControlConnection& connection, DWORD& exitCode, std::wstring& diagnostics);
 

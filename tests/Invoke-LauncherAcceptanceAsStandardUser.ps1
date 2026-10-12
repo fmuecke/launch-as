@@ -133,6 +133,10 @@ namespace LaunchAs
         -CallerWindowProcessId $windowProcess.Id `
         -ReportRoot (Split-Path -Parent $ResultPath)
 
+    & (Join-Path $PSScriptRoot 'Invoke-BrokerWriteScopeAcceptanceTest.ps1') `
+        -Account $TargetUser -LauncherPath $launcherPath `
+        -ReportRoot (Split-Path -Parent $ResultPath)
+
     $result = @(
         'PASS'
         "Interactive acceptance passed from .\$ExpectedCaller for .\$TargetUser in Windows Sandbox."

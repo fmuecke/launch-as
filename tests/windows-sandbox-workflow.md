@@ -72,6 +72,12 @@ Acceptance covers the scripted console and normal-completion GUI cases; the rema
 interactive cases are listed in [Build and test](../README.md#build-and-test). The
 feasibility probe does not replace installed-service acceptance.
 
+Acceptance also exercises all combinations of `--restrict-writes` and `--low-integrity`
+through the installed broker in console and interactive modes: requested integrity and
+restricting SIDs, profile/working-tree writes, Medium outside-file denial for Low launches
+(including hard-link and junction aliases), outside writes for Medium launches, normal reads,
+cryptographic initialization, `whoami`, PowerShell, and descendant inheritance.
+
 For changed runner behavior, add a focused regression and inspect the parameters/CMake
 registrations of the relevant contracts:
 

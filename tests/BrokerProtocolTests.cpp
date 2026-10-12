@@ -87,6 +87,37 @@ constexpr wchar_t InteractiveLeaseLogonSid[] = L"S-1-5-5-123-456";
 int wmain()
 {
     launch_as::broker::BrokerRequest request;
+    std::string scopedRequest(ValidRequest);
+    scopedRequest.insert(scopedRequest.rfind('}'), ",\"restrictWrites\":true");
+    if (!Expect(launch_as::broker::ParseBrokerRequest(scopedRequest, request) ==
+                        launch_as::broker::ParseResult::Success &&
+                    request.restrictWrites,
+            L"Write restriction was not decoded."))
+    {
+        return 1;
+    }
+    for (const auto* field :
+        {",\"restrictWrites\":true,\"restrictWrites\":false",
+            ",\"restrictWrites\":\"true\"",
+            ",\"restrictWrites\":null"})
+    {
+        std::string invalid(ValidRequest);
+        invalid.insert(invalid.rfind('}'), field);
+        if (!Expect(launch_as::broker::ParseBrokerRequest(invalid, request) ==
+                        launch_as::broker::ParseResult::InvalidRequest,
+                L"Malformed or repeated write restriction was accepted."))
+        {
+            return 1;
+        }
+    }
+    std::string scopedManagement(ListRequest);
+    scopedManagement.insert(scopedManagement.rfind('}'), ",\"restrictWrites\":false");
+    if (!Expect(launch_as::broker::ParseBrokerRequest(scopedManagement, request) ==
+                    launch_as::broker::ParseResult::InvalidRequest,
+            L"Management accepted a launch-only restriction."))
+    {
+        return 1;
+    }
     if (!Expect(launch_as::broker::ParseBrokerRequest(ValidRequest, request) ==
                     launch_as::broker::ParseResult::Success,
             L"Valid console request was rejected.") ||
@@ -95,6 +126,90 @@ int wmain()
             L"Unicode argument was not decoded.") ||
         !Expect(request.console.inheritCursor, L"Cursor-inheritance capability was not decoded.") ||
         !Expect(request.profileId == L"LaunchAsUser", L"Profile id was not decoded."))
+    {
+        return 1;
+    }
+    if (!Expect(!request.restrictWrites && !request.lowIntegrity,
+            L"Legacy launches enabled restrictions."))
+    {
+        return 1;
+    }
+    const std::array scopeArguments {std::wstring(L"C:\\Windows\\System32\\cmd.exe")};
+    std::string encodedScope;
+    for (const bool restrictWrites : {false, true})
+    {
+        for (const bool lowIntegrity : {false, true})
+        {
+            if (!Expect(launch_as::broker::BuildConsoleLaunchRequest(
+                            L"123e4567-e89b-12d3-a456-426614174000",
+                            L"LaunchAsUser",
+                            scopeArguments,
+                            L"C:\\repo",
+                            L"\\\\.\\pipe\\launch-as-scope-in",
+                            L"\\\\.\\pipe\\launch-as-scope-out",
+                            L"\\\\.\\pipe\\launch-as-scope-resize",
+                            false,
+                            encodedScope,
+                            restrictWrites,
+                            lowIntegrity) &&
+                            launch_as::broker::ParseBrokerRequest(encodedScope, request) ==
+                                launch_as::broker::ParseResult::Success &&
+                            request.restrictWrites == restrictWrites &&
+                            request.lowIntegrity == lowIntegrity,
+                    L"Console builder coupled independent launch flags.") ||
+                !Expect(launch_as::broker::BuildInteractiveLaunchRequest(
+                            L"123e4567-e89b-12d3-a456-426614174000",
+                            L"LaunchAsUser",
+                            scopeArguments,
+                            L"C:\\repo",
+                            L"\\\\.\\pipe\\launch-as-interactive-123e4567e89b12d3a456426614174000",
+                            InteractiveLeaseNonce,
+                            encodedScope,
+                            restrictWrites,
+                            lowIntegrity) &&
+                            launch_as::broker::ParseBrokerRequest(encodedScope, request) ==
+                                launch_as::broker::ParseResult::Success &&
+                            request.restrictWrites == restrictWrites &&
+                            request.lowIntegrity == lowIntegrity,
+                    L"Interactive builder coupled independent launch flags."))
+            {
+                return 1;
+            }
+        }
+    }
+    for (const auto* field :
+        {",\"lowIntegrity\":true,\"lowIntegrity\":false",
+            ",\"lowIntegrity\":\"true\"",
+            ",\"lowIntegrity\":null",
+            ",\"lowIntegrity\":1"})
+    {
+        std::string invalid(ValidRequest);
+        invalid.insert(invalid.rfind('}'), field);
+        if (!Expect(launch_as::broker::ParseBrokerRequest(invalid, request) ==
+                        launch_as::broker::ParseResult::InvalidRequest,
+                L"Malformed or repeated Low integrity was accepted."))
+        {
+            return 1;
+        }
+    }
+    for (const auto* management : {ListRequest, ForgetRequest})
+    {
+        std::string invalid(management);
+        invalid.insert(invalid.rfind('}'), ",\"lowIntegrity\":false");
+        if (!Expect(launch_as::broker::ParseBrokerRequest(invalid, request) ==
+                        launch_as::broker::ParseResult::InvalidRequest,
+                L"Management accepted a launch-only integrity flag."))
+        {
+            return 1;
+        }
+    }
+    std::string explicitFalse(ValidRequest);
+    explicitFalse.insert(
+        explicitFalse.rfind('}'), ",\"restrictWrites\":false,\"lowIntegrity\":false");
+    if (!Expect(launch_as::broker::ParseBrokerRequest(explicitFalse, request) ==
+                        launch_as::broker::ParseResult::Success &&
+                    !request.restrictWrites && !request.lowIntegrity,
+            L"Explicit false launch flags did not remain disabled."))
     {
         return 1;
     }

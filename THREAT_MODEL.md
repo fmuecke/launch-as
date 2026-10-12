@@ -28,6 +28,18 @@ AppContainer, filesystem allow-list, network isolation, or isolation between wor
 one managed account. The privileged broker is part of the trusted computing base: a broker
 compromise can compromise the host.
 
+The optional `--restrict-writes` flag adds a write-restricted token, including the target user,
+logon SID, and Everyone for Windows runtime compatibility. It leaves integrity unchanged and
+permits writes wherever those SIDs have write access; it does not confine writes to two trees.
+The independent `--low-integrity` flag lowers integrity to Low. Both flags can be combined.
+With `--low-integrity`, the broker prepares Low labels on the managed account's profile and
+working tree while impersonating that account, without granting new DACL
+rights. Labels persist; inaccessible existing children and links are skipped. Preparation rejects
+system roots and fails if either selected root cannot be labelled or verified. This is a label
+boundary, not a path allowlist: other writable Low objects, previously prepared directories,
+remote shares, and deputies remain outside the two-tree claim. Unconfined programs of the same
+account must not later execute workload-controlled profile content.
+
 **Assessment status:** the original assessment was source-based, with deployment assumptions and
 open validation items below. The interactive-path update passed the 44-test host suite plus one
 fresh installed-service end-to-end Windows Sandbox acceptance through the public CLI. That run

@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+- Added: Independent `--restrict-writes` and `--low-integrity` flags for console and interactive launches. The former adds restricting SIDs without lowering integrity; the latter lowers integrity to Low. Descendants inherit the controls; reads follow normal ACLs.
+- Security: `--low-integrity` labels the profile and working tree using the account's permissions. Labels persist and may be partially applied on failure. This is not a directory allowlist: other writable Low objects remain accessible; remote shares, network access, and services acting on the workload's behalf are outside this control. `--restrict-writes` alone permits writes granted to its restricting SIDs elsewhere.
+- Tests: Added option/protocol and write-scope tests, plus installed-broker Windows Sandbox acceptance for both launch modes, runtime compatibility, and descendants.
+
 ## [1.3.0] - 2026-09-21
 
 - Fixed: Resizing the terminal no longer duplicates or overwrites earlier output (visible with

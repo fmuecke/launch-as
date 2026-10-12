@@ -22,6 +22,8 @@ add_library(launch_as_broker_core STATIC
     InteractiveDesktopLeaseClient.h
     BrokerLogonToken.cpp
     BrokerLogonToken.h
+    BrokerWriteScope.cpp
+    BrokerWriteScope.h
     BrokerPassword.cpp
     BrokerPassword.h
     BrokerPipeServer.cpp

@@ -27,8 +27,8 @@ class TerminalBridge final
     TerminalBridge(TerminalBridge&&) = delete;
     TerminalBridge& operator=(TerminalBridge&&) = delete;
 
-    [[nodiscard]] bool InitializeForBroker(
-        std::wstring_view childSid, TerminalPipeNames& pipeNames, std::wstring& error);
+    [[nodiscard]] bool InitializeForBroker(std::wstring_view childSid, TerminalPipeNames& pipeNames,
+        std::wstring& error, bool lowIntegrity = false);
     [[nodiscard]] bool ConnectBrokerChild(std::wstring& error);
     [[nodiscard]] bool Start(std::wstring& error);
     [[nodiscard]] DWORD WaitForOutput(DWORD& waitError) const noexcept;

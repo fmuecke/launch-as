@@ -677,13 +677,21 @@ namespace
 bool BuildConsoleLaunchRequest(std::wstring_view requestId, std::wstring_view profileId,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
     std::wstring_view pipeIn, std::wstring_view pipeOut, std::wstring_view pipeResize,
-    bool inheritCursor, std::string& request)
+    bool inheritCursor, std::string& request, bool restrictWrites, bool lowIntegrity)
 {
     if (pipeIn.empty() || pipeOut.empty() || pipeResize.empty() || !IsValidUtf16(pipeIn) ||
         !IsValidUtf16(pipeOut) || !IsValidUtf16(pipeResize) ||
         !BeginLaunchRequest(requestId, profileId, "console", arguments, workingDirectory, request))
     {
         return false;
+    }
+    if (restrictWrites)
+    {
+        request += ",\"restrictWrites\":true";
+    }
+    if (lowIntegrity)
+    {
+        request += ",\"lowIntegrity\":true";
     }
     request += ",\"console\":{\"pipeIn\":";
     AppendJsonString(request, pipeIn);
@@ -698,13 +706,22 @@ bool BuildConsoleLaunchRequest(std::wstring_view requestId, std::wstring_view pr
 
 bool BuildInteractiveLaunchRequest(std::wstring_view requestId, std::wstring_view profileId,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
-    std::wstring_view leasePipe, std::wstring_view nonce, std::string& request)
+    std::wstring_view leasePipe, std::wstring_view nonce, std::string& request, bool restrictWrites,
+    bool lowIntegrity)
 {
     if (leasePipe.empty() || nonce.empty() || !IsValidUtf16(leasePipe) || !IsValidUtf16(nonce) ||
         !BeginLaunchRequest(
             requestId, profileId, "interactive", arguments, workingDirectory, request))
     {
         return false;
+    }
+    if (restrictWrites)
+    {
+        request += ",\"restrictWrites\":true";
+    }
+    if (lowIntegrity)
+    {
+        request += ",\"lowIntegrity\":true";
     }
     request += ",\"interactive\":{\"leasePipe\":";
     AppendJsonString(request, leasePipe);
@@ -741,6 +758,8 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
     bool console = false;
     bool interactive = false;
     bool force = false;
+    bool restrictWrites = false;
+    bool lowIntegrity = false;
     const bool parsed = ReadObject(reader,
         [&](std::wstring_view name)
         {
@@ -800,6 +819,14 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
             {
                 return FirstSeen(force) && reader.Boolean(request.force);
             }
+            if (name == L"restrictWrites")
+            {
+                return FirstSeen(restrictWrites) && reader.Boolean(request.restrictWrites);
+            }
+            if (name == L"lowIntegrity")
+            {
+                return FirstSeen(lowIntegrity) && reader.Boolean(request.lowIntegrity);
+            }
             return false;
         });
     if (!parsed || !reader.End() || !version || !requestId || !operation)
@@ -808,7 +835,8 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
     }
     if (operationName == L"list")
     {
-        if (profile || mode || arguments || workingDirectory || console || interactive || force)
+        if (profile || mode || arguments || workingDirectory || console || interactive || force ||
+            restrictWrites || lowIntegrity)
         {
             return ParseResult::InvalidRequest;
         }
@@ -822,7 +850,8 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
     if (operationName == L"create" || operationName == L"takeover" || operationName == L"forget" ||
         operationName == L"delete")
     {
-        if (mode || arguments || workingDirectory || console || interactive)
+        if (mode || arguments || workingDirectory || console || interactive || restrictWrites ||
+            lowIntegrity)
         {
             return ParseResult::InvalidRequest;
         }

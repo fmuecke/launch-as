@@ -28,6 +28,8 @@ struct Options
     std::filesystem::path executablePath;
     std::vector<std::wstring> processArguments;
     SessionMode sessionMode = SessionMode::Console;
+    bool restrictWrites = false;
+    bool lowIntegrity = false;
 };
 
 void PrintUsage();

@@ -134,6 +134,36 @@ The launcher holds a temporary ACL lease for the target's unique logon SID on th
 releases that lease. Interactive mode deliberately shares the caller's UI surface; use console mode
 or a separate RDP, Windows Sandbox, or VM session for workloads that must not access that surface.
 
+Console and interactive launches support two independent flags:
+
+- `--restrict-writes` adds a `WRITE_RESTRICTED` token with the target user, its independent
+  logon SID, and Everyone as restricting SIDs. Everyone keeps common Windows tools working.
+  Integrity stays Medium; these SIDs can still permit writes outside the profile and working tree.
+- `--low-integrity` lowers token integrity to Low without adding restricting SIDs.
+
+Use both for a Low-integrity, write-restricted token. Descendants inherit the controls;
+reads follow normal ACLs.
+
+With `--low-integrity`, the broker labels the profile and working tree Low using the target
+account's permissions. Accessible existing children are relabelled; new files and directories
+inherit Low. Medium items normally need Full Control for relabelling; already-Low items retain
+normal ACL requirements. Launch fails if either root cannot be prepared. Locked or inaccessible
+children, reparse points, and files with multiple hard links remain unchanged and may be read-only.
+Volume roots, Windows, Program Files, ProgramData, and the common Users directory are rejected.
+Labels persist after exit and may be partially applied on failure.
+Preparation permits at most 128 levels below either root and 100,000 examined objects across
+both trees. It checks a shared 30-second deadline between objects and directory batches;
+pending filesystem calls cannot be interrupted. Exceeding a depth or object limit fails the
+launch with `ERROR_NOT_ENOUGH_QUOTA`; deadline expiry returns `ERROR_TIMEOUT`. Already-applied
+labels persist on these failures too.
+
+Low integrity limits writes to Low-labelled objects whose ACLs permit access. With both flags,
+writes must also pass the restricting-SID check. This is not a two-directory allowlist: previously labelled
+trees and other writable Low locations remain accessible. SMB shares, filesystems without
+integrity enforcement, network access, and services acting on the workload's behalf are outside
+this control. Never run unrelated programs unconfined as the managed account: they could execute
+content changed in its writable profile.
+
 ## Build and test
 
 The source build requires Visual Studio/MSVC, a Windows SDK, CMake 3.25+, PowerShell, `ninja`, and

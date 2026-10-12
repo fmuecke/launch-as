@@ -4,6 +4,7 @@
 
 #include "BrokerProcessLauncher.h"
 
+#include "BrokerWriteScope.h"
 #include "InteractiveDesktopLeaseClient.h"
 #include "PseudoConsoleHostReport.h"
 #include "Utf8.h"
@@ -819,7 +820,7 @@ DWORD ResolveBrokerWorkingDirectory(
 DWORD BrokerChildProcess::CreateSuspendedInJob(HANDLE token, std::wstring_view accountName,
     const std::wstring& executable, std::vector<wchar_t>& commandLine,
     const std::wstring& directory, BOOL inheritHandles, DWORD creationFlags,
-    STARTUPINFOW& startupInfo)
+    STARTUPINFOW& startupInfo, bool restrictWrites, bool lowIntegrity)
 {
     // Declaration order is cleanup order on failure: terminate the process before unloading the
     // profile it was created with.
@@ -835,8 +836,39 @@ DWORD BrokerChildProcess::CreateSuspendedInJob(HANDLE token, std::wstring_view a
     {
         return environmentError;
     }
+    UniqueHandle scopedToken;
+    if (restrictWrites || lowIntegrity)
+    {
+        const DWORD tokenError =
+            CreateBrokerLaunchToken(token, restrictWrites, lowIntegrity, scopedToken);
+        if (tokenError != ERROR_SUCCESS)
+        {
+            return tokenError;
+        }
+    }
+    if (lowIntegrity)
+    {
+        DWORD profileCharacters = 0;
+        GetUserProfileDirectoryW(token, nullptr, &profileCharacters);
+        const DWORD profileSizeError = GetLastError();
+        if (profileSizeError != ERROR_INSUFFICIENT_BUFFER || profileCharacters == 0)
+        {
+            return profileSizeError;
+        }
+        std::vector<wchar_t> profileDirectory(profileCharacters);
+        if (!GetUserProfileDirectoryW(token, profileDirectory.data(), &profileCharacters))
+        {
+            return GetLastError();
+        }
+        const DWORD preparationError =
+            PrepareBrokerWriteScope(token, profileDirectory.data(), directory);
+        if (preparationError != ERROR_SUCCESS)
+        {
+            return preparationError;
+        }
+    }
     SuspendedProcess process;
-    if (!CreateProcessAsUserW(token,
+    if (!CreateProcessAsUserW(scopedToken ? scopedToken.get() : token,
             executable.c_str(),
             commandLine.data(),
             nullptr,
@@ -878,7 +910,7 @@ DWORD BrokerChildProcess::CreateSuspendedInJob(HANDLE token, std::wstring_view a
 
 DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
-    BrokerChildProcess& child)
+    BrokerChildProcess& child, bool restrictWrites, bool lowIntegrity)
 {
     if (token == nullptr || accountName.empty() || arguments.empty() || arguments.front().empty() ||
         workingDirectory.empty())
@@ -966,7 +998,9 @@ DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,
             directory,
             TRUE,
             CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
-            startupInfo.StartupInfo);
+            startupInfo.StartupInfo,
+            restrictWrites,
+            lowIntegrity);
         if (processError != ERROR_SUCCESS)
         {
             return processError;
@@ -986,7 +1020,7 @@ DWORD LaunchBrokerInteractiveProcess(HANDLE token, std::wstring_view accountName
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
     DWORD targetSessionId, std::wstring_view leasePipeName, std::wstring_view leaseNonce,
     const std::vector<BYTE>& callerLogonSid, BrokerChildProcess& child,
-    InteractiveDesktopLeaseConnection& lease)
+    InteractiveDesktopLeaseConnection& lease, bool restrictWrites, bool lowIntegrity)
 {
     child.Reset();
     lease.Reset();
@@ -1056,8 +1090,16 @@ DWORD LaunchBrokerInteractiveProcess(HANDLE token, std::wstring_view accountName
     STARTUPINFOW startupInfo {};
     startupInfo.cb = sizeof(startupInfo);
     startupInfo.lpDesktop = desktopName.data();
-    const DWORD processError = child.CreateSuspendedInJob(
-        token, accountName, executable, mutableCommandLine, directory, FALSE, 0, startupInfo);
+    const DWORD processError = child.CreateSuspendedInJob(token,
+        accountName,
+        executable,
+        mutableCommandLine,
+        directory,
+        FALSE,
+        0,
+        startupInfo,
+        restrictWrites,
+        lowIntegrity);
     if (processError != ERROR_SUCCESS)
     {
         child.Reset();

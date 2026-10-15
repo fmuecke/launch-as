@@ -307,6 +307,7 @@ if(BUILD_TESTING)
         src/common/FileSystemAccess.cpp
         src/broker/BrokerReadScope.cpp
         src/broker/BrokerWriteScope.cpp
+        src/broker/BrokerLogonToken.cpp
         src/broker/BrokerProcessLauncher.cpp
         src/broker/BrokerProcessLauncher.h
         src/broker/InteractiveDesktopLeaseClient.cpp
@@ -341,6 +342,7 @@ if(BUILD_TESTING)
         src/common/FileSystemAccess.cpp
         src/broker/BrokerReadScope.cpp
         src/broker/BrokerWriteScope.cpp
+        src/broker/BrokerLogonToken.cpp
         src/protocol/BrokerControlPipe.cpp
         src/protocol/BrokerControlPipe.h
         src/broker/BrokerProcessLauncher.cpp
@@ -727,6 +729,7 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
         tests/BrokerProcessLauncherTests.cpp
         src/broker/BrokerReadScope.cpp
         src/broker/BrokerWriteScope.cpp
+        src/broker/BrokerLogonToken.cpp
         src/broker/BrokerProcessLauncher.cpp
         src/broker/BrokerProcessLauncher.h
         src/broker/InteractiveDesktopLeaseClient.cpp
@@ -756,6 +759,7 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
     add_executable(LauncherBrokerWriteScopeTests
         tests/BrokerWriteScopeTests.cpp
         src/broker/BrokerWriteScope.cpp
+        src/broker/BrokerLogonToken.cpp
     )
     target_link_libraries(LauncherBrokerWriteScopeTests PRIVATE launch_as::common Advapi32 Ole32)
     configure_launch_as_test_target(LauncherBrokerWriteScopeTests broker common)
@@ -777,7 +781,7 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
     target_link_options(LauncherBrokerReadScopeInteractiveProbe PRIVATE /ENTRY:wmainCRTStartup)
 
     add_executable(LauncherBrokerReadScopeTests tests/BrokerReadScopeTests.cpp
-        src/broker/BrokerReadScope.cpp src/broker/BrokerWriteScope.cpp)
+        src/broker/BrokerReadScope.cpp src/broker/BrokerLogonToken.cpp)
     configure_launch_as_test_target(LauncherBrokerReadScopeTests broker common)
     target_compile_definitions(LauncherBrokerReadScopeTests PRIVATE LAUNCH_AS_TESTING)
     target_link_libraries(LauncherBrokerReadScopeTests PRIVATE launch_as::common Advapi32 Shell32 Ole32)

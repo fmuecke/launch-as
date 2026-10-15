@@ -47,6 +47,9 @@ enumeration and are removed with the account scope.
 Owner-rights denies prevent the target from removing folder denies through implicit `WRITE_DAC` access.
 The broker pins modified objects, ensures denies on each launch, and removes its entries only
 after the account's last session tree exits. Mixed restricted/unrestricted sessions are rejected.
+Directory pins also prevent every user from renaming or deleting visited directories until
+restoration releases the handles. This host-wide sharing restriction includes allowed roots,
+their ancestors, and denied base folders; it prevents path replacement while ACLs are leased.
 This is a local path restriction: loose files in allowed-path ancestors, remote shares,
 unmounted volumes, file-ID opens, pre-opened handles, hard-link aliases in allowed trees,
 and services acting for the workload are outside it.

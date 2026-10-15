@@ -14,6 +14,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -44,14 +45,27 @@ class BrokerApplication final
             const std::wstring& left, const std::wstring& right) const noexcept;
     };
 
+    // Request routing has the same lifetime as the account scope, independently of any client.
+    struct ScopeLog
+    {
+        void Join(std::wstring_view requestId);
+        void Leave(std::wstring_view requestId);
+        void Record(std::wstring_view account, std::wstring_view action, std::wstring_view path,
+            DWORD error);
+
+        std::mutex mutex;
+        std::set<std::wstring> requests;
+        std::wstring lastRequest;
+    };
+
     struct AccountSessions
     {
         std::size_t count = 0;
         std::unique_ptr<BrokerReadScope> readScope;
+        std::shared_ptr<ScopeLog> log;
     };
-    [[nodiscard]] bool TryReserveSession(
-        std::wstring_view accountName, bool restrictAccess, BrokerReadScope*& readScope);
-    [[nodiscard]] DWORD ReleaseSession(std::wstring_view accountName);
+    [[nodiscard]] bool TryReserveSession(const BrokerRequest& request, BrokerReadScope*& readScope);
+    [[nodiscard]] DWORD ReleaseSession(const BrokerRequest& request);
     [[nodiscard]] bool HasActiveSession(std::wstring_view accountName);
 
     std::vector<BYTE> authorizedCallerSid_;

@@ -17,8 +17,6 @@ namespace launch_as::broker
 // Depth/object limits return ERROR_NOT_ENOUGH_QUOTA; the shared deadline returns ERROR_TIMEOUT.
 [[nodiscard]] DWORD PrepareBrokerWriteScope(
     HANDLE token, std::wstring_view profileDirectory, std::wstring_view workingDirectory);
-[[nodiscard]] DWORD CreateBrokerLaunchToken(
-    HANDLE token, bool restrictAccess, bool lowIntegrity, UniqueHandle& launchToken);
 
 #ifdef LAUNCH_AS_TESTING
 [[nodiscard]] DWORD PrepareBrokerWriteScopeWithLimitsForTesting(HANDLE token,

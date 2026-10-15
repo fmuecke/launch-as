@@ -5,6 +5,7 @@
 #pragma once
 
 #include "BrokerPassword.h"
+#include "Win32Support.h"
 
 #include <Windows.h>
 #include <string_view>
@@ -33,5 +34,7 @@ class BrokerLogonToken final
 [[nodiscard]] DWORD GetBrokerAccountSid(std::wstring_view accountName, std::vector<BYTE>& sid);
 [[nodiscard]] DWORD LogOnBrokerAccount(std::wstring_view accountName,
     const SecurePassword& password, BrokerLogonToken& token, bool restrictAccess = false);
+[[nodiscard]] DWORD CreateBrokerLaunchToken(
+    HANDLE token, bool restrictAccess, bool lowIntegrity, UniqueHandle& launchToken);
 
 } // namespace launch_as::broker

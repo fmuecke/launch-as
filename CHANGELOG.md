@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Fixed: Shared-scope diagnostics follow active logged requests, so a failed or closing launch cannot take final restoration out of another session's text log.
+- Clarified: Directory pins prevent rename/deletion by every user until scope restoration; added focused coverage for pin lifetime.
 - Added: `--log` appends launch steps and read-scope deny/exclusion decisions to the caller's `%LOCALAPPDATA%\launch-as\launch-as.log`. Broker diagnostics also use the Application event log (`launch-as-broker`, event ID 7).
 - Added: `--restrict-access` for console and interactive launches. It adds a write-restricted token, ensures temporary account-SID denies on each launch, and removes them after the account's last session tree exits. Concurrent restricted sessions share their working directories. `--low-integrity` remains independently available. Read restriction skips empty optical/removable drives reporting "not ready"; other volume and ACL failures still reject launch. Inserted media is considered at the next launch.
 - Security: Read restriction changes only folder DACLs. Tokens lose traversal bypass so base-folder denies also block protected children through ordinary paths. File-ID opens bypass these denies; loose ancestor files and allowed system trees retain normal ACLs. New base folders and mounts need another launch. Remote shares, unmounted volumes, existing handles, and hard-link aliases in allowed trees remain outside this path restriction. Abrupt broker termination can leave temporary denies behind.

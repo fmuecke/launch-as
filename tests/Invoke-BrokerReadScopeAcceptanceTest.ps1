@@ -264,6 +264,54 @@ try {
         if (-not $failedText.Contains("action=$action")) { throw "The failed-launch log omitted $action." }
     }
     if ($failedText -match 'action=client\.log_') { throw 'The failed-launch log reported a collection failure.' }
+
+    # A failed logged launch must not take restoration diagnostics away from a live logger.
+    # Close the second logger first, then attempt a failing launch while the first stays live.
+    $clients = @()
+    foreach ($work in $works) {
+        foreach ($name in @('release.txt', 'ready.txt', 'descendant-passed.txt')) {
+            Remove-Item -LiteralPath (Join-Path $work $name) -Force -ErrorAction SilentlyContinue
+        }
+        $probe = Join-Path $work 'LauncherBrokerReadScopeInteractiveProbe.exe'
+        $integrity = if ($clients.Count -eq 0) { 'medium' } else { 'low' }
+        $flags = @('--restrict-access', '--log')
+        if ($integrity -eq 'low') { $flags += '--low-integrity' }
+        $arguments = @('--user', $Account, '--mode', 'interactive') + $flags + @(
+            '--working-directory', $work, '--', $probe, $work, $outside, $integrity, 'access', 'hold')
+        $client = Start-Process -FilePath $LauncherPath -ArgumentList (
+            $arguments | ForEach-Object { '"{0}"' -f $_ }) -NoNewWindow -PassThru `
+            -RedirectStandardOutput (Join-Path $work 'client.stdout.log') `
+            -RedirectStandardError (Join-Path $work 'client.stderr.log')
+        $null = $client.Handle
+        $clients += $client
+        Wait-ReadScopeCondition {
+            if ($client.HasExited) { throw 'The overlapping logged session exited before readiness.' }
+            Test-Path -LiteralPath (Join-Path $work 'ready.txt')
+        } 'overlapping logged-session readiness'
+    }
+    $firstEvent = Get-WinEvent -FilterHashtable @{ LogName = 'Application';
+        ProviderName = 'launch-as-broker'; Id = 7 } -MaxEvents 2000 | Where-Object {
+            $fields = @($_.Properties | ForEach-Object Value)
+            $fields -contains 'action=launch.begin' -and $fields -contains "path=$($works[0])"
+        } | Select-Object -First 1
+    $firstRequest = @($firstEvent.Properties | ForEach-Object Value |
+        Where-Object { $_ -like 'requestId=*' })[0]
+    Set-Content -LiteralPath (Join-Path $works[1] 'release.txt') -Value 'release'
+    if (-not $clients[1].WaitForExit(30000) -or $clients[1].ExitCode -ne 0) {
+        throw 'The second logged session did not close successfully.'
+    }
+    Invoke-FailedReadScopeLaunch $invalid -Log
+    Set-Content -LiteralPath (Join-Path $works[0] 'release.txt') -Value 'release'
+    if (-not $clients[0].WaitForExit(30000) -or $clients[0].ExitCode -ne 0) {
+        throw 'The final logged session did not close successfully.'
+    }
+    $firstText = @(Get-Content -LiteralPath $logPath -Encoding UTF8 |
+        Where-Object { $_.Contains($firstRequest) })
+    if (@($firstText | Where-Object { $_.Contains('action=read.restore') }).Count -eq 0 -or
+        @($firstText | Where-Object { $_ -match 'action=client\.log_' }).Count -gt 0) {
+        throw 'A closing or failed logger took the final session restoration out of its text log.'
+    }
+    Wait-ReadScopeCondition { -not (Has-ReadScopeDeny) } 'logged shared-scope restoration'
     Write-Host 'Read-scope and text-log acceptance passed'
 }
 catch {

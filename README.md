@@ -157,6 +157,10 @@ Read restriction uses one shared scope per account. Working directories accumula
 the last session and its descendants close; then the broker removes its temporary ACEs,
 preserving unrelated ACL entries. Restricted and unrestricted sessions cannot overlap for
 the same account. Other processes using that account can also be affected by the ACLs.
+The broker also holds directory handles until restoration to prevent replacement races.
+These pins block rename and deletion of visited directories for every user, including
+allowed roots, their ancestors, and denied base folders. Children inside allowed trees
+are ordinarily unpinned. Closing the account's last session releases the pins.
 Interactive launches temporarily grant the account traversal through Windows session
 namespace directories, allowing runtime startup without restoring filesystem traversal bypass.
 Mounted filesystems must support persistent ACLs. Launch fails if the scope cannot be prepared.
@@ -179,6 +183,9 @@ diagnostics when the launch attempt returns and when its session closes. Entries
 request ID, account, path, and Win32 result; command arguments and credentials are omitted.
 The broker also retains these diagnostics in **Windows Event Log → Application**, source
 `launch-as-broker`, event ID **7**. Shared-scope tracing there stays enabled until final restoration.
+Scope decisions are copied under each active logged request's ID. Closing or failed requests
+stop receiving them. Final restoration reaches the text log when a logged session closes
+the scope; if only unlogged sessions remain, later decisions stay in Event Log.
 Read the text log with:
 
 ```powershell

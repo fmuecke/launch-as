@@ -24,6 +24,8 @@ void SetBrokerReadScopeVolumeProbeForTesting(
 // until its last session closes. Filesystem changes touch only folder DACLs; native Windows
 // namespace ancestors receive temporary traversal grants. Denies are non-inheritable;
 // launch tokens must check traversal. File-ID opens and loose ancestor files are not restricted.
+// Retained no-delete-sharing handles prevent replacement races. They also block rename/deletion
+// of visited directories for all users until final restoration releases the pins.
 class BrokerReadScope final
 {
   public:

@@ -4,6 +4,7 @@
 
 #include "BrokerProcessLauncher.h"
 
+#include "BrokerLogonToken.h"
 #include "BrokerReadScope.h"
 #include "BrokerWriteScope.h"
 #include "InteractiveDesktopLeaseClient.h"

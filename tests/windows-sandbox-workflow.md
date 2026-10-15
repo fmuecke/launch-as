@@ -88,6 +88,10 @@ only an existing disabled working-set privilege for runtime compatibility.
 Logged console and GUI launches also verify the caller's UTF-8 text log, folder decisions,
 request IDs, teardown entries, and duplicate prevention. Unlogged launches leave that file
 unchanged. The runner retains the tested file as `launch-as.log` in its GUID directory.
+Overlapping logged sessions close in reverse order, followed by a failed logged launch;
+the final active logger must still collect restoration under its own request ID.
+The host read-scope test also verifies that directory pins block DELETE handles even on
+an allowed root and release them after restoration.
 
 For changed runner behavior, add a focused regression and inspect the parameters/CMake
 registrations of the relevant contracts:

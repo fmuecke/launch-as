@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Project: https://github.com/fmuecke/launch-as
 
+#include "BrokerLogonToken.h"
 #include "BrokerReadScope.h"
-#include "BrokerWriteScope.h"
 #include "FileSystemAccess.h"
 #include "TestSupport.h"
 
@@ -122,6 +122,45 @@ bool TestEnumerationLimits(HANDLE token)
                  L"Read-scope preparation continued after its deadline.") &&
              passed;
     return passed;
+}
+
+bool TestDirectoryPins(HANDLE token)
+{
+    test::TemporaryDirectory temporary;
+    const auto volume = temporary.path() / L"volume";
+    const auto profile = volume / L"profile";
+    const auto work = volume / L"work";
+    std::filesystem::create_directories(profile);
+    std::filesystem::create_directories(work);
+    if (!Expect(CanOpen(work, DELETE), L"The pin fixture must initially permit deletion."))
+    {
+        return false;
+    }
+    BrokerReadScope scope;
+    const std::array volumes {volume.native()};
+    if (!Expect(scope.EnsureForTesting(token, volumes, {}, profile.native(), work.native()) ==
+                    ERROR_SUCCESS,
+            L"Could not prepare the directory-pin fixture."))
+    {
+        return false;
+    }
+    // The work root receives no deny. Its pin still blocks DELETE handles for every caller,
+    // including an ordinary token with traversal bypass and full DACL access to this folder.
+    UniqueHandle deleting(CreateFileW(work.c_str(),
+        DELETE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS,
+        nullptr));
+    const DWORD error = deleting ? ERROR_SUCCESS : GetLastError();
+    const bool pinned = Expect(error == ERROR_SHARING_VIOLATION,
+        L"A live scope must pin allowed roots against rename and deletion regardless of ACLs.");
+    deleting.reset();
+    return Expect(scope.Restore() == ERROR_SUCCESS && CanOpen(work, DELETE) &&
+                      RemoveDirectoryW(work.c_str()),
+               L"Final scope restoration did not release the directory pin.") &&
+           pinned;
 }
 
 bool TestVolumePreparationRetry(HANDLE token)
@@ -316,7 +355,8 @@ int wmain()
         return 1;
     }
     UniqueHandle token(rawToken);
-    if (!TestEnumerationLimits(token.get()) || !TestVolumePreparationRetry(token.get()))
+    if (!TestEnumerationLimits(token.get()) || !TestDirectoryPins(token.get()) ||
+        !TestVolumePreparationRetry(token.get()))
     {
         return 1;
     }

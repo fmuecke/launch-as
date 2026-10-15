@@ -327,8 +327,8 @@ DWORD GetBrokerAccountSid(std::wstring_view accountName, std::vector<BYTE>& sid)
     return LookupLocalUserSid(accountName, sid);
 }
 
-DWORD LogOnBrokerAccount(
-    std::wstring_view accountName, const SecurePassword& password, BrokerLogonToken& token)
+DWORD LogOnBrokerAccount(std::wstring_view accountName, const SecurePassword& password,
+    BrokerLogonToken& token, bool restrictAccess)
 {
     token.Reset();
     if (accountName.empty() || password.characters().empty())
@@ -378,15 +378,26 @@ DWORD LogOnBrokerAccount(
         token.Reset();
         return tokenPrivilegeError;
     }
-
-    HANDLE restrictedToken = nullptr;
-    const DWORD restrictionError = RestrictToken(token.get(), restrictedToken);
-    if (restrictionError != ERROR_SUCCESS)
+    const DWORD sourceIntegrityError = ValidateMediumIntegrityLevel(token.get());
+    if (sourceIntegrityError != ERROR_SUCCESS)
     {
         token.Reset();
-        return restrictionError;
+        return sourceIntegrityError;
     }
-    token.Reset(restrictedToken);
+
+    // Read launches prepare their scoped token at child creation. Do not discard the
+    // existing working-set privilege here before that compatibility token is built.
+    if (!restrictAccess)
+    {
+        HANDLE restrictedToken = nullptr;
+        const DWORD restrictionError = RestrictToken(token.get(), restrictedToken);
+        if (restrictionError != ERROR_SUCCESS)
+        {
+            token.Reset();
+            return restrictionError;
+        }
+        token.Reset(restrictedToken);
+    }
 
     const DWORD restrictedTokenUserError = ValidateTokenUser(token.get(), expectedSid);
     if (restrictedTokenUserError != ERROR_SUCCESS)

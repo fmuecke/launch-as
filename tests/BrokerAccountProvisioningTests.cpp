@@ -443,12 +443,20 @@ int wmain()
             ? launch_as::broker::LogOnBrokerAccount(
                   privilegedAccount.name(), privilegedPassword, privilegedToken)
             : privilegedResetError;
+    const DWORD privilegedReadLogonError =
+        privilegedResetError == ERROR_SUCCESS
+            ? launch_as::broker::LogOnBrokerAccount(
+                  privilegedAccount.name(), privilegedPassword, privilegedToken, true)
+            : privilegedResetError;
     privilegedPassword.Clear();
     static_cast<void>(SetBackupPrivilege(privilegedAccountSid.data(), false));
     if (!Expect(privilegedResetError == ERROR_SUCCESS,
             L"Could not reset the password for the disposable SeBackupPrivilege account.") ||
         !Expect(privilegedLogonError == ERROR_ACCESS_DENIED && !static_cast<bool>(privilegedToken),
-            L"Broker minted a usable token for an account holding SeBackupPrivilege."))
+            L"Broker minted a usable token for an account holding SeBackupPrivilege.") ||
+        !Expect(
+            privilegedReadLogonError == ERROR_ACCESS_DENIED && !static_cast<bool>(privilegedToken),
+            L"Read-mode preparation bypassed the account privilege gate."))
     {
         std::wcerr << L"Privileged logon status: " << privilegedLogonError << L"\n";
         return 1;

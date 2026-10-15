@@ -2,9 +2,12 @@
 
 ## [Unreleased]
 
-- Added: Independent `--restrict-writes` and `--low-integrity` flags for console and interactive launches. The former adds restricting SIDs without lowering integrity; the latter lowers integrity to Low. Descendants inherit the controls; reads follow normal ACLs.
-- Security: `--low-integrity` labels the profile and working tree using the account's permissions. Labels persist and may be partially applied on failure. This is not a directory allowlist: other writable Low objects remain accessible; remote shares, network access, and services acting on the workload's behalf are outside this control. `--restrict-writes` alone permits writes granted to its restricting SIDs elsewhere.
-- Tests: Added option/protocol and write-scope tests, plus installed-broker Windows Sandbox acceptance for both launch modes, runtime compatibility, and descendants.
+- Added: `--log` appends launch steps and read-scope deny/exclusion decisions to the caller's `%LOCALAPPDATA%\launch-as\launch-as.log`. Broker diagnostics also use the Application event log (`launch-as-broker`, event ID 7).
+- Added: `--restrict-access` for console and interactive launches. It adds a write-restricted token, ensures temporary account-SID denies on each launch, and removes them after the account's last session tree exits. Concurrent restricted sessions share their working directories. `--low-integrity` remains independently available. Read restriction skips empty optical/removable drives reporting "not ready"; other volume and ACL failures still reject launch. Inserted media is considered at the next launch.
+- Security: Read restriction changes only folder DACLs. Tokens lose traversal bypass so base-folder denies also block protected children through ordinary paths. File-ID opens bypass these denies; loose ancestor files and allowed system trees retain normal ACLs. New base folders and mounts need another launch. Remote shares, unmounted volumes, existing handles, and hard-link aliases in allowed trees remain outside this path restriction. Abrupt broker termination can leave temporary denies behind.
+- Security: `--low-integrity` labels the profile and working tree using the account's permissions. Labels persist and may be partially applied on failure. This is not a directory allowlist: other writable Low objects remain accessible; remote shares, network access, and services acting on the workload's behalf are outside this control. Access restriction still permits writes granted to its restricting SIDs within accessible paths.
+- Fixed: Read-scope enumeration counts loose files against its work budget and checks its deadline during enumeration, bounding preparation work between filesystem calls even in large ancestor folders.
+- Tests: Added option/protocol and read/write-scope tests, plus installed-broker Windows Sandbox acceptance for both launch modes, runtime compatibility, descendants, shared-scope lifetime, and failed-launch restoration.
 
 ## [1.3.0] - 2026-09-21
 

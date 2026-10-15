@@ -677,7 +677,7 @@ namespace
 bool BuildConsoleLaunchRequest(std::wstring_view requestId, std::wstring_view profileId,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
     std::wstring_view pipeIn, std::wstring_view pipeOut, std::wstring_view pipeResize,
-    bool inheritCursor, std::string& request, bool restrictWrites, bool lowIntegrity)
+    bool inheritCursor, std::string& request, bool restrictAccess, bool lowIntegrity, bool log)
 {
     if (pipeIn.empty() || pipeOut.empty() || pipeResize.empty() || !IsValidUtf16(pipeIn) ||
         !IsValidUtf16(pipeOut) || !IsValidUtf16(pipeResize) ||
@@ -685,9 +685,13 @@ bool BuildConsoleLaunchRequest(std::wstring_view requestId, std::wstring_view pr
     {
         return false;
     }
-    if (restrictWrites)
+    if (log)
     {
-        request += ",\"restrictWrites\":true";
+        request += ",\"log\":true";
+    }
+    if (restrictAccess)
+    {
+        request += ",\"restrictAccess\":true";
     }
     if (lowIntegrity)
     {
@@ -706,8 +710,8 @@ bool BuildConsoleLaunchRequest(std::wstring_view requestId, std::wstring_view pr
 
 bool BuildInteractiveLaunchRequest(std::wstring_view requestId, std::wstring_view profileId,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
-    std::wstring_view leasePipe, std::wstring_view nonce, std::string& request, bool restrictWrites,
-    bool lowIntegrity)
+    std::wstring_view leasePipe, std::wstring_view nonce, std::string& request, bool restrictAccess,
+    bool lowIntegrity, bool log)
 {
     if (leasePipe.empty() || nonce.empty() || !IsValidUtf16(leasePipe) || !IsValidUtf16(nonce) ||
         !BeginLaunchRequest(
@@ -715,9 +719,13 @@ bool BuildInteractiveLaunchRequest(std::wstring_view requestId, std::wstring_vie
     {
         return false;
     }
-    if (restrictWrites)
+    if (log)
     {
-        request += ",\"restrictWrites\":true";
+        request += ",\"log\":true";
+    }
+    if (restrictAccess)
+    {
+        request += ",\"restrictAccess\":true";
     }
     if (lowIntegrity)
     {
@@ -758,8 +766,9 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
     bool console = false;
     bool interactive = false;
     bool force = false;
-    bool restrictWrites = false;
+    bool restrictAccess = false;
     bool lowIntegrity = false;
+    bool log = false;
     const bool parsed = ReadObject(reader,
         [&](std::wstring_view name)
         {
@@ -819,13 +828,17 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
             {
                 return FirstSeen(force) && reader.Boolean(request.force);
             }
-            if (name == L"restrictWrites")
+            if (name == L"restrictAccess")
             {
-                return FirstSeen(restrictWrites) && reader.Boolean(request.restrictWrites);
+                return FirstSeen(restrictAccess) && reader.Boolean(request.restrictAccess);
             }
             if (name == L"lowIntegrity")
             {
                 return FirstSeen(lowIntegrity) && reader.Boolean(request.lowIntegrity);
+            }
+            if (name == L"log")
+            {
+                return FirstSeen(log) && reader.Boolean(request.log);
             }
             return false;
         });
@@ -836,7 +849,7 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
     if (operationName == L"list")
     {
         if (profile || mode || arguments || workingDirectory || console || interactive || force ||
-            restrictWrites || lowIntegrity)
+            restrictAccess || lowIntegrity || log)
         {
             return ParseResult::InvalidRequest;
         }
@@ -850,8 +863,8 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
     if (operationName == L"create" || operationName == L"takeover" || operationName == L"forget" ||
         operationName == L"delete")
     {
-        if (mode || arguments || workingDirectory || console || interactive || restrictWrites ||
-            lowIntegrity)
+        if (mode || arguments || workingDirectory || console || interactive || restrictAccess ||
+            lowIntegrity || log)
         {
             return ParseResult::InvalidRequest;
         }

@@ -72,11 +72,22 @@ Acceptance covers the scripted console and normal-completion GUI cases; the rema
 interactive cases are listed in [Build and test](../README.md#build-and-test). The
 feasibility probe does not replace installed-service acceptance.
 
-Acceptance also exercises all combinations of `--restrict-writes` and `--low-integrity`
-through the installed broker in console and interactive modes: requested integrity and
-restricting SIDs, profile/working-tree writes, Medium outside-file denial for Low launches
-(including hard-link and junction aliases), outside writes for Medium launches, normal reads,
-cryptographic initialization, `whoami`, PowerShell, and descendant inheritance.
+Write-scope acceptance exercises the independent `--low-integrity` flag with and without
+Low integrity in console and interactive modes: profile/working-tree writes, Medium
+outside-file denial for Low launches (including hard-link and junction aliases), outside
+writes for Medium launches, normal reads, cryptographic initialization, `whoami`, PowerShell,
+and descendant inheritance.
+
+Access restriction (`--restrict-access`) is tested with and without `--low-integrity` in
+console and interactive modes. Read-scope acceptance covers descendant
+inheritance, protected-child and junction denial, profile/worktree writes, two concurrent
+interactive sessions with different working directories, mixed-mode rejection, restoration
+after the last close, and failed-launch restoration. It runs only in the disposable guest.
+Read-restricted identity checks query the native token and run `whoami`. The token retains
+only an existing disabled working-set privilege for runtime compatibility.
+Logged console and GUI launches also verify the caller's UTF-8 text log, folder decisions,
+request IDs, teardown entries, and duplicate prevention. Unlogged launches leave that file
+unchanged. The runner retains the tested file as `launch-as.log` in its GUID directory.
 
 For changed runner behavior, add a focused regression and inspect the parameters/CMake
 registrations of the relevant contracts:

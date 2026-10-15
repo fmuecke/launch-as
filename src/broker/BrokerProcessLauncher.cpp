@@ -4,6 +4,7 @@
 
 #include "BrokerProcessLauncher.h"
 
+#include "BrokerReadScope.h"
 #include "BrokerWriteScope.h"
 #include "InteractiveDesktopLeaseClient.h"
 #include "PseudoConsoleHostReport.h"
@@ -820,7 +821,7 @@ DWORD ResolveBrokerWorkingDirectory(
 DWORD BrokerChildProcess::CreateSuspendedInJob(HANDLE token, std::wstring_view accountName,
     const std::wstring& executable, std::vector<wchar_t>& commandLine,
     const std::wstring& directory, BOOL inheritHandles, DWORD creationFlags,
-    STARTUPINFOW& startupInfo, bool restrictWrites, bool lowIntegrity)
+    STARTUPINFOW& startupInfo, bool lowIntegrity, BrokerReadScope* readScope)
 {
     // Declaration order is cleanup order on failure: terminate the process before unloading the
     // profile it was created with.
@@ -837,16 +838,16 @@ DWORD BrokerChildProcess::CreateSuspendedInJob(HANDLE token, std::wstring_view a
         return environmentError;
     }
     UniqueHandle scopedToken;
-    if (restrictWrites || lowIntegrity)
+    if (lowIntegrity || readScope != nullptr)
     {
         const DWORD tokenError =
-            CreateBrokerLaunchToken(token, restrictWrites, lowIntegrity, scopedToken);
+            CreateBrokerLaunchToken(token, readScope != nullptr, lowIntegrity, scopedToken);
         if (tokenError != ERROR_SUCCESS)
         {
             return tokenError;
         }
     }
-    if (lowIntegrity)
+    if (lowIntegrity || readScope != nullptr)
     {
         DWORD profileCharacters = 0;
         GetUserProfileDirectoryW(token, nullptr, &profileCharacters);
@@ -860,11 +861,23 @@ DWORD BrokerChildProcess::CreateSuspendedInJob(HANDLE token, std::wstring_view a
         {
             return GetLastError();
         }
-        const DWORD preparationError =
-            PrepareBrokerWriteScope(token, profileDirectory.data(), directory);
-        if (preparationError != ERROR_SUCCESS)
+        if (readScope != nullptr)
         {
-            return preparationError;
+            // A prior session can have denied this newly selected working directory.
+            // Make it accessible before preparing Low labels as the account.
+            const DWORD error = readScope->Ensure(token, profileDirectory.data(), directory);
+            if (error != ERROR_SUCCESS)
+            {
+                return error;
+            }
+        }
+        if (lowIntegrity)
+        {
+            const DWORD error = PrepareBrokerWriteScope(token, profileDirectory.data(), directory);
+            if (error != ERROR_SUCCESS)
+            {
+                return error;
+            }
         }
     }
     SuspendedProcess process;
@@ -910,7 +923,7 @@ DWORD BrokerChildProcess::CreateSuspendedInJob(HANDLE token, std::wstring_view a
 
 DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
-    BrokerChildProcess& child, bool restrictWrites, bool lowIntegrity)
+    BrokerChildProcess& child, bool lowIntegrity, BrokerReadScope* readScope)
 {
     if (token == nullptr || accountName.empty() || arguments.empty() || arguments.front().empty() ||
         workingDirectory.empty())
@@ -999,8 +1012,8 @@ DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,
             TRUE,
             CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
             startupInfo.StartupInfo,
-            restrictWrites,
-            lowIntegrity);
+            lowIntegrity,
+            readScope);
         if (processError != ERROR_SUCCESS)
         {
             return processError;
@@ -1020,7 +1033,7 @@ DWORD LaunchBrokerInteractiveProcess(HANDLE token, std::wstring_view accountName
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
     DWORD targetSessionId, std::wstring_view leasePipeName, std::wstring_view leaseNonce,
     const std::vector<BYTE>& callerLogonSid, BrokerChildProcess& child,
-    InteractiveDesktopLeaseConnection& lease, bool restrictWrites, bool lowIntegrity)
+    InteractiveDesktopLeaseConnection& lease, bool lowIntegrity, BrokerReadScope* readScope)
 {
     child.Reset();
     lease.Reset();
@@ -1098,8 +1111,8 @@ DWORD LaunchBrokerInteractiveProcess(HANDLE token, std::wstring_view accountName
         FALSE,
         0,
         startupInfo,
-        restrictWrites,
-        lowIntegrity);
+        lowIntegrity,
+        readScope);
     if (processError != ERROR_SUCCESS)
     {
         child.Reset();

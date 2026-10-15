@@ -134,15 +134,56 @@ The launcher holds a temporary ACL lease for the target's unique logon SID on th
 releases that lease. Interactive mode deliberately shares the caller's UI surface; use console mode
 or a separate RDP, Windows Sandbox, or VM session for workloads that must not access that surface.
 
-Console and interactive launches support two independent flags:
+Console and interactive launches support these controls:
 
-- `--restrict-writes` adds a `WRITE_RESTRICTED` token with the target user, its independent
+- `--restrict-access` adds a `WRITE_RESTRICTED` token with the target user, its independent
   logon SID, and Everyone as restricting SIDs. Everyone keeps common Windows tools working.
-  Integrity stays Medium; these SIDs can still permit writes outside the profile and working tree.
-- `--low-integrity` lowers token integrity to Low without adding restricting SIDs.
+  It also restricts reads through temporary folder denies. Normal read access remains available
+  to Windows, Program Files, Program Files (x86), the target profile, and working directories.
+  On each launch the broker ensures explicit account-SID denies on other existing base
+  folders of mounted local volumes and on sibling folders along the allowed paths.
+  It ensures traversal through allowed roots and their ancestors without granting new write rights.
+  It changes only folder DACLs, without propagating ACEs or editing individual file DACLs.
+  It removes traversal bypass from the launch token, so protected child ACLs cannot bypass
+  a base deny through ordinary paths.
+  No new write permissions are granted; profile and working-directory writes retain normal
+  ACL requirements.
 
-Use both for a Low-integrity, write-restricted token. Descendants inherit the controls;
-reads follow normal ACLs.
+- `--low-integrity` independently lowers token integrity to Low. Combine it with
+  `--restrict-access` for both controls. Descendants inherit the token controls. Without
+  `--restrict-access`, reads follow normal ACLs.
+
+Read restriction uses one shared scope per account. Working directories accumulate until
+the last session and its descendants close; then the broker removes its temporary ACEs,
+preserving unrelated ACL entries. Restricted and unrestricted sessions cannot overlap for
+the same account. Other processes using that account can also be affected by the ACLs.
+Interactive launches temporarily grant the account traversal through Windows session
+namespace directories, allowing runtime startup without restoring filesystem traversal bypass.
+Mounted filesystems must support persistent ACLs. Launch fails if the scope cannot be prepared.
+Empty optical and removable drives reporting "not ready" are skipped. Media inserted during
+a session is outside the restriction until another launch; loaded filesystems still need ACL support.
+Restoration failures are audited and prevent scope reuse until restoration succeeds.
+Abrupt broker termination can leave denies in place. New base folders and mounted volumes
+are covered only by the next launch. Loose files in allowed-path ancestors, including drive
+roots, retain normal access. File-ID opens bypass folder denies; remote shares, unmounted
+volumes, previously opened handles, and hard-link aliases in allowed trees are also outside
+this path restriction. Allowed system trees retain their normal ACLs and the existing
+write-restricted-token behavior; this does not make them uniformly read-only.
+The token retains only the account's existing working-set privilege, disabled, for tools
+such as `whoami`; traversal bypass and all other privileges are removed.
+
+Add `--log` to append launch steps, folders selected for deny, folders excluded from deny,
+traversal-only ancestors, skipped empty drives, and ACL restoration to
+`%LOCALAPPDATA%\launch-as\launch-as.log` for the caller. The client collects the broker's
+diagnostics when the launch attempt returns and when its session closes. Entries include the
+request ID, account, path, and Win32 result; command arguments and credentials are omitted.
+The broker also retains these diagnostics in **Windows Event Log → Application**, source
+`launch-as-broker`, event ID **7**. Shared-scope tracing there stays enabled until final restoration.
+Read the text log with:
+
+```powershell
+Get-Content "$env:LOCALAPPDATA\launch-as\launch-as.log" -Tail 100
+```
 
 With `--low-integrity`, the broker labels the profile and working tree Low using the target
 account's permissions. Accessible existing children are relabelled; new files and directories

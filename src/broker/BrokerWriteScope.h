@@ -18,7 +18,7 @@ namespace launch_as::broker
 [[nodiscard]] DWORD PrepareBrokerWriteScope(
     HANDLE token, std::wstring_view profileDirectory, std::wstring_view workingDirectory);
 [[nodiscard]] DWORD CreateBrokerLaunchToken(
-    HANDLE token, bool restrictWrites, bool lowIntegrity, UniqueHandle& launchToken);
+    HANDLE token, bool restrictAccess, bool lowIntegrity, UniqueHandle& launchToken);
 
 #ifdef LAUNCH_AS_TESTING
 [[nodiscard]] DWORD PrepareBrokerWriteScopeWithLimitsForTesting(HANDLE token,

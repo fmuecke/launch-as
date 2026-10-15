@@ -13,6 +13,8 @@ add_library(launch_as_launcher_core STATIC
     LauncherOptions.h
     LaunchProcess.cpp
     LaunchProcess.h
+    LaunchLog.cpp
+    LaunchLog.h
 )
 add_library(launch_as::launcher ALIAS launch_as_launcher_core)
 
@@ -23,6 +25,9 @@ target_link_libraries(launch_as_launcher_core
     PRIVATE
         Advapi32
         User32
+        Shell32
+        Ole32
+        Wevtapi
         launch_as::protocol
         launch_as::terminal
 )

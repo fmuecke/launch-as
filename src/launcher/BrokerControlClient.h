@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "LaunchLog.h"
 #include "TerminalEndpoints.h"
 #include "Win32Support.h"
 
@@ -19,6 +20,7 @@ class BrokerControlConnection final
 {
   public:
     BrokerControlConnection() = default;
+    ~BrokerControlConnection();
 
     BrokerControlConnection(const BrokerControlConnection&) = delete;
     BrokerControlConnection& operator=(const BrokerControlConnection&) = delete;
@@ -27,20 +29,22 @@ class BrokerControlConnection final
     [[nodiscard]] std::wstring_view requestId() const noexcept;
     void SetRequestId(std::wstring value);
     void Reset(HANDLE pipe = nullptr) noexcept;
+    [[nodiscard]] LaunchLog& log() noexcept { return log_; }
 
   private:
     UniqueHandle pipe_;
     std::wstring requestId_;
+    LaunchLog log_;
 };
 
 [[nodiscard]] DWORD LaunchBrokerInteractive(std::wstring_view profileId,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
     std::wstring_view leasePipe, std::wstring_view nonce, BrokerControlConnection& connection,
-    DWORD& processId, bool restrictWrites = false, bool lowIntegrity = false);
+    DWORD& processId, bool restrictAccess = false, bool lowIntegrity = false, bool log = false);
 [[nodiscard]] DWORD LaunchBrokerConsole(std::wstring_view profileId,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
     const TerminalPipeNames& pipes, bool inheritCursor, BrokerControlConnection& connection,
-    DWORD& processId, bool restrictWrites = false, bool lowIntegrity = false);
+    DWORD& processId, bool restrictAccess = false, bool lowIntegrity = false, bool log = false);
 [[nodiscard]] DWORD WaitForBrokerConsoleExit(
     BrokerControlConnection& connection, DWORD& exitCode, std::wstring& diagnostics);
 

@@ -4,12 +4,13 @@
 
 #include "BrokerWriteScope.h"
 
+#include "FileSystemAccess.h"
+
 #include <Aclapi.h>
 #include <array>
 #include <filesystem>
 #include <sddl.h>
 #include <vector>
-#include <winternl.h>
 
 namespace launch_as::broker
 {
@@ -169,61 +170,6 @@ DWORD HasLowLabel(HANDLE object, bool directory, bool& low)
     return ERROR_SUCCESS;
 }
 
-DWORD OpenRelative(HANDLE parent, std::wstring_view name, DWORD access, UniqueHandle& object)
-{
-    // Exactly one component: no intermediate path can traverse a newly introduced junction.
-    if (name.empty() || name == L"." || name == L".." ||
-        name.find_first_of(L"\\/:") != std::wstring_view::npos || name.size() > 32'767)
-    {
-        return ERROR_BAD_PATHNAME;
-    }
-    const auto ntdll = GetModuleHandleW(L"ntdll.dll");
-    if (ntdll == nullptr)
-    {
-        return GetLastError();
-    }
-    const auto createFile =
-        reinterpret_cast<decltype(&NtCreateFile)>(GetProcAddress(ntdll, "NtCreateFile"));
-    if (createFile == nullptr)
-    {
-        return GetLastError();
-    }
-    const auto statusToError = reinterpret_cast<decltype(&RtlNtStatusToDosError)>(
-        GetProcAddress(ntdll, "RtlNtStatusToDosError"));
-    if (statusToError == nullptr)
-    {
-        return GetLastError();
-    }
-    UNICODE_STRING component {};
-    component.Length = static_cast<USHORT>(name.size() * sizeof(wchar_t));
-    component.MaximumLength = component.Length;
-    component.Buffer = const_cast<PWSTR>(name.data());
-    OBJECT_ATTRIBUTES attributes {};
-    attributes.Length = sizeof(attributes);
-    attributes.RootDirectory = parent;
-    attributes.ObjectName = &component;
-    // Preserve the enumerated spelling, including in case-sensitive directories.
-    IO_STATUS_BLOCK statusBlock {};
-    HANDLE rawObject = nullptr;
-    const NTSTATUS status = createFile(&rawObject,
-        access | SYNCHRONIZE,
-        &attributes,
-        &statusBlock,
-        nullptr,
-        0,
-        FILE_SHARE_READ | FILE_SHARE_WRITE,
-        FILE_OPEN,
-        FILE_OPEN_REPARSE_POINT | FILE_OPEN_FOR_BACKUP_INTENT | FILE_SYNCHRONOUS_IO_NONALERT,
-        nullptr,
-        0);
-    if (status < 0)
-    {
-        return statusToError(status);
-    }
-    object.reset(rawObject);
-    return ERROR_SUCCESS;
-}
-
 bool IsUnavailableChildError(DWORD error)
 {
     return error == ERROR_ACCESS_DENIED || error == ERROR_SHARING_VIOLATION ||
@@ -244,7 +190,8 @@ DWORD LabelTree(HANDLE parent, std::wstring_view name, PACL label, bool root, DW
     }
     // Pin each object against rename/replacement, and never resolve its ancestors by path.
     UniqueHandle object;
-    const DWORD openError = OpenRelative(parent, name, READ_CONTROL | FILE_READ_ATTRIBUTES, object);
+    const DWORD openError =
+        OpenRelativeFile(parent, name, READ_CONTROL | FILE_READ_ATTRIBUTES, object);
     if (openError != ERROR_SUCCESS)
     {
         // Skip unavailable children, including entries removed since enumeration.
@@ -293,21 +240,15 @@ DWORD LabelTree(HANDLE parent, std::wstring_view name, PACL label, bool root, DW
     }
     if (!low)
     {
-        // MAXIMUM_ALLOWED suppresses SetSecurityInfo's automatic inheritance propagation.
-        // Label each pinned object explicitly so links cannot relabel targets outside the tree.
+        // Metadata-only access is compatible with the read scope's no-delete sharing pins.
+        // The native setter labels this object without propagating through links or children.
         UniqueHandle writable;
-        const DWORD writeError = OpenRelative(parent, name, MAXIMUM_ALLOWED, writable);
+        const DWORD writeError = OpenRelativeFile(parent, name, WRITE_OWNER, writable);
         if (writeError != ERROR_SUCCESS)
         {
             return !root && IsUnavailableChildError(writeError) ? ERROR_SUCCESS : writeError;
         }
-        error = SetSecurityInfo(writable.get(),
-            SE_FILE_OBJECT,
-            LABEL_SECURITY_INFORMATION,
-            nullptr,
-            nullptr,
-            nullptr,
-            label);
+        error = SetObjectLabel(writable.get(), label);
         if (error != ERROR_SUCCESS)
         {
             return !root && IsUnavailableChildError(error) ? ERROR_SUCCESS : error;
@@ -330,7 +271,7 @@ DWORD LabelTree(HANDLE parent, std::wstring_view name, PACL label, bool root, DW
 #endif
     // A reparse update does not redirect enumeration of an already-open directory object.
     UniqueHandle entries;
-    const DWORD enumerationOpenError = OpenRelative(parent, name, FILE_LIST_DIRECTORY, entries);
+    const DWORD enumerationOpenError = OpenRelativeFile(parent, name, FILE_LIST_DIRECTORY, entries);
     if (enumerationOpenError != ERROR_SUCCESS)
     {
         return !root && IsUnavailableChildError(enumerationOpenError) ? ERROR_SUCCESS
@@ -425,8 +366,8 @@ DWORD LabelRoot(std::wstring_view directory, PACL label, WriteScopeBudget& budge
             return ancestorTimeError;
         }
         UniqueHandle handle;
-        const DWORD openError =
-            OpenRelative(ancestors.back().get(), component.native(), FILE_READ_ATTRIBUTES, handle);
+        const DWORD openError = OpenRelativeFile(
+            ancestors.back().get(), component.native(), FILE_READ_ATTRIBUTES, handle);
         if (openError != ERROR_SUCCESS)
         {
             return openError;
@@ -509,7 +450,7 @@ DWORD PrepareBrokerWriteScope(
 
 namespace
 {
-DWORD CreateWriteRestrictedToken(HANDLE token, UniqueHandle& restrictedToken)
+DWORD CreateAccessRestrictedToken(HANDLE token, UniqueHandle& restrictedToken)
 {
     restrictedToken.reset();
     std::vector<BYTE> userBuffer;
@@ -549,13 +490,39 @@ DWORD CreateWriteRestrictedToken(HANDLE token, UniqueHandle& restrictedToken)
         return GetLastError();
     }
     restricting.push_back({everyone.data(), 0});
+    std::vector<LUID_AND_ATTRIBUTES> removePrivileges;
+    {
+        // Keep an existing working-set privilege for tools such as whoami, which fail with
+        // an empty privilege list. It will be disabled and cannot bypass file ACLs.
+        LUID workingSet {};
+        if (!LookupPrivilegeValueW(nullptr, SE_INC_WORKING_SET_NAME, &workingSet))
+        {
+            return GetLastError();
+        }
+        std::vector<BYTE> privileges;
+        error = QueryTokenInformation(token, TokenPrivileges, privileges);
+        if (error != ERROR_SUCCESS)
+        {
+            return error;
+        }
+        const auto* values = reinterpret_cast<const TOKEN_PRIVILEGES*>(privileges.data());
+        for (DWORD index = 0; index < values->PrivilegeCount; ++index)
+        {
+            const auto& value = values->Privileges[index];
+            if (value.Luid.LowPart != workingSet.LowPart ||
+                value.Luid.HighPart != workingSet.HighPart)
+            {
+                removePrivileges.push_back(value);
+            }
+        }
+    }
     HANDLE rawToken = nullptr;
     if (!CreateRestrictedToken(token,
-            DISABLE_MAX_PRIVILEGE | WRITE_RESTRICTED,
+            WRITE_RESTRICTED,
             0,
             nullptr,
-            0,
-            nullptr,
+            static_cast<DWORD>(removePrivileges.size()),
+            removePrivileges.data(),
             static_cast<DWORD>(restricting.size()),
             restricting.data(),
             &rawToken))
@@ -598,13 +565,13 @@ DWORD CreateWriteRestrictedToken(HANDLE token, UniqueHandle& restrictedToken)
 } // namespace
 
 DWORD CreateBrokerLaunchToken(
-    HANDLE token, bool restrictWrites, bool lowIntegrity, UniqueHandle& launchToken)
+    HANDLE token, bool restrictAccess, bool lowIntegrity, UniqueHandle& launchToken)
 {
     launchToken.reset();
     UniqueHandle prepared;
-    if (restrictWrites)
+    if (restrictAccess)
     {
-        const DWORD error = CreateWriteRestrictedToken(token, prepared);
+        const DWORD error = CreateAccessRestrictedToken(token, prepared);
         if (error != ERROR_SUCCESS)
         {
             return error;
@@ -619,6 +586,20 @@ DWORD CreateBrokerLaunchToken(
             return GetLastError();
         }
         prepared.reset(rawToken);
+    }
+    if (restrictAccess)
+    {
+        // The traversal privilege was permanently removed by CreateRestrictedToken.
+        // Disable the retained working-set privilege before launching the workload.
+        if (!AdjustTokenPrivileges(prepared.get(), TRUE, nullptr, 0, nullptr, nullptr))
+        {
+            return GetLastError();
+        }
+        const DWORD error = GetLastError();
+        if (error != ERROR_SUCCESS)
+        {
+            return error;
+        }
     }
     if (lowIntegrity)
     {

@@ -16,6 +16,7 @@ namespace launch_as::broker
 {
 
 class InteractiveDesktopLeaseConnection;
+class BrokerReadScope;
 
 class BrokerChildProcess final
 {
@@ -44,7 +45,7 @@ class BrokerChildProcess final
     [[nodiscard]] DWORD CreateSuspendedInJob(HANDLE token, std::wstring_view accountName,
         const std::wstring& executable, std::vector<wchar_t>& commandLine,
         const std::wstring& directory, BOOL inheritHandles, DWORD creationFlags,
-        STARTUPINFOW& startupInfo, bool restrictWrites, bool lowIntegrity);
+        STARTUPINFOW& startupInfo, bool lowIntegrity, BrokerReadScope* readScope);
 
     UniqueHandle job_;
     UniqueHandle process_;
@@ -57,12 +58,12 @@ class BrokerChildProcess final
     friend DWORD CreateBrokerJob(BrokerChildProcess& child);
     friend DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,
         std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
-        BrokerChildProcess& child, bool restrictWrites, bool lowIntegrity);
+        BrokerChildProcess& child, bool lowIntegrity, BrokerReadScope* readScope);
     friend DWORD LaunchBrokerInteractiveProcess(HANDLE token, std::wstring_view accountName,
         std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
         DWORD targetSessionId, std::wstring_view leasePipeName, std::wstring_view leaseNonce,
         const std::vector<BYTE>& callerLogonSid, BrokerChildProcess& child,
-        InteractiveDesktopLeaseConnection& lease, bool restrictWrites, bool lowIntegrity);
+        InteractiveDesktopLeaseConnection& lease, bool lowIntegrity, BrokerReadScope* readScope);
 #ifdef LAUNCH_AS_TESTING
     friend DWORD LaunchBrokerChildForTesting(std::wstring_view command, BrokerChildProcess& child);
     friend DWORD LaunchQuickBrokerChildForTesting(BrokerChildProcess& child);
@@ -74,13 +75,13 @@ class BrokerChildProcess final
     std::wstring_view workingDirectory, std::wstring& resolvedDirectory);
 [[nodiscard]] DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
-    BrokerChildProcess& child, bool restrictWrites = false, bool lowIntegrity = false);
+    BrokerChildProcess& child, bool lowIntegrity = false, BrokerReadScope* readScope = nullptr);
 [[nodiscard]] DWORD LaunchBrokerInteractiveProcess(HANDLE token, std::wstring_view accountName,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
     DWORD targetSessionId, std::wstring_view leasePipeName, std::wstring_view leaseNonce,
     const std::vector<BYTE>& callerLogonSid, BrokerChildProcess& child,
-    InteractiveDesktopLeaseConnection& lease, bool restrictWrites = false,
-    bool lowIntegrity = false);
+    InteractiveDesktopLeaseConnection& lease, bool lowIntegrity = false,
+    BrokerReadScope* readScope = nullptr);
 [[nodiscard]] DWORD GetTokenLogonSid(HANDLE token, std::vector<BYTE>& logonSid);
 [[nodiscard]] DWORD ValidateChildLogonSid(HANDLE process, const std::vector<BYTE>& callerLogonSid);
 [[nodiscard]] DWORD SetBrokerTokenSessionId(HANDLE token, DWORD sessionId);

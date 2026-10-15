@@ -22,15 +22,20 @@ void PrintUsage()
   launch-as.exe [run] --user <launch-as-user>
                       [--mode console|interactive]
                       [--working-directory <directory>]
-                      [--restrict-writes] [--low-integrity]
+                      [--restrict-access] [--low-integrity] [--log]
                       -- <absolute-executable> [arguments...]
 
   Starts a console session by default, or a GUI process on the caller's shared desktop in
   interactive mode, through launch-as-broker. Create or take over the account first with the
   elevated launch-as-admin command. The client never accepts or stores passwords.
-  --restrict-writes uses a write-restricted token without changing its integrity level.
+  --restrict-access uses a write-restricted token and temporarily denies other local folders.
+  Read access remains available to Windows, Program Files, the profile, and working directory.
+  Account ACLs are checked on each launch and restored when its last session closes.
+  Individual file DACLs stay unchanged; file-ID opens and loose ancestor files are unrestricted.
   --low-integrity lowers token integrity and persistently labels the target user's profile
-  and working directory Low, where account permissions allow. The flags are independent.
+  and working directory Low, where account permissions allow.
+  --log appends launch steps and folder deny/exclusion decisions to
+  %LOCALAPPDATA%\launch-as\launch-as.log for the caller.
 
 )usage";
     std::wcerr << std::endl;
@@ -61,13 +66,22 @@ std::optional<Options> ParseOptions(std::span<wchar_t*> arguments)
             }
             break;
         }
-        if (name == L"--restrict-writes")
+        if (name == L"--log")
         {
-            if (options.restrictWrites)
+            if (options.log)
             {
                 return std::nullopt;
             }
-            options.restrictWrites = true;
+            options.log = true;
+            continue;
+        }
+        if (name == L"--restrict-access")
+        {
+            if (options.restrictAccess)
+            {
+                return std::nullopt;
+            }
+            options.restrictAccess = true;
             continue;
         }
         if (name == L"--low-integrity")

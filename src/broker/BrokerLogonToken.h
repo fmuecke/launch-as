@@ -31,7 +31,7 @@ class BrokerLogonToken final
 };
 
 [[nodiscard]] DWORD GetBrokerAccountSid(std::wstring_view accountName, std::vector<BYTE>& sid);
-[[nodiscard]] DWORD LogOnBrokerAccount(
-    std::wstring_view accountName, const SecurePassword& password, BrokerLogonToken& token);
+[[nodiscard]] DWORD LogOnBrokerAccount(std::wstring_view accountName,
+    const SecurePassword& password, BrokerLogonToken& token, bool restrictAccess = false);
 
 } // namespace launch_as::broker

@@ -566,7 +566,8 @@ int wmain()
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
     HANDLE rawToken = nullptr;
     if (!OpenProcessToken(GetCurrentProcess(),
-            TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY | TOKEN_ADJUST_DEFAULT,
+            TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY | TOKEN_ADJUST_DEFAULT |
+                TOKEN_ADJUST_PRIVILEGES,
             &rawToken))
     {
         return 1;
@@ -582,7 +583,7 @@ int wmain()
     {
         return 1;
     }
-    for (const bool restrictWrites : {false, true})
+    for (const bool restrictAccess : {false, true})
     {
         for (const bool lowIntegrity : {false, true})
         {
@@ -591,7 +592,7 @@ int wmain()
             std::vector<BYTE> restricted;
             if (!Expect(
                     CreateBrokerLaunchToken(
-                        token.get(), restrictWrites, lowIntegrity, launchToken) == ERROR_SUCCESS,
+                        token.get(), restrictAccess, lowIntegrity, launchToken) == ERROR_SUCCESS,
                     L"Independent launch token creation failed.") ||
                 !Expect(
                     QueryTokenInformation(launchToken.get(), TokenIntegrityLevel, integrity) ==
@@ -603,7 +604,7 @@ int wmain()
                 !Expect(QueryTokenInformation(launchToken.get(), TokenRestrictedSids, restricted) ==
                                 ERROR_SUCCESS &&
                             (reinterpret_cast<TOKEN_GROUPS*>(restricted.data())->GroupCount != 0) ==
-                                restrictWrites,
+                                restrictAccess,
                     L"Launch token restricting SIDs did not match the requested flag."))
             {
                 return 1;

@@ -27,12 +27,13 @@ if (-not (Test-BrokerServiceInstalled)) {
 
 .\out\build\Release\launch-as.exe `
     --user LaunchAsUser `
-    --working-directory C:\dev\ `
+    --restrict-access `
+    --working-directory C:\AgentSandbox\ `
     -- C:\Windows\System32\cmd.exe /d /k
 
 .\out\build\Release\launch-as.exe `
     --mode interactive `
     --user LaunchAsUser `
-    --working-directory C:\dev\ `
+    --working-directory C:\AgentSandbox\ `
     -- C:\Windows\System32\notepad.exe    
 

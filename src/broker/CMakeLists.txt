@@ -24,6 +24,8 @@ add_library(launch_as_broker_core STATIC
     BrokerLogonToken.h
     BrokerWriteScope.cpp
     BrokerWriteScope.h
+    BrokerReadScope.cpp
+    BrokerReadScope.h
     BrokerPassword.cpp
     BrokerPassword.h
     BrokerPipeServer.cpp
@@ -44,4 +46,6 @@ target_link_libraries(launch_as_broker_core
         launch_as::protocol
     PRIVATE
         launch_as::common
+        Shell32
+        Ole32
 )

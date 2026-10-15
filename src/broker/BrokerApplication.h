@@ -6,11 +6,13 @@
 
 #include "BrokerCallerIdentity.h"
 #include "BrokerProtocol.h"
+#include "BrokerReadScope.h"
 #include "BrokerRegistration.h"
 #include "BrokerSession.h"
 
 #include <Windows.h>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -42,15 +44,21 @@ class BrokerApplication final
             const std::wstring& left, const std::wstring& right) const noexcept;
     };
 
-    [[nodiscard]] bool TryReserveSession(std::wstring_view accountName);
-    void ReleaseSession(std::wstring_view accountName);
+    struct AccountSessions
+    {
+        std::size_t count = 0;
+        std::unique_ptr<BrokerReadScope> readScope;
+    };
+    [[nodiscard]] bool TryReserveSession(
+        std::wstring_view accountName, bool restrictAccess, BrokerReadScope*& readScope);
+    [[nodiscard]] DWORD ReleaseSession(std::wstring_view accountName);
     [[nodiscard]] bool HasActiveSession(std::wstring_view accountName);
 
     std::vector<BYTE> authorizedCallerSid_;
     RegistrationService registration_;
     std::mutex launchMutex_;
     std::mutex sessionMutex_;
-    std::map<std::wstring, std::size_t, AccountNameLess> sessionsByAccount_;
+    std::map<std::wstring, AccountSessions, AccountNameLess> sessionsByAccount_;
     std::size_t sessionCount_ = 0;
 };
 

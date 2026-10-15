@@ -3,6 +3,8 @@
 # Project: https://github.com/fmuecke/launch-as
 
 add_library(launch_as_common STATIC
+    FileSystemAccess.cpp
+    FileSystemAccess.h
     ExitCodes.h
     LicenseHeader.cpp
     LicenseHeader.h

@@ -47,7 +47,8 @@ using LocalString = LocalAllocation<PWSTR>;
 }
 
 void AuditRequest(BrokerAuditEvent event, WORD type, const BrokerRequest& request,
-    const BrokerCallerIdentity& caller, DWORD result, DWORD processId = 0)
+    const BrokerCallerIdentity& caller, DWORD result, DWORD processId = 0,
+    std::wstring_view readScopePath = {})
 {
     const std::vector<std::wstring> fields {
         L"requestId=" + request.requestId,
@@ -55,13 +56,31 @@ void AuditRequest(BrokerAuditEvent event, WORD type, const BrokerRequest& reques
         AuditProfileId(L"account", request.profileId),
         L"callerSid=" + AuditCallerSid(caller),
         L"callerSession=" + std::to_wstring(caller.sessionId),
-        L"restrictWrites=" + std::wstring(request.restrictWrites ? L"true" : L"false"),
+        L"restrictAccess=" + std::wstring(request.restrictAccess ? L"true" : L"false"),
         L"lowIntegrity=" + std::wstring(request.lowIntegrity ? L"true" : L"false"),
+        L"log=" + std::wstring(request.log ? L"true" : L"false"),
         L"result=" + std::wstring(result == ERROR_SUCCESS ? L"allowed" : L"rejected"),
         L"processId=" + std::to_wstring(processId),
         L"win32Error=" + std::to_wstring(result),
+        L"readScopePath=" + std::wstring(readScopePath),
     };
     static_cast<void>(WriteBrokerAuditEvent(type, event, fields));
+}
+
+void LogLaunchAction(std::wstring_view requestId, std::wstring_view account,
+    std::wstring_view action, std::wstring_view path = {}, DWORD error = ERROR_SUCCESS)
+{
+    const std::array<std::wstring, 5> fields {
+        L"requestId=" + std::wstring(requestId),
+        L"account=" + std::wstring(account),
+        L"action=" + std::wstring(action),
+        L"path=" + std::wstring(path),
+        L"win32Error=" + std::to_wstring(error)
+    };
+    static_cast<void>(WriteBrokerAuditEvent(
+        error == ERROR_SUCCESS ? EVENTLOG_INFORMATION_TYPE : EVENTLOG_WARNING_TYPE,
+        BrokerAuditEvent::LaunchDiagnostic,
+        fields));
 }
 
 } // namespace
@@ -83,7 +102,8 @@ bool BrokerApplication::AccountNameLess::operator()(
     return _wcsicmp(left.c_str(), right.c_str()) < 0;
 }
 
-bool BrokerApplication::TryReserveSession(std::wstring_view accountName)
+bool BrokerApplication::TryReserveSession(
+    std::wstring_view accountName, bool restrictAccess, BrokerReadScope*& readScope)
 {
     std::lock_guard lock(sessionMutex_);
     if (sessionCount_ >= MaximumConcurrentSessions)
@@ -92,36 +112,57 @@ bool BrokerApplication::TryReserveSession(std::wstring_view accountName)
     }
     const auto existing = sessionsByAccount_.find(std::wstring(accountName));
     if (existing != sessionsByAccount_.end() &&
-        existing->second >= MaximumConcurrentSessionsPerAccount)
+        (existing->second.count >= MaximumConcurrentSessionsPerAccount ||
+            (existing->second.readScope != nullptr) != restrictAccess))
     {
         return false;
     }
-    ++sessionsByAccount_[std::wstring(accountName)];
+    auto& sessions = sessionsByAccount_[std::wstring(accountName)];
+    if (restrictAccess && !sessions.readScope)
+    {
+        sessions.readScope = std::make_unique<BrokerReadScope>();
+    }
+    // A failed restoration retains the scope and blocks reuse until restoration succeeds.
+    if (sessions.count == 0 && sessions.readScope && sessions.readScope->Restore() != ERROR_SUCCESS)
+    {
+        return false;
+    }
+    readScope = sessions.readScope.get();
+    ++sessions.count;
     ++sessionCount_;
     return true;
 }
 
-void BrokerApplication::ReleaseSession(std::wstring_view accountName)
+DWORD BrokerApplication::ReleaseSession(std::wstring_view accountName)
 {
     std::lock_guard lock(sessionMutex_);
     const auto existing = sessionsByAccount_.find(std::wstring(accountName));
-    if (existing == sessionsByAccount_.end() || existing->second == 0)
+    if (existing == sessionsByAccount_.end() || existing->second.count == 0)
     {
-        return;
+        return ERROR_SUCCESS;
     }
-    --existing->second;
+    --existing->second.count;
     --sessionCount_;
-    if (existing->second == 0)
+    if (existing->second.count == 0)
     {
+        if (existing->second.readScope)
+        {
+            const DWORD error = existing->second.readScope->Restore();
+            if (error != ERROR_SUCCESS)
+            {
+                return error;
+            }
+        }
         sessionsByAccount_.erase(existing);
     }
+    return ERROR_SUCCESS;
 }
 
 bool BrokerApplication::HasActiveSession(std::wstring_view accountName)
 {
     std::lock_guard lock(sessionMutex_);
     const auto existing = sessionsByAccount_.find(std::wstring(accountName));
-    return existing != sessionsByAccount_.end() && existing->second != 0;
+    return existing != sessionsByAccount_.end();
 }
 
 DWORD BrokerApplication::Configure(const BrokerRequest& request, const BrokerCallerIdentity& caller,
@@ -175,13 +216,29 @@ DWORD BrokerApplication::Launch(
     const BrokerRequest& request, const BrokerCallerIdentity& caller, BrokerSession& session)
 {
     BrokerChildProcess& child = session.child;
+    BrokerReadScope* readScope = nullptr;
     bool sessionReserved = false;
     const auto complete = [&](DWORD result)
     {
+        const std::wstring scopePath =
+            result != ERROR_SUCCESS && readScope != nullptr ? readScope->failurePath() : L"";
         if (result != ERROR_SUCCESS && sessionReserved)
         {
-            ReleaseSession(request.profileId);
+            child.TerminateAndWaitForExitConfirmed();
+            const DWORD restoreError = ReleaseSession(request.profileId);
+            if (restoreError != ERROR_SUCCESS)
+            {
+                result = restoreError;
+            }
             sessionReserved = false;
+        }
+        if (request.log)
+        {
+            LogLaunchAction(request.requestId,
+                request.profileId,
+                result == ERROR_SUCCESS ? L"launch.started" : L"launch.failed",
+                request.workingDirectory,
+                result);
         }
         AuditRequest(result == ERROR_SUCCESS ? BrokerAuditEvent::LaunchAllowed
                                              : BrokerAuditEvent::LaunchRejected,
@@ -189,7 +246,8 @@ DWORD BrokerApplication::Launch(
             request,
             caller,
             result,
-            child.processId());
+            child.processId(),
+            scopePath);
         return result;
     };
     if ((request.operation != RequestOperation::ConsoleLaunch &&
@@ -202,12 +260,26 @@ DWORD BrokerApplication::Launch(
     {
         return complete(ERROR_INVALID_PARAMETER);
     }
-    if (!TryReserveSession(request.profileId))
+    if (!TryReserveSession(request.profileId, request.restrictAccess, readScope))
     {
         return complete(ERROR_BUSY);
     }
     sessionReserved = true;
     std::lock_guard launchLock(launchMutex_);
+    if (request.log)
+    {
+        LogLaunchAction(
+            request.requestId, request.profileId, L"launch.begin", request.workingDirectory);
+        if (readScope != nullptr)
+        {
+            // A scope spans sessions. Keep its tracing through final restoration, even if
+            // a later joining session omits --log; capture no command line or credentials.
+            readScope->SetObserver(
+                [requestId = request.requestId, account = request.profileId](
+                    std::wstring_view action, std::wstring_view path, DWORD error)
+                { LogLaunchAction(requestId, account, action, path, error); });
+        }
+    }
     SecurePassword password;
     const DWORD passwordError = GenerateBrokerPassword(password);
     if (passwordError != ERROR_SUCCESS)
@@ -221,11 +293,16 @@ DWORD BrokerApplication::Launch(
         return complete(resetError);
     }
     BrokerLogonToken token;
-    const DWORD logonError = LogOnBrokerAccount(request.profileId, password, token);
+    const DWORD logonError =
+        LogOnBrokerAccount(request.profileId, password, token, request.restrictAccess);
     password.Clear();
     if (logonError != ERROR_SUCCESS)
     {
         return complete(logonError);
+    }
+    if (request.log)
+    {
+        LogLaunchAction(request.requestId, request.profileId, L"launch.account_logged_on");
     }
     if (request.operation == RequestOperation::InteractiveLaunch)
     {
@@ -240,8 +317,8 @@ DWORD BrokerApplication::Launch(
             caller.logonSid,
             child,
             lease,
-            request.restrictWrites,
-            request.lowIntegrity);
+            request.lowIntegrity,
+            readScope);
         if (launchError != ERROR_SUCCESS)
         {
             return complete(launchError);
@@ -277,8 +354,8 @@ DWORD BrokerApplication::Launch(
         conhostArguments,
         request.workingDirectory,
         child,
-        request.restrictWrites,
-        request.lowIntegrity);
+        request.lowIntegrity,
+        readScope);
     if (launchError != ERROR_SUCCESS)
     {
         return complete(launchError);
@@ -317,7 +394,15 @@ DWORD BrokerApplication::FinishSession(
     {
         leaseError = ReleaseInteractiveDesktopLease(session.desktopLease);
     }
-    ReleaseSession(request.profileId);
+    const DWORD restoreError = ReleaseSession(request.profileId);
+    if (restoreError != ERROR_SUCCESS)
+    {
+        leaseError = restoreError;
+    }
+    if (request.log)
+    {
+        LogLaunchAction(request.requestId, request.profileId, L"session.closed", {}, leaseError);
+    }
     if (leaseError != ERROR_SUCCESS)
     {
         const std::array<std::wstring, 4> fields {

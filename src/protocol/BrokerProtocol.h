@@ -65,8 +65,9 @@ struct BrokerRequest
     std::wstring requestId;
     std::wstring profileId;
     bool force = false;
-    bool restrictWrites = false;
+    bool restrictAccess = false;
     bool lowIntegrity = false;
+    bool log = false;
     std::vector<std::wstring> arguments;
     std::wstring workingDirectory;
     ConsoleRequest console;
@@ -110,11 +111,11 @@ enum class ParseResult
     std::wstring_view profileId, std::span<const std::wstring> arguments,
     std::wstring_view workingDirectory, std::wstring_view pipeIn, std::wstring_view pipeOut,
     std::wstring_view pipeResize, bool inheritCursor, std::string& request,
-    bool restrictWrites = false, bool lowIntegrity = false);
+    bool restrictAccess = false, bool lowIntegrity = false, bool log = false);
 [[nodiscard]] bool BuildInteractiveLaunchRequest(std::wstring_view requestId,
     std::wstring_view profileId, std::span<const std::wstring> arguments,
     std::wstring_view workingDirectory, std::wstring_view leasePipe, std::wstring_view nonce,
-    std::string& request, bool restrictWrites = false, bool lowIntegrity = false);
+    std::string& request, bool restrictAccess = false, bool lowIntegrity = false, bool log = false);
 [[nodiscard]] std::string BuildErrorResponse(
     std::wstring_view requestId, std::string_view reasonCode, DWORD win32Error);
 [[nodiscard]] std::string BuildSuccessResponse(

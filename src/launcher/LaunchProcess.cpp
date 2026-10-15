@@ -145,8 +145,9 @@ ExitCode RunBrokerConsole(const AccountIdentity& account, const Options& options
         terminalBridge.supportsCursorInheritance(),
         connection,
         processId,
-        options.restrictWrites,
-        options.lowIntegrity);
+        options.restrictAccess,
+        options.lowIntegrity,
+        options.log);
     if (launchError != ERROR_SUCCESS)
     {
         if (launchError == ERROR_PIPE_BUSY)
@@ -277,13 +278,18 @@ ExitCode RunBrokerInteractive(const AccountIdentity& account, const Options& opt
                 nonce,
                 connection,
                 processId,
-                options.restrictWrites,
-                options.lowIntegrity);
+                options.restrictAccess,
+                options.lowIntegrity,
+                options.log);
             SetEvent(launchCompleted.get());
         });
     const DWORD coordinatorError =
         CoordinateInteractiveDesktopLease(leasePipe.get(), nonce, launchCompleted.get());
     launchWorker.join();
+    if (launchError == ERROR_SUCCESS && coordinatorError == ERROR_SUCCESS)
+    {
+        connection.log().Finish();
+    }
     connection.Reset();
     DisconnectNamedPipe(leasePipe.get());
 

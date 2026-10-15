@@ -28,10 +28,34 @@ AppContainer, filesystem allow-list, network isolation, or isolation between wor
 one managed account. The privileged broker is part of the trusted computing base: a broker
 compromise can compromise the host.
 
-The optional `--restrict-writes` flag adds a write-restricted token, including the target user,
-logon SID, and Everyone for Windows runtime compatibility. It leaves integrity unchanged and
-permits writes wherever those SIDs have write access; it does not confine writes to two trees.
+The optional `--restrict-access` flag adds a write-restricted token, including the target
+user, logon SID, and Everyone for Windows runtime compatibility. It leaves integrity unchanged
+and permits writes wherever those SIDs have write access within accessible paths.
 The independent `--low-integrity` flag lowers integrity to Low. Both flags can be combined.
+Access restriction also adds temporary account-SID denies on existing
+excluded base folders of mounted local volumes. Individual file DACLs are never changed,
+and the added ACEs do not propagate into child trees. The profile, accumulated working directories,
+Windows, and both Program Files trees retain their normal ACL permissions. Denies also cover
+siblings along allowed-path ancestors. The token permanently loses `SeChangeNotifyPrivilege`,
+making base-folder traversal denies effective for ordinary paths even with protected child DACLs.
+Temporary traversal grants preserve access to allowed roots and their ancestors where needed.
+The account's existing working-set privilege is retained disabled for runtime compatibility;
+all other privileges are removed. Working-set adjustment does not bypass file ACLs.
+Interactive startup gets account-scoped traversal grants on the native `\Sessions`,
+`\Sessions\<id>`, and `\Sessions\<id>\Windows` directories. These grant no object creation or
+enumeration and are removed with the account scope.
+Owner-rights denies prevent the target from removing folder denies through implicit `WRITE_DAC` access.
+The broker pins modified objects, ensures denies on each launch, and removes its entries only
+after the account's last session tree exits. Mixed restricted/unrestricted sessions are rejected.
+This is a local path restriction: loose files in allowed-path ancestors, remote shares,
+unmounted volumes, file-ID opens, pre-opened handles, hard-link aliases in allowed trees,
+and services acting for the workload are outside it.
+New base folders, mounts, and media inserted into a skipped empty optical or removable drive
+are not covered until another launch. Loaded
+filesystems without persistent ACL support still fail preparation. Same-account sessions share
+the union of working directories until the final close. Allowed system trees may still contain
+writable objects. Abrupt broker termination can leave the temporary denies behind; restoration
+failure is audited and the account scope remains reserved until restoration can succeed.
 With `--low-integrity`, the broker prepares Low labels on the managed account's profile and
 working tree while impersonating that account, without granting new DACL
 rights. Labels persist; inaccessible existing children and links are skipped. Preparation rejects

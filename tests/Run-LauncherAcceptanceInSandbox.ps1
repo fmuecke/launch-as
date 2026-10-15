@@ -35,6 +35,10 @@ $phaseLogs = @(
         LocalPath  = Join-Path $resultDirectory 'interactive-acceptance.log'
         SharedPath = Join-Path $SourceDirectory 'interactive-acceptance.log'
     }
+    [PSCustomObject]@{
+        LocalPath  = Join-Path $resultDirectory 'launch-as.log'
+        SharedPath = Join-Path $SourceDirectory 'launch-as.log'
+    }
 )
 $callerCredential = $null
 $callerWasAddedToAdministrators = $false

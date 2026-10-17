@@ -378,6 +378,15 @@ DWORD BrokerApplication::Launch(
     {
         conhostArguments.emplace_back(L"--inherit-cursor");
     }
+    if (request.appContainer.enabled)
+    {
+        conhostArguments.emplace_back(L"--appcontainer");
+        for (const auto& capability : request.appContainer.capabilities)
+        {
+            conhostArguments.insert(
+                conhostArguments.end(), {L"--appcontainer-capability", capability});
+        }
+    }
     conhostArguments.insert(conhostArguments.end(),
         {L"--pipe-in",
             request.console.pipeIn,
@@ -388,15 +397,26 @@ DWORD BrokerApplication::Launch(
             L"--"});
     conhostArguments.insert(
         conhostArguments.end(), request.arguments.begin(), request.arguments.end());
+    std::wstring preparationContext;
     const DWORD launchError = LaunchBrokerConsoleHost(token.get(),
         request.profileId,
         conhostArguments,
         request.workingDirectory,
         child,
         request.lowIntegrity,
-        readScope);
+        readScope,
+        request.appContainer,
+        &preparationContext);
     if (launchError != ERROR_SUCCESS)
     {
+        if (request.appContainer.enabled && !preparationContext.empty())
+        {
+            LogLaunchAction(request.requestId,
+                request.profileId,
+                L"appcontainer.prepare.failed",
+                preparationContext,
+                launchError);
+        }
         return complete(launchError);
     }
     const DWORD validationError = ValidateChildLogonSid(child.process(), caller.logonSid);

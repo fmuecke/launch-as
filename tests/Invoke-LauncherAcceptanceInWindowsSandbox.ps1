@@ -63,6 +63,7 @@ $artifactPaths = @(
     (Join-Path $configurationDirectory 'LauncherBrokerChildIdentityProbe.exe')
     (Join-Path $configurationDirectory 'LauncherBrokerProcessAccessProbe.exe')
     (Join-Path $configurationDirectory 'LauncherBrokerWriteScopeProbe.exe')
+    (Join-Path $configurationDirectory 'LauncherAppContainerProbe.exe')
     (Join-Path $configurationDirectory 'LauncherBrokerReadScopeInteractiveProbe.exe')
     (Join-Path $configurationDirectory 'LauncherBrokerProcessLauncherTests.exe')
     (Join-Path $configurationDirectory 'LauncherInteractiveTargetProbe.exe')
@@ -79,6 +80,7 @@ $artifactPaths = @(
     (Join-Path $PSScriptRoot 'Invoke-BrokerSameAccountConcurrencyTest.ps1')
     (Join-Path $PSScriptRoot 'Invoke-BrokerInteractiveAcceptanceTest.ps1')
     (Join-Path $PSScriptRoot 'Invoke-BrokerWriteScopeAcceptanceTest.ps1')
+    (Join-Path $PSScriptRoot 'Invoke-AppContainerAcceptanceTest.ps1')
     (Join-Path $PSScriptRoot 'Invoke-BrokerReadScopeAcceptanceTest.ps1')
 )
 foreach ($artifactPath in $artifactPaths) {

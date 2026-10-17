@@ -40,20 +40,28 @@ bool ParsePseudoConsoleHostInvocation(
         ++separatorIndex;
     }
     for (;
-        separatorIndex < arguments.size() && std::wstring_view(arguments[separatorIndex]) != L"--";
-        separatorIndex += 2)
+        separatorIndex < arguments.size() && std::wstring_view(arguments[separatorIndex]) != L"--";)
     {
-        if (separatorIndex + 1 >= arguments.size())
+        const std::wstring_view name(arguments[separatorIndex++]);
+        if (name == L"--appcontainer" && !invocation.appContainer.enabled)
+        {
+            invocation.appContainer.enabled = true;
+            continue;
+        }
+        if (separatorIndex >= arguments.size())
         {
             return false;
         }
-        const std::wstring_view name(arguments[separatorIndex]);
-        const std::wstring_view value(arguments[separatorIndex + 1]);
+        const std::wstring_view value(arguments[separatorIndex++]);
         if (value.empty())
         {
             return false;
         }
-        if (name == PipeInArgument && invocation.pipeIn.empty())
+        if (name == L"--appcontainer-capability")
+        {
+            invocation.appContainer.capabilities.emplace_back(value);
+        }
+        else if (name == PipeInArgument && invocation.pipeIn.empty())
         {
             invocation.pipeIn = value;
         }
@@ -81,8 +89,8 @@ bool ParsePseudoConsoleHostInvocation(
     {
         invocation.processArguments.emplace_back(arguments[index]);
     }
-    return !invocation.pipeIn.empty() && !invocation.pipeOut.empty() &&
-           !invocation.pipeResize.empty();
+    return IsValidAppContainerOptions(invocation.appContainer) && !invocation.pipeIn.empty() &&
+           !invocation.pipeOut.empty() && !invocation.pipeResize.empty();
 }
 
 } // namespace launch_as

@@ -86,6 +86,34 @@ constexpr wchar_t InteractiveLeaseLogonSid[] = L"S-1-5-5-123-456";
 
 int wmain()
 {
+    for (const auto* fields :
+        {R"(,"appContainer":true)", R"(,"appContainer":true,"capabilities":[])"})
+    {
+        std::string text(ValidRequest);
+        text.insert(text.find_last_of('}'), fields);
+        launch_as::broker::BrokerRequest parsed;
+        if (!Expect(launch_as::broker::ParseBrokerRequest(text, parsed) ==
+                            launch_as::broker::ParseResult::Success &&
+                        parsed.appContainer.enabled && parsed.appContainer.capabilities.empty(),
+                L"Minimal AppContainer request failed."))
+            return 1;
+    }
+    for (const auto* fields :
+        {R"(,"capabilities":["internetClient"])",
+            R"(,"appContainer":true,"lowIntegrity":true)",
+            R"(,"appContainer":true,"restrictAccess":true)",
+            R"(,"appContainer":true,"capabilities":["internetClient","internetClient"])",
+            R"(,"appContainer":true,"capabilities":["bad capability"])",
+            R"(,"appContainer":true,"appContainer":false)"})
+    {
+        std::string text(ValidRequest);
+        text.insert(text.find_last_of('}'), fields);
+        launch_as::broker::BrokerRequest parsed;
+        if (!Expect(launch_as::broker::ParseBrokerRequest(text, parsed) ==
+                        launch_as::broker::ParseResult::InvalidRequest,
+                L"Invalid AppContainer request was accepted."))
+            return 1;
+    }
     launch_as::broker::BrokerRequest request;
     for (const auto* retired : {",\"restrictReads\":true", ",\"restrictWrites\":false"})
     {

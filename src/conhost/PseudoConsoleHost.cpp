@@ -4,10 +4,12 @@
 
 #include "PseudoConsoleHost.h"
 
+#include "AppContainer.h"
 #include "PseudoConsoleHostInvocation.h"
 #include "PseudoConsoleHostReport.h"
 #include "PseudoConsoleSession.h"
 #include "TerminalIO.h"
+#include "Utf8.h"
 #include "Win32Support.h"
 #include "WindowsCommandLine.h"
 
@@ -19,6 +21,7 @@
 #include <filesystem>
 #include <io.h>
 #include <iostream>
+#include <sddl.h>
 #include <span>
 #include <string>
 #include <string_view>
@@ -94,6 +97,51 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
         return ExitFailure;
     }
 
+    AppContainer appContainer;
+    if (invocation.appContainer.enabled)
+    {
+        const DWORD error = appContainer.Initialize(invocation.appContainer);
+        if (error != ERROR_SUCCESS)
+        {
+            std::wcerr << L"Could not prepare the AppContainer: " << FormatWindowsError(error)
+                       << L"\nAppContainer step: " << appContainer.failureContext()
+                       << L"\nAppContainer profile: " << appContainer.name() << L"\n";
+            return ExitFailure;
+        }
+        // The name is ASCII and lets an administrator prepare loopback access separately.
+        std::string name;
+        if (!WideToUtf8(appContainer.name(), name))
+        {
+            return ExitFailure;
+        }
+        LocalAllocation<LPWSTR> sid;
+        if (!ConvertSidToStringSidW(appContainer.security()->AppContainerSid, sid.address()))
+        {
+            const DWORD sidError = GetLastError();
+            std::wcerr << L"Could not report the AppContainer SID: " << FormatWindowsError(sidError)
+                       << L"\n";
+            return ExitFailure;
+        }
+        std::string sidText;
+        if (!WideToUtf8(sid.get(), sidText))
+        {
+            return ExitFailure;
+        }
+        const std::string message =
+            "AppContainer: " + name + "\r\nAppContainer SID: " + sidText + "\r\n";
+        DWORD written = 0;
+        if (!WriteFile(parentOutput.get(),
+                message.data(),
+                static_cast<DWORD>(message.size()),
+                &written,
+                nullptr))
+        {
+            const DWORD reportError = GetLastError();
+            std::wcerr << L"Could not report the AppContainer identity: "
+                       << FormatWindowsError(reportError) << L"\n";
+            return ExitFailure;
+        }
+    }
     PseudoConsoleSession pseudoConsole;
     std::wstring terminalError;
     if (!pseudoConsole.Initialize(terminalSize,
@@ -102,6 +150,12 @@ ExitCode RunPseudoConsoleHost(std::span<wchar_t*> arguments)
             parentOutput.get(),
             resizeInput.get(),
             terminalError))
+    {
+        std::wcerr << terminalError << L"\n";
+        return ExitFailure;
+    }
+    if (invocation.appContainer.enabled &&
+        !pseudoConsole.SetAppContainer(appContainer.security(), terminalError))
     {
         std::wcerr << terminalError << L"\n";
         return ExitFailure;

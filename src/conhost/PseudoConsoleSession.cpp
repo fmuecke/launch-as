@@ -123,7 +123,7 @@ bool PseudoConsoleSession::Initialize(COORD terminalSize, bool inheritCursor, HA
     }
 
     SIZE_T attributeListBytes = 0;
-    InitializeProcThreadAttributeList(nullptr, 1, 0, &attributeListBytes);
+    InitializeProcThreadAttributeList(nullptr, 2, 0, &attributeListBytes);
     const DWORD attributeListSizeError = GetLastError();
     if (attributeListBytes == 0)
     {
@@ -140,7 +140,7 @@ bool PseudoConsoleSession::Initialize(COORD terminalSize, bool inheritCursor, HA
     startupInfo_.StartupInfo.hStdError = nullOutput_.get();
     startupInfo_.lpAttributeList =
         reinterpret_cast<PPROC_THREAD_ATTRIBUTE_LIST>(attributeListStorage_.data());
-    if (!InitializeProcThreadAttributeList(startupInfo_.lpAttributeList, 1, 0, &attributeListBytes))
+    if (!InitializeProcThreadAttributeList(startupInfo_.lpAttributeList, 2, 0, &attributeListBytes))
     {
         const DWORD attributeListError = GetLastError();
         error = L"Could not initialize the pseudoconsole process attributes: " +
@@ -165,6 +165,24 @@ bool PseudoConsoleSession::Initialize(COORD terminalSize, bool inheritCursor, HA
 }
 
 STARTUPINFOW* PseudoConsoleSession::startupInfo() noexcept { return &startupInfo_.StartupInfo; }
+
+bool PseudoConsoleSession::SetAppContainer(SECURITY_CAPABILITIES* security, std::wstring& error)
+{
+    if (!UpdateProcThreadAttribute(startupInfo_.lpAttributeList,
+            0,
+            PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
+            security,
+            sizeof(*security),
+            nullptr,
+            nullptr))
+    {
+        const DWORD attributeError = GetLastError();
+        error = L"Could not attach the AppContainer security attribute: " +
+                FormatWindowsError(attributeError);
+        return false;
+    }
+    return true;
+}
 
 HANDLE PseudoConsoleSession::inputRelayFailedEvent() const noexcept
 {

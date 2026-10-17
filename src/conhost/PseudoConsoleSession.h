@@ -30,6 +30,7 @@ class PseudoConsoleSession final
     [[nodiscard]] bool Initialize(COORD terminalSize, bool inheritCursor, HANDLE parentInput,
         HANDLE parentOutput, HANDLE resizeInput, std::wstring& error);
     [[nodiscard]] STARTUPINFOW* startupInfo() noexcept;
+    [[nodiscard]] bool SetAppContainer(SECURITY_CAPABILITIES* security, std::wstring& error);
     [[nodiscard]] HANDLE inputRelayFailedEvent() const noexcept;
     [[nodiscard]] bool StartRelays(std::wstring& error);
     void StopRelays() noexcept;

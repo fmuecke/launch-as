@@ -3,6 +3,8 @@
 # Project: https://github.com/fmuecke/launch-as
 
 add_library(launch_as_conhost_core STATIC
+    AppContainer.cpp
+    AppContainer.h
     PseudoConsoleHost.cpp
     PseudoConsoleHost.h
     PseudoConsoleHostInvocation.cpp
@@ -19,4 +21,6 @@ target_link_libraries(launch_as_conhost_core
         launch_as::terminal
     PRIVATE
         launch_as::protocol
+        Advapi32
+        User32
 )

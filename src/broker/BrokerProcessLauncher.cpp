@@ -4,6 +4,7 @@
 
 #include "BrokerProcessLauncher.h"
 
+#include "BrokerAppContainerScope.h"
 #include "BrokerLogonToken.h"
 #include "BrokerReadScope.h"
 #include "BrokerWriteScope.h"
@@ -822,7 +823,8 @@ DWORD ResolveBrokerWorkingDirectory(
 DWORD BrokerChildProcess::CreateSuspendedInJob(HANDLE token, std::wstring_view accountName,
     const std::wstring& executable, std::vector<wchar_t>& commandLine,
     const std::wstring& directory, BOOL inheritHandles, DWORD creationFlags,
-    STARTUPINFOW& startupInfo, bool lowIntegrity, BrokerReadScope* readScope)
+    STARTUPINFOW& startupInfo, bool lowIntegrity, BrokerReadScope* readScope,
+    const AppContainerOptions& appContainer, std::wstring* preparationContext)
 {
     // Declaration order is cleanup order on failure: terminate the process before unloading the
     // profile it was created with.
@@ -848,7 +850,7 @@ DWORD BrokerChildProcess::CreateSuspendedInJob(HANDLE token, std::wstring_view a
             return tokenError;
         }
     }
-    if (lowIntegrity || readScope != nullptr)
+    if (lowIntegrity || readScope != nullptr || appContainer.enabled)
     {
         DWORD profileCharacters = 0;
         GetUserProfileDirectoryW(token, nullptr, &profileCharacters);
@@ -875,6 +877,20 @@ DWORD BrokerChildProcess::CreateSuspendedInJob(HANDLE token, std::wstring_view a
         if (lowIntegrity)
         {
             const DWORD error = PrepareBrokerWriteScope(token, profileDirectory.data(), directory);
+            if (error != ERROR_SUCCESS)
+            {
+                return error;
+            }
+        }
+        if (appContainer.enabled)
+        {
+            std::wstring context;
+            const DWORD error = PrepareBrokerAppContainerScope(
+                token, profileDirectory.data(), directory, appContainer, context);
+            if (preparationContext)
+            {
+                *preparationContext = std::move(context);
+            }
             if (error != ERROR_SUCCESS)
             {
                 return error;
@@ -924,7 +940,8 @@ DWORD BrokerChildProcess::CreateSuspendedInJob(HANDLE token, std::wstring_view a
 
 DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
-    BrokerChildProcess& child, bool lowIntegrity, BrokerReadScope* readScope)
+    BrokerChildProcess& child, bool lowIntegrity, BrokerReadScope* readScope,
+    const AppContainerOptions& appContainer, std::wstring* preparationContext)
 {
     if (token == nullptr || accountName.empty() || arguments.empty() || arguments.front().empty() ||
         workingDirectory.empty())
@@ -1014,7 +1031,9 @@ DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,
             CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
             startupInfo.StartupInfo,
             lowIntegrity,
-            readScope);
+            readScope,
+            appContainer,
+            preparationContext);
         if (processError != ERROR_SUCCESS)
         {
             return processError;

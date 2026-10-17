@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "AppContainerOptions.h"
 #include "LaunchLog.h"
 #include "TerminalEndpoints.h"
 #include "Win32Support.h"
@@ -44,7 +45,8 @@ class BrokerControlConnection final
 [[nodiscard]] DWORD LaunchBrokerConsole(std::wstring_view profileId,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
     const TerminalPipeNames& pipes, bool inheritCursor, BrokerControlConnection& connection,
-    DWORD& processId, bool restrictAccess = false, bool lowIntegrity = false, bool log = false);
+    DWORD& processId, bool restrictAccess = false, bool lowIntegrity = false, bool log = false,
+    const AppContainerOptions& appContainer = {});
 [[nodiscard]] DWORD WaitForBrokerConsoleExit(
     BrokerControlConnection& connection, DWORD& exitCode, std::wstring& diagnostics);
 

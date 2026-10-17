@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "AppContainerOptions.h"
+
 #include <Windows.h>
 #include <filesystem>
 #include <span>
@@ -16,6 +18,7 @@ namespace launch_as
 struct PseudoConsoleHostInvocation
 {
     bool inheritCursor = false;
+    AppContainerOptions appContainer;
     std::filesystem::path executable;
     std::vector<std::wstring> processArguments;
     std::wstring pipeIn;

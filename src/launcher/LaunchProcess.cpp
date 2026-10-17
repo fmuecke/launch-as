@@ -147,7 +147,8 @@ ExitCode RunBrokerConsole(const AccountIdentity& account, const Options& options
         processId,
         options.restrictAccess,
         options.lowIntegrity,
-        options.log);
+        options.log,
+        options.appContainer);
     if (launchError != ERROR_SUCCESS)
     {
         if (launchError == ERROR_PIPE_BUSY)

@@ -677,10 +677,13 @@ namespace
 bool BuildConsoleLaunchRequest(std::wstring_view requestId, std::wstring_view profileId,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
     std::wstring_view pipeIn, std::wstring_view pipeOut, std::wstring_view pipeResize,
-    bool inheritCursor, std::string& request, bool restrictAccess, bool lowIntegrity, bool log)
+    bool inheritCursor, std::string& request, bool restrictAccess, bool lowIntegrity, bool log,
+    const AppContainerOptions& appContainer)
 {
-    if (pipeIn.empty() || pipeOut.empty() || pipeResize.empty() || !IsValidUtf16(pipeIn) ||
-        !IsValidUtf16(pipeOut) || !IsValidUtf16(pipeResize) ||
+    if (!IsValidAppContainerOptions(appContainer) ||
+        (appContainer.enabled && (restrictAccess || lowIntegrity)) || pipeIn.empty() ||
+        pipeOut.empty() || pipeResize.empty() || !IsValidUtf16(pipeIn) || !IsValidUtf16(pipeOut) ||
+        !IsValidUtf16(pipeResize) ||
         !BeginLaunchRequest(requestId, profileId, "console", arguments, workingDirectory, request))
     {
         return false;
@@ -696,6 +699,19 @@ bool BuildConsoleLaunchRequest(std::wstring_view requestId, std::wstring_view pr
     if (lowIntegrity)
     {
         request += ",\"lowIntegrity\":true";
+    }
+    if (appContainer.enabled)
+    {
+        request += ",\"appContainer\":true,\"capabilities\":[";
+        for (std::size_t index = 0; index < appContainer.capabilities.size(); ++index)
+        {
+            if (index != 0)
+            {
+                request += ',';
+            }
+            AppendJsonString(request, appContainer.capabilities[index]);
+        }
+        request += ']';
     }
     request += ",\"console\":{\"pipeIn\":";
     AppendJsonString(request, pipeIn);
@@ -769,6 +785,8 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
     bool restrictAccess = false;
     bool lowIntegrity = false;
     bool log = false;
+    bool appContainer = false;
+    bool capabilities = false;
     const bool parsed = ReadObject(reader,
         [&](std::wstring_view name)
         {
@@ -840,16 +858,29 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
             {
                 return FirstSeen(log) && reader.Boolean(request.log);
             }
+            if (name == L"appContainer")
+            {
+                return FirstSeen(appContainer) && reader.Boolean(request.appContainer.enabled);
+            }
+            if (name == L"capabilities")
+            {
+                return FirstSeen(capabilities) &&
+                       ReadStringArray(
+                           reader, request.appContainer.capabilities, IsAppContainerCapability);
+            }
             return false;
         });
-    if (!parsed || !reader.End() || !version || !requestId || !operation)
+    if (!parsed || !reader.End() || !version || !requestId || !operation ||
+        !IsValidAppContainerOptions(request.appContainer) ||
+        (capabilities && !request.appContainer.enabled) ||
+        (request.appContainer.enabled && (request.lowIntegrity || request.restrictAccess)))
     {
         return ParseResult::InvalidRequest;
     }
     if (operationName == L"list")
     {
         if (profile || mode || arguments || workingDirectory || console || interactive || force ||
-            restrictAccess || lowIntegrity || log)
+            restrictAccess || lowIntegrity || log || appContainer || capabilities)
         {
             return ParseResult::InvalidRequest;
         }
@@ -864,7 +895,7 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
         operationName == L"delete")
     {
         if (mode || arguments || workingDirectory || console || interactive || restrictAccess ||
-            lowIntegrity || log)
+            lowIntegrity || log || appContainer || capabilities)
         {
             return ParseResult::InvalidRequest;
         }
@@ -880,7 +911,8 @@ ParseResult ParseBrokerRequest(std::string_view message, BrokerRequest& request)
     }
     if (launchMode == LaunchMode::Interactive)
     {
-        if (console || !interactive || !IsInteractiveLeasePipeName(request.interactive.leasePipe) ||
+        if (appContainer || capabilities || console || !interactive ||
+            !IsInteractiveLeasePipeName(request.interactive.leasePipe) ||
             !IsRequestId(request.interactive.nonce))
         {
             return ParseResult::InvalidRequest;

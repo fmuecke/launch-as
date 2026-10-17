@@ -24,7 +24,7 @@ endpoints, and other objects that already admit the managed account remain acces
 logon SID does not override permissive object ACLs.
 
 This is an alternate-account launcher with blast-radius controls. It provides no VM, container,
-AppContainer, filesystem allow-list, network isolation, or isolation between workloads sharing
+filesystem allow-list, network isolation, or isolation between workloads sharing
 one managed account. The privileged broker is part of the trusted computing base: a broker
 compromise can compromise the host.
 
@@ -32,6 +32,28 @@ The optional `--restrict-access` flag adds a write-restricted token, including t
 user, logon SID, and Everyone for Windows runtime compatibility. It leaves integrity unchanged
 and permits writes wherever those SIDs have write access within accessible paths.
 The independent `--low-integrity` flag lowers integrity to Low. Both flags can be combined.
+
+Console-only `--appcontainer` instead applies Windows AppContainer security capabilities to
+the command created by the terminal host. Descendants inherit confinement. The terminal host
+remains outside the container. The default capability list is empty; explicit capabilities
+expand access, and network capabilities can authorize DNS-service requests. It cannot combine
+with the other token restriction flags. The broker persistently grants the container identity
+inheritable Modify access on the managed profile and selected workspace roots. Integrity
+labels remain unchanged; the package grant permits writes to Medium-integrity files, but an
+explicit inheritable Medium label can still block new-file creation. Profiles and grants are
+keyed by account, workspace path and resolved capabilities. Existing Windows AppContainer grants
+remain effective. Preparation rejects reparse roots and ancestors and verifies the managed
+account's read/write/execute access before changing the pinned root ACL with broker permissions.
+Windows propagates permissions to existing descendants on every launch while the broker
+impersonates the managed account; descendant updates use the account's ordinary metadata rights.
+New children inherit normally. Files the account cannot update may need their owner's preparation.
+Protected child ACLs and explicit denies remain effective. Hard links share an ACL, so propagation
+where the account has metadata rights can expose a file through names outside the workspace.
+This is not an exact path allowlist. ACL changes persist after exit.
+External WFP policy and separately prepared loopback exemptions remain the
+network boundary. A reachable service resolving attacker-controlled names on behalf of the
+workload can still provide an exfiltration path. Never run unrelated unconfined programs as the
+managed account.
 Access restriction also adds temporary account-SID denies on existing
 excluded base folders of mounted local volumes. Individual file DACLs are never changed,
 and the added ACEs do not propagate into child trees. The profile, accumulated working directories,

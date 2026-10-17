@@ -3,6 +3,8 @@
 # Project: https://github.com/fmuecke/launch-as
 
 add_library(launch_as_broker_core STATIC
+    BrokerAppContainerScope.cpp
+    BrokerAppContainerScope.h
     BrokerAccountProvisioner.cpp
     BrokerAccountProvisioner.h
     BrokerApplication.cpp

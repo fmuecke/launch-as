@@ -12,6 +12,6 @@ add_library(launch_as_protocol STATIC
 add_library(launch_as::protocol ALIAS launch_as_protocol)
 
 configure_launch_as_module(launch_as_protocol "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(launch_as_protocol PRIVATE
+target_link_libraries(launch_as_protocol PUBLIC
     launch_as::common
 )

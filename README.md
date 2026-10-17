@@ -19,8 +19,9 @@ account password. The broker creates an independent logon session, so the child 
 the caller's logon SID or its default access to the caller's processes.
 
 This is a general-purpose alternate-account launcher: its authorised caller can choose a configured
-launch-as-managed account and any absolute executable. It is blast-radius reduction, not a sandbox:
-it does not protect against a local administrator or kernel-level attacker. Interactive mode puts
+launch-as-managed account and any absolute executable. Default launches provide identity separation;
+`--appcontainer` adds Windows AppContainer confinement for console commands. Neither protects
+against a local administrator or kernel-level attacker. Interactive mode puts
 the target on the caller's shared desktop, so screen, window, clipboard, and input interaction are
 intentionally possible even though the target retains an independent logon SID.
 
@@ -159,6 +160,69 @@ Console and interactive launches support these controls:
 - `--low-integrity` independently lowers token integrity to Low. Combine it with
   `--restrict-access` for both controls. Descendants inherit the token controls. Without
   `--restrict-access`, reads follow normal ACLs.
+
+Console launches also support `--appcontainer`, with **zero capabilities by default**:
+
+```powershell
+.\launch-as.exe --user LaunchAsUser --working-directory C:\dev\project `
+    --appcontainer -- C:\Windows\System32\cmd.exe
+```
+
+Repeat `--appcontainer-capability <name-or-SID>` to grant capabilities explicitly, for example
+`internetClient`, `privateNetworkClientServer`, or a capability SID such as `S-1-15-3-1`.
+These network capabilities also permit DNS-service requests; leave them absent when preventing
+service-mediated DNS exfiltration is the goal. Windows derives custom capability names too,
+so a misspelled name can produce an ineffective capability rather than an error.
+Only `S-1-15-3-...` capability SIDs are accepted. At most 32 distinct input values are supported.
+AppContainer currently requires console mode and cannot combine with `--restrict-access`
+or `--low-integrity`.
+
+The terminal host stays outside the container; the command and its descendants run inside it
+at Low integrity. The broker adds an inheritable Modify grant on the managed profile and
+workspace roots. It verifies the account's existing read/write/execute access and pins
+each root and its ancestors before changing the root ACL. On every launch, Windows propagates
+the grants to existing children while impersonating the managed account, using its ordinary
+metadata permissions. Protected child ACLs remain unchanged. New children inherit access normally.
+Integrity labels remain unchanged;
+AppContainer package grants permit writes to Medium-integrity files. Explicit inheritable
+Medium labels can prevent new-file creation (error 1314); setup does not override that policy.
+Volume roots, Windows, Program Files, ProgramData and the common Users directory are rejected.
+
+Existing files that the managed account cannot update may still need preparation by their owner.
+Use the printed `AppContainer SID: S-1-15-2-...` and apply ordinary Windows inheritance:
+
+```powershell
+$containerSid = 'S-1-15-2-...' # Replace with the printed SID.
+icacls.exe C:\dev\project /grant "*${containerSid}:(OI)(CI)M"
+```
+
+This propagates permissions where the owner has normal metadata rights. Automatic propagation
+already covers account-owned profile and workspace contents; it never uses SYSTEM rights on
+descendants. Files that do not inherit can remain inaccessible.
+The profile name and its grants are specific to the account, workspace path and resolved capabilities.
+AppContainer profiles and grants remain after exit, including failed launches. Moving a
+prepared tree preserves its ACLs. Hard links share one ACL: propagation under the account's metadata rights can expose a linked file
+through its names outside the workspace too. Junctions do not grant access to their targets. Existing AppContainer/capability grants and Windows resources
+accessible to All Application Packages remain available: this is not an exact two-directory allowlist.
+Place agent runtimes in the workspace, managed profile or a location already readable by
+AppContainers, such as Program Files, so the confined command can load its dependencies.
+Preparation failures record the operation and path in the broker log, collected by `--log`.
+
+Network policy remains external. For a local model proxy, use its numeric address
+`http://127.0.0.1:8080` and prepare a loopback exemption separately if required. Each launch prints
+`AppContainer: launch-as-...`; an administrator can use that name with
+`CheckNetIsolation.exe LoopbackExempt -a -n=<printed-name>`. The exemption permits loopback for
+that identity, including other localhost ports; enforce the permitted endpoints through your WFP
+policy. Remove an exemption with `LoopbackExempt -d -n=<printed-name>`.
+
+A disposable Windows Sandbox probe observed zero DNS packets for `GetAddrInfoW`, `DnsQuery_W`
+and `DnsQueryEx` in a zero-capability container, with successful receiver controls. The DNS APIs
+returned access denied. A loopback exemption allowed a TCP connection to `127.0.0.1:8080`
+without enabling those DNS requests. This is bounded evidence for those APIs and that guest,
+not a guarantee against all DNS/exfiltration paths. A reachable proxy or localhost service that
+resolves attacker-selected names can still provide an exfiltration path. See the
+[AppContainer network analysis](https://projectzero.google/2021/08/understanding-network-access-windows-app.html)
+for the DNS-service capability check.
 
 Read restriction uses one shared scope per account. Working directories accumulate until
 the last session and its descendants close; then the broker removes its temporary ACEs,

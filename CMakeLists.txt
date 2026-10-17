@@ -255,6 +255,29 @@ set_target_properties(launch_as_admin PROPERTIES
 )
 
 if(BUILD_TESTING)
+    add_executable(LauncherAppContainerOptionsTests
+        tests/AppContainerOptionsTests.cpp
+        src/conhost/PseudoConsoleHostInvocation.cpp
+    )
+    configure_launch_as_test_target(LauncherAppContainerOptionsTests conhost protocol common)
+    target_link_libraries(LauncherAppContainerOptionsTests PRIVATE launch_as::protocol)
+    add_test(NAME launcher.appcontainer_options COMMAND "$<TARGET_FILE:LauncherAppContainerOptionsTests>")
+    set_tests_properties(launcher.appcontainer_options PROPERTIES LABELS "launcher;unit")
+
+    add_executable(LauncherAppContainerScopeTests
+        tests/AppContainerScopeTests.cpp
+        src/broker/BrokerAppContainerScope.cpp
+    )
+    configure_launch_as_test_target(LauncherAppContainerScopeTests broker common)
+    target_compile_definitions(LauncherAppContainerScopeTests PRIVATE LAUNCH_AS_TESTING)
+    target_link_libraries(LauncherAppContainerScopeTests PRIVATE launch_as::common Advapi32)
+    add_test(NAME launcher.appcontainer_scope COMMAND "$<TARGET_FILE:LauncherAppContainerScopeTests>")
+    set_tests_properties(launcher.appcontainer_scope PROPERTIES LABELS "broker;integration")
+
+    add_executable(LauncherAppContainerProbe tests/AppContainerProbe.cpp)
+    configure_launch_as_test_target(LauncherAppContainerProbe common)
+    target_link_libraries(LauncherAppContainerProbe PRIVATE launch_as::common Advapi32 Dnsapi)
+
     add_executable(LauncherOptionsTests
         tests/LauncherOptionsTests.cpp
         src/launcher/LauncherOptions.cpp
@@ -309,6 +332,7 @@ if(BUILD_TESTING)
         src/broker/BrokerWriteScope.cpp
         src/broker/BrokerLogonToken.cpp
         src/broker/BrokerProcessLauncher.cpp
+        src/broker/BrokerAppContainerScope.cpp
         src/broker/BrokerProcessLauncher.h
         src/broker/InteractiveDesktopLeaseClient.cpp
         src/broker/InteractiveDesktopLeaseClient.h
@@ -321,6 +345,7 @@ if(BUILD_TESTING)
         src/common/WindowsCommandLine.h
     )
     target_link_libraries(LauncherBrokerPipeTests PRIVATE
+        launch_as::common
         Advapi32
         Userenv
     )
@@ -346,6 +371,7 @@ if(BUILD_TESTING)
         src/protocol/BrokerControlPipe.cpp
         src/protocol/BrokerControlPipe.h
         src/broker/BrokerProcessLauncher.cpp
+        src/broker/BrokerAppContainerScope.cpp
         src/broker/BrokerProcessLauncher.h
         src/broker/InteractiveDesktopLeaseClient.cpp
         src/broker/InteractiveDesktopLeaseClient.h
@@ -359,6 +385,7 @@ if(BUILD_TESTING)
         src/common/WindowsCommandLine.h
     )
     target_link_libraries(LauncherBrokerCommandTests PRIVATE
+        launch_as::common
         Advapi32
         Userenv
     )
@@ -613,6 +640,7 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
             Invoke-BrokerInteractiveAcceptanceTest.ps1
             Invoke-BrokerWriteScopeAcceptanceTest.ps1
             Invoke-BrokerReadScopeAcceptanceTest.ps1
+            Invoke-AppContainerAcceptanceTest.ps1
             Run-InteractiveSessionProbeInSandbox.ps1
             WindowsSandboxAcceptanceSupport.psm1)
         string(REGEX REPLACE "\\.psm?1$" "" script_test_name "${script_name}")
@@ -727,6 +755,7 @@ target_link_libraries(LauncherBrokerAdminTestClient PRIVATE
 
     add_executable(LauncherBrokerProcessLauncherTests
         tests/BrokerProcessLauncherTests.cpp
+        src/broker/BrokerAppContainerScope.cpp
         src/broker/BrokerReadScope.cpp
         src/broker/BrokerWriteScope.cpp
         src/broker/BrokerLogonToken.cpp

@@ -124,7 +124,7 @@ DWORD LaunchBrokerInteractive(std::wstring_view profileId, std::span<const std::
 DWORD LaunchBrokerConsole(std::wstring_view profileId, std::span<const std::wstring> arguments,
     std::wstring_view workingDirectory, const TerminalPipeNames& pipes, bool inheritCursor,
     BrokerControlConnection& connection, DWORD& processId, bool restrictAccess, bool lowIntegrity,
-    bool log)
+    bool log, const AppContainerOptions& appContainer)
 {
     connection.Reset();
     processId = 0;
@@ -145,7 +145,8 @@ DWORD LaunchBrokerConsole(std::wstring_view profileId, std::span<const std::wstr
             request,
             restrictAccess,
             lowIntegrity,
-            log))
+            log,
+            appContainer))
     {
         return ERROR_INVALID_PARAMETER;
     }

@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "AppContainerOptions.h"
+
 #include <Windows.h>
 #include <array>
 #include <span>
@@ -68,6 +70,7 @@ struct BrokerRequest
     bool restrictAccess = false;
     bool lowIntegrity = false;
     bool log = false;
+    AppContainerOptions appContainer;
     std::vector<std::wstring> arguments;
     std::wstring workingDirectory;
     ConsoleRequest console;
@@ -111,7 +114,8 @@ enum class ParseResult
     std::wstring_view profileId, std::span<const std::wstring> arguments,
     std::wstring_view workingDirectory, std::wstring_view pipeIn, std::wstring_view pipeOut,
     std::wstring_view pipeResize, bool inheritCursor, std::string& request,
-    bool restrictAccess = false, bool lowIntegrity = false, bool log = false);
+    bool restrictAccess = false, bool lowIntegrity = false, bool log = false,
+    const AppContainerOptions& appContainer = {});
 [[nodiscard]] bool BuildInteractiveLaunchRequest(std::wstring_view requestId,
     std::wstring_view profileId, std::span<const std::wstring> arguments,
     std::wstring_view workingDirectory, std::wstring_view leasePipe, std::wstring_view nonce,

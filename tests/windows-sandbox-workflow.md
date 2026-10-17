@@ -70,6 +70,17 @@ live result file. A timeout terminates the process and waits for exit before col
 
 ## Coverage and maintenance
 
+AppContainer console checks exercise zero capabilities, a capability name and its equivalent SID,
+Low process integrity, writes to Medium-labelled workspace files without relabelling,
+profile writes, outside/junction and previous-workspace denial, shared hard-link ACL behavior,
+broker grants on Modify-only workspace roots, automatic propagation to account-owned existing
+workspace and profile contents, and unchanged protected-child and foreign-owned hard-link ACLs,
+new-file inheritance and repeated propagation to account-owned moved-in files,
+preservation of explicit inheritable Medium labels (new-file creation remains denied),
+parent-process memory/handle access denial, DNS-service API denial, descendant confinement,
+`cmd.exe`, invalid SIDs and protected workspaces. The native probe runs from its prepared workspace. It does
+not test a particular AI agent or the host's WFP rules. DNS/proxy feasibility was probed separately.
+
 Acceptance covers the scripted console and normal-completion GUI cases; the remaining
 interactive cases are listed in [Build and test](../README.md#build-and-test). The
 feasibility probe does not replace installed-service acceptance.

@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "AppContainerOptions.h"
 #include "ExitCodes.h"
 
 #include <filesystem>
@@ -31,6 +32,7 @@ struct Options
     bool restrictAccess = false;
     bool lowIntegrity = false;
     bool log = false;
+    AppContainerOptions appContainer;
 };
 
 void PrintUsage();

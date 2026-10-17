@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "AppContainerOptions.h"
 #include "Win32Support.h"
 
 #include <Windows.h>
@@ -45,7 +46,8 @@ class BrokerChildProcess final
     [[nodiscard]] DWORD CreateSuspendedInJob(HANDLE token, std::wstring_view accountName,
         const std::wstring& executable, std::vector<wchar_t>& commandLine,
         const std::wstring& directory, BOOL inheritHandles, DWORD creationFlags,
-        STARTUPINFOW& startupInfo, bool lowIntegrity, BrokerReadScope* readScope);
+        STARTUPINFOW& startupInfo, bool lowIntegrity, BrokerReadScope* readScope,
+        const AppContainerOptions& appContainer = {}, std::wstring* preparationContext = nullptr);
 
     UniqueHandle job_;
     UniqueHandle process_;
@@ -58,7 +60,8 @@ class BrokerChildProcess final
     friend DWORD CreateBrokerJob(BrokerChildProcess& child);
     friend DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,
         std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
-        BrokerChildProcess& child, bool lowIntegrity, BrokerReadScope* readScope);
+        BrokerChildProcess& child, bool lowIntegrity, BrokerReadScope* readScope,
+        const AppContainerOptions& appContainer, std::wstring* preparationContext);
     friend DWORD LaunchBrokerInteractiveProcess(HANDLE token, std::wstring_view accountName,
         std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
         DWORD targetSessionId, std::wstring_view leasePipeName, std::wstring_view leaseNonce,
@@ -75,7 +78,8 @@ class BrokerChildProcess final
     std::wstring_view workingDirectory, std::wstring& resolvedDirectory);
 [[nodiscard]] DWORD LaunchBrokerConsoleHost(HANDLE token, std::wstring_view accountName,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
-    BrokerChildProcess& child, bool lowIntegrity = false, BrokerReadScope* readScope = nullptr);
+    BrokerChildProcess& child, bool lowIntegrity = false, BrokerReadScope* readScope = nullptr,
+    const AppContainerOptions& appContainer = {}, std::wstring* preparationContext = nullptr);
 [[nodiscard]] DWORD LaunchBrokerInteractiveProcess(HANDLE token, std::wstring_view accountName,
     std::span<const std::wstring> arguments, std::wstring_view workingDirectory,
     DWORD targetSessionId, std::wstring_view leasePipeName, std::wstring_view leaseNonce,

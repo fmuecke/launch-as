@@ -26,6 +26,69 @@ template <std::size_t Size>
 
 int wmain()
 {
+    const auto container = Parse(std::array {
+        L"launch-as.exe",
+        L"--user",
+        L"LaunchAsUser",
+        L"--appcontainer",
+        L"--",
+        L"C:\\Windows\\System32\\cmd.exe"
+    });
+    const auto capability = Parse(std::array {
+        L"launch-as.exe",
+        L"--user",
+        L"LaunchAsUser",
+        L"--appcontainer",
+        L"--appcontainer-capability",
+        L"internetClient",
+        L"--appcontainer-capability",
+        L"S-1-15-3-4",
+        L"--",
+        L"C:\\Windows\\System32\\cmd.exe"
+    });
+    if (!Expect(container && container->appContainer.enabled &&
+                    container->appContainer.capabilities.empty(),
+            L"AppContainer must default to zero capabilities.") ||
+        !Expect(capability && capability->appContainer.capabilities ==
+                                  std::vector<std::wstring> {L"internetClient", L"S-1-15-3-4"},
+            L"Capabilities were not retained."))
+        return 1;
+    for (const auto* conflict : {L"--appcontainer", L"--restrict-access", L"--low-integrity"})
+    {
+        if (!Expect(!Parse(std::array {
+                        L"launch-as.exe",
+                        L"--user",
+                        L"LaunchAsUser",
+                        L"--appcontainer",
+                        conflict,
+                        L"--",
+                        L"C:\\Windows\\System32\\cmd.exe"
+                    }),
+                L"Conflicting or duplicate AppContainer flags were accepted."))
+            return 1;
+    }
+    if (!Expect(!Parse(std::array {
+                    L"launch-as.exe",
+                    L"--user",
+                    L"LaunchAsUser",
+                    L"--appcontainer-capability",
+                    L"internetClient",
+                    L"--",
+                    L"C:\\Windows\\System32\\cmd.exe"
+                }),
+            L"A capability without AppContainer was accepted.") ||
+        !Expect(!Parse(std::array {
+                    L"launch-as.exe",
+                    L"--user",
+                    L"LaunchAsUser",
+                    L"--appcontainer",
+                    L"--mode",
+                    L"interactive",
+                    L"--",
+                    L"C:\\Windows\\System32\\cmd.exe"
+                }),
+            L"Interactive AppContainer was accepted."))
+        return 1;
     for (const auto* retired : {L"--restrict-reads", L"--restrict-writes"})
     {
         if (!Expect(!Parse(std::array {

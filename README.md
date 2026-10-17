@@ -11,7 +11,7 @@ The first version was v0.3.2. [Browse old stable v0.3.2 version](https://github.
   can obtain `PROCESS_VM_READ` and `PROCESS_TERMINATE`, allowing memory reads and termination.
   Protected processes or processes with custom DACLs may not be accessible.
 
-**1.3.0 · Windows x64 · console and shared-desktop GUI programs**
+**current version · Windows x64 · console and shared-desktop GUI programs**
 
 `launch-as` starts a program as a **launch-as-managed local standard account** through the
 `launch-as-broker` Windows service. The client never accepts, reads, stores, or transmits the
@@ -26,8 +26,7 @@ intentionally possible even though the target retains an independent logon SID.
 
 ## Why not PsExec or `runas.exe`?
 
-Both `PsExec` and `runas.exe` can start the agent under a dedicated Windows user, but they do not 
-provide the isolation required by `launch-as`.
+Both `PsExec` and `runas.exe` can start the agent under a dedicated Windows user, but they do not provide the isolation required by `launch-as`.
 
 In testing, both approaches retain the interactive user's **logon SID** in the child token.
 Consequently, the sandboxed process can still access processes belonging to the interactive 
@@ -43,7 +42,7 @@ them unsuitable for workflows such as running an agent directly inside a VS Code
 
 ## Install the binary package
 
-Extract `launch-as-v1.3.0-win64.zip` and run the bundled setup script from its extracted
+Extract `launch-as-v1.4.0-win64.zip` and run the bundled setup script from its extracted
 directory. It elevates when needed, installs or updates the demand-start service and all four
 executables into `%ProgramFiles%\launch-as`, and can create a default account. Updating takes over
 that account and replaces its broker-owned password. The user who runs a fresh `install` becomes the
@@ -280,5 +279,4 @@ shared-desktop adapters, their different lifetimes, and their security boundarie
 
 ## License
 
-`launch-as` is licensed under the [GNU General Public License version 3 only](LICENSE). Source for
-this preview is available at <https://github.com/fmuecke/launch-as/tree/v1.3.0>.
+`launch-as` is licensed under the [GNU General Public License version 3 only](LICENSE). Source for this version is available at <https://github.com/fmuecke/launch-as>.

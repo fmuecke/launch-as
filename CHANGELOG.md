@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0] - 2026-10-19
+
+- Added: Experimental console-only AppContainer confinement for commands and descendants through `--appcontainer-experimental`, with zero capabilities by default. Repeat `--appcontainer-capability <name-or-SID>` to grant capabilities explicitly.
+- Security: AppContainer profiles and inheritable Modify grants on the managed profile and workspace persist after exit, including failed launches. Existing descendants receive grants using the managed account's metadata permissions; protected child ACLs remain unchanged. This is not an exact filesystem allowlist.
+- Limitations: AppContainer cannot combine with `--restrict-access` or `--low-integrity`. Network capabilities can permit DNS-service requests; WFP policy and loopback exemptions remain separate controls.
+- Tests: Added AppContainer option, protocol, identity and filesystem-scope tests, plus a Windows Sandbox acceptance script.
+
 ## [1.4.1] - 2026-10-19
 
 - Security: Interactive mode now permits named-object and subdirectory creation in the caller's shared namespace. Predictable names may allow IPC spoofing or denial of service. The grant is non-inheritable, leaves existing object ACLs unchanged, and is removed after the target process tree exits.

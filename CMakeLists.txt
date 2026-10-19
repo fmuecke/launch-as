@@ -6,7 +6,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
     launch_as
-    VERSION 1.4.1
+    VERSION 1.5.0
     LANGUAGES CXX RC
 )
 

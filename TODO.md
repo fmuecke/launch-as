@@ -1,2 +1,4 @@
 - [ ] Add a `quiet` or `verbose` switch that controls the broker messages for starting & stopping
-- [ ] verbose mode could also print some more info like 
+- [ ] verbose mode could also print some more info like (t.b.d.)
+- [ ] Discuss how to separate AppContainer capability configuration from execution, including loopback exemptions.
+- [ ] Discuss MXC's lifecycle as a reference: provision the account, start/stop the session, then deprovision the account and clean up.

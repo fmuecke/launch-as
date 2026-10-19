@@ -177,6 +177,10 @@ Only `S-1-15-3-...` capability SIDs are accepted. At most 32 distinct input valu
 AppContainer currently requires console mode and cannot combine with `--restrict-access`
 or `--low-integrity`.
 
+**Experimental limitation:** AppContainer setup is coupled to launching a command. Separating
+capability and loopback configuration from execution, with explicit provisioning, session
+start/stop and cleanup, remains an open design discussion; see [TODO.md](TODO.md).
+
 The terminal host stays outside the container; the command and its descendants run inside it
 at Low integrity. The broker adds an inheritable Modify grant on the managed profile and
 workspace roots. It verifies the account's existing read/write/execute access and pins

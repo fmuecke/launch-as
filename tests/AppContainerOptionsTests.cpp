@@ -74,7 +74,7 @@ int wmain()
     std::array<const wchar_t*, 14> arguments {
         L"host.exe",
         L"--internal-pseudoconsole-host",
-        L"--appcontainer",
+        L"--appcontainer-experimental",
         L"--appcontainer-capability",
         L"internetClient",
         L"--pipe-in",

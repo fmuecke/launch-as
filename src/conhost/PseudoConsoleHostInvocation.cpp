@@ -43,7 +43,7 @@ bool ParsePseudoConsoleHostInvocation(
         separatorIndex < arguments.size() && std::wstring_view(arguments[separatorIndex]) != L"--";)
     {
         const std::wstring_view name(arguments[separatorIndex++]);
-        if (name == L"--appcontainer" && !invocation.appContainer.enabled)
+        if (name == L"--appcontainer-experimental" && !invocation.appContainer.enabled)
         {
             invocation.appContainer.enabled = true;
             continue;

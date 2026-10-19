@@ -75,7 +75,7 @@ $protectedAcl = New-ProtectedCanary $protectedPath
 
 $names = @()
 foreach ($capability in @('', 'internetClient', 'S-1-15-3-1')) {
-    $options = @('--appcontainer')
+    $options = @('--appcontainer-experimental')
     $expected = 'minimal'
     if ($capability) { $options += @('--appcontainer-capability', $capability); $expected = 'capability' }
     $output = & $LauncherPath --user $Account @options --working-directory $work -- $probe $work $outside $expected 2>&1
@@ -102,7 +102,7 @@ $output = & $LauncherPath --user $Account --working-directory $scope -- `
 if ($LASTEXITCODE -ne 0) { throw 'Could not create the managed moved-in fixture.' }
 $output | Write-Host
 Move-Item -LiteralPath (Join-Path $scope 'managed-moved-in.txt') -Destination $work
-$output = & $LauncherPath --user $Account --appcontainer --working-directory $work -- `
+$output = & $LauncherPath --user $Account --appcontainer-experimental --working-directory $work -- `
     $probe --check-relaunch $work 2>&1
 $exitCode = $LASTEXITCODE
 $output | Write-Host
@@ -124,7 +124,7 @@ Set-Content (Join-Path $work 'shared.txt') 'caller-owned shared file'
 New-Item -ItemType HardLink -Path (Join-Path $second 'hardlink.txt') -Value (Join-Path $work 'shared.txt') | Out-Null
 & cmd.exe /d /c mklink /J (Join-Path $second 'junction') $work
 if ($LASTEXITCODE -ne 0) { throw 'Could not create second junction.' }
-$output = & $LauncherPath --user $Account --appcontainer --working-directory $second -- `
+$output = & $LauncherPath --user $Account --appcontainer-experimental --working-directory $second -- `
     (Join-Path $second 'probe.exe') $second $work 'minimal' 2>&1
 $exitCode = $LASTEXITCODE
 $output | Write-Host
@@ -135,7 +135,7 @@ if ($exitCode -ne 0 -or $text -notmatch 'AppContainer token, file, process and d
 }
 
 # Check a system console executable independently of the native probe runtime.
-$output = & $LauncherPath --user $Account --appcontainer --working-directory $work -- `
+$output = & $LauncherPath --user $Account --appcontainer-experimental --working-directory $work -- `
     C:\Windows\System32\cmd.exe /d /c echo appcontainer-cmd-passed 2>&1
 $exitCode = $LASTEXITCODE
 $output | Write-Host
@@ -149,7 +149,7 @@ $mediumInheritance = Join-Path $work 'medium-inheritance'
 New-Item -ItemType Directory $mediumInheritance | Out-Null
 & icacls.exe $mediumInheritance /setintegritylevel '(OI)(CI)M' /Q
 if ($LASTEXITCODE -ne 0) { throw 'Could not create the explicit label fixture.' }
-$output = & $LauncherPath --user $Account --appcontainer --working-directory $work -- `
+$output = & $LauncherPath --user $Account --appcontainer-experimental --working-directory $work -- `
     $probe --check-medium-create-denied $mediumInheritance 2>&1
 $exitCode = $LASTEXITCODE
 $output | Write-Host
@@ -165,7 +165,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Could not create the unauthorized workspace fi
 $readOnlyAcl = (Get-Acl $readOnly).Sddl
 try {
     $ErrorActionPreference = 'Continue'
-    $output = & $LauncherPath --user $Account --appcontainer --working-directory $readOnly -- `
+    $output = & $LauncherPath --user $Account --appcontainer-experimental --working-directory $readOnly -- `
         C:\Windows\System32\cmd.exe /d /c exit 0 2>&1
 } finally { $ErrorActionPreference = 'Stop' }
 if ($LASTEXITCODE -eq 0 -or (Get-Acl $readOnly).Sddl -ne $readOnlyAcl) {
@@ -176,14 +176,14 @@ $output | Write-Host
 # Non-capability SIDs must fail without falling back to an unrestricted launch.
 try {
     $ErrorActionPreference = 'Continue'
-    $output = & $LauncherPath --user $Account --appcontainer --appcontainer-capability 'S-1-5-18' `
+    $output = & $LauncherPath --user $Account --appcontainer-experimental --appcontainer-capability 'S-1-5-18' `
         --working-directory $work -- C:\Windows\System32\cmd.exe /d /c exit 0 2>&1
 } finally { $ErrorActionPreference = 'Stop' }
 if ($LASTEXITCODE -eq 0) { throw 'A non-capability SID was accepted.' }
 $output | Write-Host
 try {
     $ErrorActionPreference = 'Continue'
-    $output = & $LauncherPath --user $Account --appcontainer --working-directory C:\Windows -- `
+    $output = & $LauncherPath --user $Account --appcontainer-experimental --working-directory C:\Windows -- `
         C:\Windows\System32\cmd.exe /d /c exit 0 2>&1
 } finally { $ErrorActionPreference = 'Stop' }
 if ($LASTEXITCODE -eq 0) { throw 'A protected system workspace was prepared.' }

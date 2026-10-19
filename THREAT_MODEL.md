@@ -33,7 +33,7 @@ user, logon SID, and Everyone for Windows runtime compatibility. It leaves integ
 and permits writes wherever those SIDs have write access within accessible paths.
 The independent `--low-integrity` flag lowers integrity to Low. Both flags can be combined.
 
-Console-only `--appcontainer` instead applies Windows AppContainer security capabilities to
+Console-only `--appcontainer-experimental-experimental` instead applies Windows AppContainer security capabilities to
 the command created by the terminal host. Descendants inherit confinement. The terminal host
 remains outside the container. The default capability list is empty; explicit capabilities
 expand access, and network capabilities can authorize DNS-service requests. It cannot combine

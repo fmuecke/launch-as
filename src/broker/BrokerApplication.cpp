@@ -380,7 +380,7 @@ DWORD BrokerApplication::Launch(
     }
     if (request.appContainer.enabled)
     {
-        conhostArguments.emplace_back(L"--appcontainer");
+        conhostArguments.emplace_back(L"--appcontainer-experimental");
         for (const auto& capability : request.appContainer.capabilities)
         {
             conhostArguments.insert(

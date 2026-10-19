@@ -20,7 +20,7 @@ the caller's logon SID or its default access to the caller's processes.
 
 This is a general-purpose alternate-account launcher: its authorised caller can choose a configured
 launch-as-managed account and any absolute executable. Default launches provide identity separation;
-`--appcontainer` adds Windows AppContainer confinement for console commands. Neither protects
+`--appcontainer-experimental-experimental` adds Windows AppContainer confinement for console commands. Neither protects
 against a local administrator or kernel-level attacker. Interactive mode puts
 the target on the caller's shared desktop, so screen, window, clipboard, and input interaction are
 intentionally possible even though the target retains an independent logon SID.
@@ -161,14 +161,14 @@ Console and interactive launches support these controls:
   `--restrict-access` for both controls. Descendants inherit the token controls. Without
   `--restrict-access`, reads follow normal ACLs.
 
-Console launches also support `--appcontainer`, with **zero capabilities by default**:
+Console launches also support `--appcontainer-experimental-experimental-experimental`, with **zero capabilities by default**:
 
 ```powershell
 .\launch-as.exe --user LaunchAsUser --working-directory C:\dev\project `
-    --appcontainer -- C:\Windows\System32\cmd.exe
+    --appcontainer-experimental-experimental-experimental-experimental-experimental -- C:\Windows\System32\cmd.exe
 ```
 
-Repeat `--appcontainer-capability <name-or-SID>` to grant capabilities explicitly, for example
+Repeat `--appcontainer-experimental-experimental-experimental-capability <name-or-SID>` to grant capabilities explicitly, for example
 `internetClient`, `privateNetworkClientServer`, or a capability SID such as `S-1-15-3-1`.
 These network capabilities also permit DNS-service requests; leave them absent when preventing
 service-mediated DNS exfiltration is the goal. Windows derives custom capability names too,

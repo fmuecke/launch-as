@@ -30,7 +30,7 @@ int wmain()
         L"launch-as.exe",
         L"--user",
         L"LaunchAsUser",
-        L"--appcontainer",
+        L"--appcontainer-experimental",
         L"--",
         L"C:\\Windows\\System32\\cmd.exe"
     });
@@ -38,7 +38,7 @@ int wmain()
         L"launch-as.exe",
         L"--user",
         L"LaunchAsUser",
-        L"--appcontainer",
+        L"--appcontainer-experimental",
         L"--appcontainer-capability",
         L"internetClient",
         L"--appcontainer-capability",
@@ -53,13 +53,14 @@ int wmain()
                                   std::vector<std::wstring> {L"internetClient", L"S-1-15-3-4"},
             L"Capabilities were not retained."))
         return 1;
-    for (const auto* conflict : {L"--appcontainer", L"--restrict-access", L"--low-integrity"})
+    for (const auto* conflict :
+        {L"--appcontainer-experimental", L"--restrict-access", L"--low-integrity"})
     {
         if (!Expect(!Parse(std::array {
                         L"launch-as.exe",
                         L"--user",
                         L"LaunchAsUser",
-                        L"--appcontainer",
+                        L"--appcontainer-experimental",
                         conflict,
                         L"--",
                         L"C:\\Windows\\System32\\cmd.exe"
@@ -81,7 +82,7 @@ int wmain()
                     L"launch-as.exe",
                     L"--user",
                     L"LaunchAsUser",
-                    L"--appcontainer",
+                    L"--appcontainer-experimental",
                     L"--mode",
                     L"interactive",
                     L"--",

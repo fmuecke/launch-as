@@ -23,7 +23,7 @@ void PrintUsage()
                       [--mode console|interactive]
                       [--working-directory <directory>]
                       [--restrict-access] [--low-integrity] [--log]
-                      [--appcontainer [--appcontainer-capability <name-or-SID>]...]
+                      [--appcontainer-experimental [--appcontainer-capability <name-or-SID>]...]
                       -- <absolute-executable> [arguments...]
 
   Starts a console session by default, or a GUI process on the caller's shared desktop in
@@ -37,7 +37,7 @@ void PrintUsage()
   and working directory Low, where account permissions allow.
   --log appends launch steps and folder deny/exclusion decisions to
   %LOCALAPPDATA%\launch-as\launch-as.log for the caller.
-  --appcontainer confines the console command and descendants, with zero capabilities by default.
+  --appcontainer-experimental confines the console command and descendants, with zero capabilities by default.
   Repeat --appcontainer-capability to grant Windows capability names or S-1-15-3-... SIDs.
   Grants propagate through the profile and workspace using the managed account's metadata rights.
   Existing files the account cannot update need owner preparation; protected ACLs are preserved.
@@ -66,7 +66,7 @@ std::optional<Options> ParseOptions(std::span<wchar_t*> arguments)
     for (std::size_t index = firstOptionIndex; index < arguments.size(); ++index)
     {
         const std::wstring_view name(arguments[index]);
-        if (name == L"--appcontainer")
+        if (name == L"--appcontainer-experimental")
         {
             if (options.appContainer.enabled)
             {

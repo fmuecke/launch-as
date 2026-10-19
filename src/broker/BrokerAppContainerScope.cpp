@@ -113,7 +113,8 @@ DWORD GrantPackageAccess(HANDLE token, HANDLE object, PSID sid)
         }
     }
     UniqueHandle writable;
-    error = ReopenPinnedFile(object, FILE_GENERIC_READ | FILE_GENERIC_EXECUTE | WRITE_DAC, writable);
+    error =
+        ReopenPinnedFile(object, FILE_GENERIC_READ | FILE_GENERIC_EXECUTE | WRITE_DAC, writable);
     if (error != ERROR_SUCCESS)
     {
         return error;

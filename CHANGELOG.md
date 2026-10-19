@@ -6,6 +6,7 @@
 - Security: AppContainer profiles and inheritable Modify grants on the managed profile and workspace persist after exit, including failed launches. Existing descendants receive grants using the managed account's metadata permissions; protected child ACLs remain unchanged. This is not an exact filesystem allowlist.
 - Limitations: AppContainer cannot combine with `--restrict-access` or `--low-integrity`. Network capabilities can permit DNS-service requests; WFP policy and loopback exemptions remain separate controls.
 - Tests: Added AppContainer option, protocol, identity and filesystem-scope tests, plus a Windows Sandbox acceptance script.
+- Fixed: Re-enabled list-folder on --restrict-access (was too restrictive)
 
 ## [1.4.1] - 2026-10-19
 

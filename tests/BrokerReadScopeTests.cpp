@@ -5,6 +5,7 @@
 #include "BrokerLogonToken.h"
 #include "BrokerReadScope.h"
 #include "FileSystemAccess.h"
+#include "ScopeTestSupport.h"
 #include "TestSupport.h"
 
 #include <Aclapi.h>
@@ -237,7 +238,7 @@ bool TestVolumePreparationRetry(HANDLE token)
 int wmain()
 {
     test::TemporaryDirectory temporary;
-    if (!temporary.created())
+    if (!temporary.created() || !test::GrantScopeFixtureAccess(temporary.path()))
     {
         return 1;
     }
@@ -326,7 +327,28 @@ int wmain()
         FILE_FLAG_BACKUP_SEMANTICS,
         nullptr));
     const auto protectedOriginal = DaclText(protectedRootHandle.get());
+    // Exercise legacy inherited ACLs without AUTO_INHERITED even when the host's temp
+    // directory normally creates auto-inherited ACLs (unlike some Server 2022 runners).
+    LocalAllocation<PSECURITY_DESCRIPTOR> legacyDescriptor;
+    PACL legacyDacl = nullptr;
+    if (GetSecurityInfo(originalHandle.get(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            nullptr,
+            nullptr,
+            &legacyDacl,
+            nullptr,
+            legacyDescriptor.address()) != ERROR_SUCCESS ||
+        SetObjectDacl(originalHandle.get(), legacyDacl, 0) != ERROR_SUCCESS)
+    {
+        return 1;
+    }
     const auto originalDacl = DaclText(originalHandle.get());
+    if (!Expect(originalDacl.starts_with(L"D:("),
+            L"The legacy ACL fixture must lack auto-inheritance and protection flags."))
+    {
+        return 1;
+    }
     UniqueHandle baseFileHandle(CreateFileW((volume / L"base-file.txt").c_str(),
         READ_CONTROL,
         FILE_SHARE_READ | FILE_SHARE_WRITE,
@@ -535,16 +557,15 @@ int wmain()
     const auto preparedDacl = DaclText(originalHandle.get());
     LocalAllocation<PSECURITY_DESCRIPTOR> originalDescriptor;
     PACL originalAcl = nullptr;
+    SECURITY_DESCRIPTOR_CONTROL originalControl {};
+    DWORD originalRevision = 0;
+    // Simulate deny removal without SetSecurityInfo's auto-inheritance side effects.
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
             originalDacl.c_str(), SDDL_REVISION_1, originalDescriptor.address(), nullptr) ||
         !GetSecurityDescriptorDacl(originalDescriptor.get(), &present, &originalAcl, &defaulted) ||
-        SetSecurityInfo(originalHandle.get(),
-            SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION,
-            nullptr,
-            nullptr,
-            originalAcl,
-            nullptr) != ERROR_SUCCESS)
+        !GetSecurityDescriptorControl(
+            originalDescriptor.get(), &originalControl, &originalRevision) ||
+        SetObjectDacl(originalHandle.get(), originalAcl, originalControl) != ERROR_SUCCESS)
     {
         return 1;
     }

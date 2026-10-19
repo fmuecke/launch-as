@@ -4,6 +4,7 @@
 
 #include "BrokerLogonToken.h"
 #include "BrokerWriteScope.h"
+#include "ScopeTestSupport.h"
 #include "TestSupport.h"
 
 #include <Aclapi.h>
@@ -574,13 +575,31 @@ int wmain()
         return 1;
     }
     UniqueHandle token(rawToken);
+    // CI may start tests elevated. Establish the managed account's Medium baseline in
+    // this test process before creating fixtures; never change the parent runner's token.
+    std::array<BYTE, SECURITY_MAX_SID_SIZE> mediumSid {};
+    DWORD mediumSidBytes = static_cast<DWORD>(mediumSid.size());
+    if (!CreateWellKnownSid(WinMediumLabelSid, nullptr, mediumSid.data(), &mediumSidBytes))
+    {
+        return 1;
+    }
+    TOKEN_MANDATORY_LABEL mediumIntegrity {{mediumSid.data(), SE_GROUP_INTEGRITY}};
+    if (!SetTokenInformation(token.get(),
+            TokenIntegrityLevel,
+            &mediumIntegrity,
+            static_cast<DWORD>(sizeof(mediumIntegrity)) + mediumSidBytes))
+    {
+        const DWORD error = GetLastError();
+        std::wcerr << L"Could not establish Medium test integrity: " << error << L"\n";
+        return 1;
+    }
     std::vector<BYTE> sourceIntegrity;
     if (!Expect(QueryTokenInformation(token.get(), TokenIntegrityLevel, sourceIntegrity) ==
                         ERROR_SUCCESS &&
                     IsWellKnownSid(
                         reinterpret_cast<TOKEN_MANDATORY_LABEL*>(sourceIntegrity.data())->Label.Sid,
                         WinMediumLabelSid),
-            L"Run this test from a Medium-integrity executable and token."))
+            L"The test token must have Medium integrity."))
     {
         return 1;
     }
@@ -627,6 +646,11 @@ int wmain()
         return 1;
     }
     const auto root = std::filesystem::temp_directory_path() / (L"launch-as-scope-" + suffix);
+    std::filesystem::create_directory(root);
+    if (!test::GrantScopeFixtureAccess(root))
+    {
+        return 1;
+    }
     const auto profile = root / L"profile";
     const auto work = root / L"work";
     const auto outside = root / L"outside.txt";

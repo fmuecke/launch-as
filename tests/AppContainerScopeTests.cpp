@@ -3,6 +3,8 @@
 // Project: https://github.com/fmuecke/launch-as
 
 #include "BrokerAppContainerScope.h"
+#include "FileSystemAccess.h"
+#include "ScopeTestSupport.h"
 #include "TestSupport.h"
 
 #include <Aclapi.h>
@@ -44,7 +46,8 @@ std::wstring Permissions(const std::filesystem::path& path, bool labelOnly = fal
 int wmain()
 {
     test::TemporaryDirectory temporary;
-    if (!Expect(temporary.created(), L"Could not create inheritance fixture."))
+    if (!Expect(temporary.created() && test::GrantScopeFixtureAccess(temporary.path()),
+            L"Could not create inheritance fixture."))
     {
         return 1;
     }
@@ -124,10 +127,48 @@ int wmain()
 
     const auto late = work / L"late.txt";
     std::filesystem::rename(root / L"late.txt", late);
+    // Model an unprotected moved-in file explicitly. Elevated runners can leave this
+    // fixture's retained DACL protected; protected children are checked separately above.
+    LocalAllocation<PSECURITY_DESCRIPTOR> movedDescriptor;
+    PACL movedDacl = nullptr;
+    UniqueHandle moved(CreateFileW(late.c_str(),
+        READ_CONTROL | WRITE_DAC,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr));
+    if (!moved ||
+        GetSecurityInfo(moved.get(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            nullptr,
+            nullptr,
+            &movedDacl,
+            nullptr,
+            movedDescriptor.address()) != ERROR_SUCCESS ||
+        SetObjectDacl(moved.get(), movedDacl, 0) != ERROR_SUCCESS)
+    {
+        return 1;
+    }
+    moved.reset();
     const auto before = Permissions(late);
-    passed = Expect(!before.empty() && before.find(package) == std::wstring::npos &&
-                        prepare() == ERROR_SUCCESS &&
-                        Permissions(late).find(package) != std::wstring::npos,
+    passed = Expect(!before.empty() && !before.starts_with(L"D:P") &&
+                        before.find(package) == std::wstring::npos,
+                 L"The moved-in fixture must be unprotected and lack package access.") &&
+             passed;
+    const DWORD repeatError = prepare();
+    const auto after = Permissions(late);
+    if (repeatError != ERROR_SUCCESS)
+    {
+        std::wcerr << L"Repeated preparation error=" << repeatError << L", " << context << L"\n";
+    }
+    if (after.find(package) == std::wstring::npos)
+    {
+        std::wcerr << L"Moved-in DACL before: " << before << L"\nAfter: " << after << L"\nRoot: "
+                   << Permissions(work) << L"\n";
+    }
+    passed = Expect(repeatError == ERROR_SUCCESS && after.find(package) != std::wstring::npos,
                  L"An existing root grant prevented propagation to a moved-in file.") &&
              passed;
     const auto propagated = Permissions(late);

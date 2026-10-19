@@ -586,9 +586,29 @@ int wmain()
              passed;
     passed = Expect(!CanOpen(blocked / L"file.txt", GENERIC_READ) &&
                         !CanOpen(otherProfile / L"file.txt", GENERIC_READ) &&
+                        !CanOpen(workSibling / L"file.txt", GENERIC_READ) &&
                         !CanOpen(otherVolume / L"file.txt", GENERIC_READ),
                  L"Read restriction did not block an excluded path.") &&
              passed;
+    for (const auto& ancestor : {volume, profile.parent_path(), work.parent_path()})
+    {
+        passed = Expect(CanOpen(ancestor, FILE_LIST_DIRECTORY),
+                     L"Allowed-path ancestors must remain listable for path inspection.") &&
+                 passed;
+        for (const DWORD access : std::array<DWORD, 6> {
+                 FILE_ADD_FILE,
+                 FILE_ADD_SUBDIRECTORY,
+                 FILE_DELETE_CHILD,
+                 DELETE,
+                 WRITE_DAC,
+                 WRITE_OWNER
+             })
+        {
+            passed = Expect(!CanOpen(ancestor, access),
+                         L"Listing an allowed-path ancestor must not permit modifying it.") &&
+                     passed;
+        }
+    }
     passed = Expect(CanOpen(volume / L"base-file.txt", GENERIC_READ),
                  L"Loose files in allowed-path ancestors must retain normal ACL access.") &&
              passed;

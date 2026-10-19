@@ -98,9 +98,10 @@ and descendant inheritance.
 
 Access restriction (`--restrict-access`) is tested with and without `--low-integrity` in
 console and interactive modes. Read-scope acceptance covers descendant
-inheritance, protected-child and junction denial, profile/worktree writes, two concurrent
-interactive sessions with different working directories, mixed-mode rejection, restoration
-after the last close, and failed-launch restoration. It runs only in the disposable guest.
+inheritance, long-name lookup for profile/worktree paths, protected-child and junction denial,
+profile/worktree writes, two concurrent interactive sessions with different working directories,
+mixed-mode rejection, restoration after the last close, and failed-launch restoration.
+It runs only in the disposable guest.
 Read-restricted identity checks query the native token and run `whoami`. The token retains
 only an existing disabled working-set privilege for runtime compatibility.
 Logged console and GUI launches also verify the caller's UTF-8 text log, folder decisions,

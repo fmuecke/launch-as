@@ -37,6 +37,18 @@ bool WriteFileAt(const std::filesystem::path& path)
            written == sizeof(value);
 }
 
+bool CheckLongPathInspection(const std::filesystem::path& path)
+{
+    std::array<wchar_t, 32'768> name {};
+    if (GetLongPathNameW(path.c_str(), name.data(), static_cast<DWORD>(name.size())) == 0)
+    {
+        const DWORD error = GetLastError();
+        std::wcerr << L"Long-path inspection failed: " << path << L" (error " << error << L")\n";
+        return false;
+    }
+    return true;
+}
+
 bool Run(const std::wstring& executable, const std::vector<std::wstring>& arguments)
 {
     const auto command = BuildWindowsCommandLine(executable, arguments);
@@ -243,6 +255,12 @@ int wmain(int count, wchar_t** arguments)
     readOutside.reset();
     if (restrictAccess)
     {
+        if (!CheckLongPathInspection(
+                std::filesystem::path(profile.data()) / L"launch-as-write-scope-probe.txt") ||
+            !CheckLongPathInspection(std::filesystem::path(arguments[1]) / L"new.txt"))
+        {
+            return 1;
+        }
         UniqueHandle readAlias(CreateFileW(
             (std::filesystem::path(arguments[1]) / L"junction" / L"outside.txt").c_str(),
             GENERIC_READ,

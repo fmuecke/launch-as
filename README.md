@@ -151,6 +151,8 @@ Console and interactive launches support these controls:
   On each launch the broker ensures explicit account-SID denies on other existing base
   folders of mounted local volumes and on sibling folders along the allowed paths.
   It ensures traversal through allowed roots and their ancestors without granting new write rights.
+  Ancestors retain normal directory-listing permissions, so names of excluded sibling folders
+  can be visible while access through those folders remains denied.
   It changes only folder DACLs, without propagating ACEs or editing individual file DACLs.
   It removes traversal bypass from the launch token, so protected child ACLs cannot bypass
   a base deny through ordinary paths.
@@ -250,9 +252,12 @@ this path restriction. Allowed system trees retain their normal ACLs and the exi
 write-restricted-token behavior; this does not make them uniformly read-only.
 The token retains only the account's existing working-set privilege, disabled, for tools
 such as `whoami`; traversal bypass and all other privileges are removed.
+Windows normalized-name queries (`GetFinalPathNameByHandleW` with `FILE_NAME_NORMALIZED`)
+can return access denied without traversal bypass, even for allowed files. Tools that
+require these queries can be incompatible with `--restrict-access`.
 
 Add `--log` to append launch steps, folders selected for deny, folders excluded from deny,
-traversal-only ancestors, skipped empty drives, and ACL restoration to
+allowed-path ancestors, skipped empty drives, and ACL restoration to
 `%LOCALAPPDATA%\launch-as\launch-as.log` for the caller. The client collects the broker's
 diagnostics when the launch attempt returns and when its session closes. Entries include the
 request ID, account, path, and Win32 result; command arguments and credentials are omitted.

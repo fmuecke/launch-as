@@ -25,8 +25,10 @@ std::mutex readScopeMutex;
 thread_local DWORD (*volumeProbeForTesting)(std::wstring_view, UINT&) = nullptr;
 #endif
 
-constexpr DWORD AncestorDeny = FILE_LIST_DIRECTORY | FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY |
-                               FILE_DELETE_CHILD | DELETE | WRITE_DAC | WRITE_OWNER;
+// Runtimes can need ancestor listings to normalize otherwise accessible paths.
+// Keep create/delete and ACL changes denied; excluded sibling folders retain full denies.
+constexpr DWORD AncestorDeny =
+    FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | FILE_DELETE_CHILD | DELETE | WRITE_DAC | WRITE_OWNER;
 
 bool Within(std::wstring_view path, std::wstring_view root)
 {

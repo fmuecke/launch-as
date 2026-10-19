@@ -35,7 +35,9 @@ For prerequisites and formatting behavior, see [Build and test](../README.md#bui
 
 ## Guest context
 
-Integration runs as guest SYSTEM. Acceptance and the session probe connect a visible
+Integration runs guest-local copies of the test executables as SYSTEM, so host integrity
+labels on shared images cannot lower their process integrity. Results remain in the share.
+Acceptance and the session probe connect a visible
 guest desktop and bootstrap under `ExistingLogin`; they require no manual guest
 commands or UAC interaction. Both runners retry login error `0x80070520` for a bounded
 window; if that expires, inspect guest desktop/login readiness.

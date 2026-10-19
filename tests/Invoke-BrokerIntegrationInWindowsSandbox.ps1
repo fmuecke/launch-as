@@ -122,8 +122,13 @@ $sandboxResult = Invoke-WindowsSandboxTest `
             else {
                 ' ' + ($argumentText -join ' ')
             }
-            $testCommand = 'cmd.exe /d /s /c ""{0}"{1} > "{2}" 2>&1"' -f `
-                $testCase.Executable, $argumentSuffix, $guestResultPath
+            # A shared image can inherit host Low/Medium labels and lower the SYSTEM token's
+            # integrity. A guest-local copy inherits guest security instead; results stay shared.
+            $guestExecutablePath = '%TEMP%\' + [IO.Path]::GetFileName($testCase.Executable)
+            $testCommand = (
+                'cmd.exe /d /s /c "copy /b /y "{0}" "{1}" > "{3}" 2>&1 && ' +
+                '"{1}"{2} >> "{3}" 2>&1"'
+            ) -f $testCase.Executable, $guestExecutablePath, $argumentSuffix, $guestResultPath
             $execution = & $sandbox.InvokeCommand `
                 -Command $testCommand `
                 -Phase $testCase.Name `

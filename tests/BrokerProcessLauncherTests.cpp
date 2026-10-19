@@ -99,6 +99,18 @@ void ObserveSessionAssignment()
     {
         return false;
     }
+    std::vector<BYTE> integrity;
+    if (!Expect(launch_as::QueryTokenInformation(processToken, TokenIntegrityLevel, integrity) ==
+                        ERROR_SUCCESS &&
+                    IsWellKnownSid(
+                        reinterpret_cast<TOKEN_MANDATORY_LABEL*>(integrity.data())->Label.Sid,
+                        WinSystemLabelSid),
+            L"The SYSTEM privilege test requires System integrity. Execute a guest-local copy; "
+            L"shared-folder image labels can lower process integrity."))
+    {
+        CloseHandle(processToken);
+        return false;
+    }
     if (!Expect(TcbHasState(processToken, true),
             L"This test requires the default SYSTEM state with TCB initially enabled.") ||
         !Expect(launch_as::broker::DisableBrokerProcessTcbPrivilege() == ERROR_SUCCESS &&

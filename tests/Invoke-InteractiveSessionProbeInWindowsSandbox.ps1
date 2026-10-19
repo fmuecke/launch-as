@@ -64,6 +64,7 @@ $artifactPaths = @(
     (Join-Path $configurationDirectory 'LauncherInteractiveLeaseHandshakeProbe.exe')
     (Join-Path $PSScriptRoot $driverFileName)
     (Join-Path $PSScriptRoot 'Show-LauncherAcceptanceWindow.ps1')
+    (Join-Path $PSScriptRoot 'LauncherAcceptanceLogon.cs')
 )
 foreach ($artifactPath in $artifactPaths) {
     if (-not (Test-Path -LiteralPath $artifactPath -PathType Leaf)) {

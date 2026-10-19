@@ -3,6 +3,7 @@
 // Project: https://github.com/fmuecke/launch-as
 
 #include "InteractiveDesktopAclLease.h"
+#include "NamedObjectDirectoryTestSupport.h"
 
 #include <Sddl.h>
 #include <Windows.h>
@@ -59,19 +60,21 @@ namespace
     return result;
 }
 
-[[nodiscard]] DWORD ReadDaclSddl(HANDLE object, std::wstring& value)
+[[nodiscard]] DWORD ReadDaclSddl(HANDLE object, std::wstring& value, bool kernelObject = false)
 {
     value.clear();
     DWORD required = 0;
     SECURITY_INFORMATION information = DACL_SECURITY_INFORMATION;
-    GetUserObjectSecurity(object, &information, nullptr, 0, &required);
+    launch_as::test::ReadInteractiveObjectSecurity(
+        object, kernelObject, &information, nullptr, 0, &required);
     const DWORD sizeError = GetLastError();
     if (sizeError != ERROR_INSUFFICIENT_BUFFER || required == 0)
     {
         return sizeError == ERROR_SUCCESS ? ERROR_INVALID_SECURITY_DESCR : sizeError;
     }
     std::vector<BYTE> descriptor(required);
-    if (!GetUserObjectSecurity(object, &information, descriptor.data(), required, &required))
+    if (!launch_as::test::ReadInteractiveObjectSecurity(
+            object, kernelObject, &information, descriptor.data(), required, &required))
     {
         return GetLastError();
     }
@@ -97,19 +100,22 @@ namespace
     return result;
 }
 
-[[nodiscard]] DWORD ReadLeaseMask(HANDLE object, PSID sid, ACCESS_MASK& mask)
+[[nodiscard]] DWORD ReadLeaseMask(
+    HANDLE object, PSID sid, ACCESS_MASK& mask, bool kernelObject = false)
 {
     mask = 0;
     DWORD required = 0;
     SECURITY_INFORMATION information = DACL_SECURITY_INFORMATION;
-    GetUserObjectSecurity(object, &information, nullptr, 0, &required);
+    launch_as::test::ReadInteractiveObjectSecurity(
+        object, kernelObject, &information, nullptr, 0, &required);
     const DWORD sizeError = GetLastError();
     if (sizeError != ERROR_INSUFFICIENT_BUFFER || required == 0)
     {
         return sizeError == ERROR_SUCCESS ? ERROR_INVALID_SECURITY_DESCR : sizeError;
     }
     std::vector<BYTE> descriptor(required);
-    if (!GetUserObjectSecurity(object, &information, descriptor.data(), required, &required))
+    if (!launch_as::test::ReadInteractiveObjectSecurity(
+            object, kernelObject, &information, descriptor.data(), required, &required))
     {
         return GetLastError();
     }
@@ -234,8 +240,14 @@ int wmain(int argumentCount, wchar_t* arguments[])
         snapshotWindowStation != nullptr ? ERROR_SUCCESS : GetLastError();
     HDESK snapshotDesktop = OpenDesktopW(L"Default", 0, FALSE, READ_CONTROL);
     const DWORD snapshotDesktopError = snapshotDesktop != nullptr ? ERROR_SUCCESS : GetLastError();
+    HANDLE snapshotNamedObjects = launch_as::test::OpenSessionNamedObjectDirectory();
     std::wstring originalWindowStationDacl;
     std::wstring originalDesktopDacl;
+    std::wstring originalNamedObjectsDacl;
+    const DWORD originalNamedObjectsDaclError =
+        snapshotNamedObjects != nullptr
+            ? ReadDaclSddl(snapshotNamedObjects, originalNamedObjectsDacl, true)
+            : ERROR_INVALID_HANDLE;
     const DWORD originalWindowStationDaclError =
         snapshotWindowStation != nullptr
             ? ReadDaclSddl(snapshotWindowStation, originalWindowStationDacl)
@@ -255,6 +267,7 @@ int wmain(int argumentCount, wchar_t* arguments[])
     const DWORD acquireError = leaseSid != nullptr ? lease.Acquire(leaseSid) : ERROR_INVALID_SID;
     ACCESS_MASK windowStationMask = 0;
     ACCESS_MASK desktopMask = 0;
+    ACCESS_MASK namedObjectsMask = 0;
     const DWORD windowStationMaskError =
         acquireError == ERROR_SUCCESS
             ? ReadLeaseMask(snapshotWindowStation, leaseSid, windowStationMask)
@@ -262,12 +275,22 @@ int wmain(int argumentCount, wchar_t* arguments[])
     const DWORD desktopMaskError = acquireError == ERROR_SUCCESS
                                        ? ReadLeaseMask(snapshotDesktop, leaseSid, desktopMask)
                                        : acquireError;
-    const bool masksMatch = windowStationMaskError == ERROR_SUCCESS &&
-                            desktopMaskError == ERROR_SUCCESS && windowStationMask == 0x00020366 &&
-                            desktopMask == 0x000200cf;
+    const DWORD namedObjectsMaskError =
+        acquireError == ERROR_SUCCESS
+            ? ReadLeaseMask(snapshotNamedObjects, leaseSid, namedObjectsMask, true)
+            : acquireError;
+    const bool masksMatch =
+        windowStationMaskError == ERROR_SUCCESS && desktopMaskError == ERROR_SUCCESS &&
+        namedObjectsMaskError == ERROR_SUCCESS && windowStationMask == 0x00020366 &&
+        desktopMask == 0x000200cf && namedObjectsMask == 0x000f;
     const DWORD releaseError = acquireError == ERROR_SUCCESS ? lease.Release() : acquireError;
     std::wstring finalWindowStationDacl;
     std::wstring finalDesktopDacl;
+    std::wstring finalNamedObjectsDacl;
+    const DWORD finalNamedObjectsDaclError =
+        snapshotNamedObjects != nullptr
+            ? ReadDaclSddl(snapshotNamedObjects, finalNamedObjectsDacl, true)
+            : ERROR_INVALID_HANDLE;
     const DWORD finalWindowStationDaclError =
         snapshotWindowStation != nullptr
             ? ReadDaclSddl(snapshotWindowStation, finalWindowStationDacl)
@@ -278,6 +301,10 @@ int wmain(int argumentCount, wchar_t* arguments[])
     if (snapshotDesktop != nullptr)
     {
         CloseDesktop(snapshotDesktop);
+    }
+    if (snapshotNamedObjects != nullptr)
+    {
+        CloseHandle(snapshotNamedObjects);
     }
     if (snapshotWindowStation != nullptr)
     {
@@ -290,6 +317,7 @@ int wmain(int argumentCount, wchar_t* arguments[])
 
     const auto& windowStationLease = lease.windowStationStatus();
     const auto& desktopLease = lease.desktopStatus();
+    const auto& namedObjectsLease = lease.namedObjectDirectoryStatus();
     std::ofstream output(std::filesystem::path(arguments[1]), std::ios::binary | std::ios::trunc);
     if (!output)
     {
@@ -311,18 +339,24 @@ int wmain(int argumentCount, wchar_t* arguments[])
     output << "acquireError=" << acquireError << '\n';
     output << "windowStationMask=" << windowStationMask << '\n';
     output << "desktopMask=" << desktopMask << '\n';
+    output << "namedObjectDirectoryMask=" << namedObjectsMask << '\n';
     output << "leaseMasksMatch=" << (masksMatch ? "true" : "false") << '\n';
     output << "releaseError=" << releaseError << '\n';
     WriteLease(output, "windowStation", windowStationLease);
     WriteLease(output, "desktop", desktopLease);
-    const bool restored = windowStationLease.restored && desktopLease.restored;
+    WriteLease(output, "namedObjectDirectory", namedObjectsLease);
+    const bool restored =
+        windowStationLease.restored && desktopLease.restored && namedObjectsLease.restored;
     output << "daclSemanticallyRestored=" << (restored ? "true" : "false") << '\n';
     const bool independentlyRestored = originalWindowStationDaclError == ERROR_SUCCESS &&
                                        originalDesktopDaclError == ERROR_SUCCESS &&
+                                       originalNamedObjectsDaclError == ERROR_SUCCESS &&
                                        finalWindowStationDaclError == ERROR_SUCCESS &&
                                        finalDesktopDaclError == ERROR_SUCCESS &&
+                                       finalNamedObjectsDaclError == ERROR_SUCCESS &&
                                        originalWindowStationDacl == finalWindowStationDacl &&
-                                       originalDesktopDacl == finalDesktopDacl;
+                                       originalDesktopDacl == finalDesktopDacl &&
+                                       originalNamedObjectsDacl == finalNamedObjectsDacl;
     output << "independentDaclSemanticallyRestored=" << (independentlyRestored ? "true" : "false")
            << '\n';
 
@@ -333,7 +367,8 @@ int wmain(int argumentCount, wchar_t* arguments[])
         elevationError == ERROR_SUCCESS && administratorError == ERROR_SUCCESS &&
         elevation.TokenIsElevated == 0 && !isAdministrator && sidError == ERROR_SUCCESS &&
         acquireError == ERROR_SUCCESS && releaseError == ERROR_SUCCESS && independentlyRestored &&
-        masksMatch && LeaseSucceeded(windowStationLease) && LeaseSucceeded(desktopLease);
+        masksMatch && LeaseSucceeded(windowStationLease) && LeaseSucceeded(desktopLease) &&
+        LeaseSucceeded(namedObjectsLease);
     output << "probeSucceeded=" << (success ? "true" : "false") << '\n';
     output.flush();
     const bool outputSucceeded = output.good();

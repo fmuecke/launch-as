@@ -193,8 +193,82 @@ namespace LaunchAs
 
         private IntPtr windowStation;
         private IntPtr desktop;
+        private IntPtr namedObjectDirectory;
         private byte[] originalWindowStation;
         private byte[] originalDesktop;
+        private byte[] originalNamedObjectDirectory;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct UnicodeString
+        {
+            public ushort Length;
+            public ushort MaximumLength;
+            public IntPtr Buffer;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ObjectAttributes
+        {
+            public int Length;
+            public IntPtr RootDirectory;
+            public IntPtr ObjectName;
+            public uint Attributes;
+            public IntPtr SecurityDescriptor;
+            public IntPtr SecurityQualityOfService;
+        }
+
+        [DllImport("ntdll.dll")]
+        private static extern int NtOpenDirectoryObject(
+            out IntPtr handle, int desiredAccess, ref ObjectAttributes attributes);
+
+        [DllImport("ntdll.dll")]
+        private static extern int RtlNtStatusToDosError(int status);
+
+        [DllImport("kernel32.dll")]
+        private static extern bool CloseHandle(IntPtr handle);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        private static extern bool GetKernelObjectSecurity(
+            IntPtr handle, int requestedInformation, byte[] securityDescriptor,
+            int length, out int lengthNeeded);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        private static extern bool SetKernelObjectSecurity(
+            IntPtr handle, int requestedInformation, byte[] securityDescriptor);
+
+        private static IntPtr OpenNamedObjectDirectory()
+        {
+            string path = @"\Sessions\" +
+                System.Diagnostics.Process.GetCurrentProcess().SessionId + @"\BaseNamedObjects";
+            var name = new UnicodeString
+            {
+                Length = checked((ushort)(path.Length * 2)),
+                MaximumLength = checked((ushort)(path.Length * 2)),
+                Buffer = Marshal.StringToHGlobalUni(path)
+            };
+            IntPtr namePointer = Marshal.AllocHGlobal(Marshal.SizeOf<UnicodeString>());
+            try
+            {
+                Marshal.StructureToPtr(name, namePointer, false);
+                var attributes = new ObjectAttributes
+                {
+                    Length = Marshal.SizeOf<ObjectAttributes>(),
+                    ObjectName = namePointer
+                };
+                IntPtr handle;
+                int status = NtOpenDirectoryObject(out handle, ReadControl | WriteDac, ref attributes);
+                if (status < 0)
+                {
+                    throw new Win32Exception(RtlNtStatusToDosError(status));
+                }
+                return handle;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(namePointer);
+                Marshal.FreeHGlobal(name.Buffer);
+            }
+        }
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern IntPtr OpenWindowStation(
@@ -219,30 +293,42 @@ namespace LaunchAs
         private static extern bool SetUserObjectSecurity(
             IntPtr handle, ref int requestedInformation, byte[] securityDescriptor);
 
-        private InteractiveObjectAclV1(string accountSid)
+        private InteractiveObjectAclV1(string accountSid, bool namedObjectsOnly)
         {
             int desiredAccess = ReadControl | WriteDac;
-            windowStation = OpenWindowStation("WinSta0", false, desiredAccess);
-            if (windowStation == IntPtr.Zero)
+            if (!namedObjectsOnly)
             {
-                throw new Win32Exception(Marshal.GetLastWin32Error());
-            }
-            desktop = OpenDesktop("Default", 0, false, desiredAccess);
-            if (desktop == IntPtr.Zero)
-            {
-                int error = Marshal.GetLastWin32Error();
-                CloseWindowStation(windowStation);
-                windowStation = IntPtr.Zero;
-                throw new Win32Exception(error);
+                windowStation = OpenWindowStation("WinSta0", false, desiredAccess);
+                if (windowStation == IntPtr.Zero)
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+                desktop = OpenDesktop("Default", 0, false, desiredAccess);
+                if (desktop == IntPtr.Zero)
+                {
+                    int error = Marshal.GetLastWin32Error();
+                    CloseWindowStation(windowStation);
+                    windowStation = IntPtr.Zero;
+                    throw new Win32Exception(error);
+                }
             }
 
             try
             {
+                namedObjectDirectory = OpenNamedObjectDirectory();
                 var sid = new SecurityIdentifier(accountSid);
-                originalWindowStation = ReadSecurityDescriptor(windowStation);
-                originalDesktop = ReadSecurityDescriptor(desktop);
-                Grant(windowStation, originalWindowStation, sid, WindowStationAllAccess);
-                Grant(desktop, originalDesktop, sid, DesktopAllAccess);
+                if (!namedObjectsOnly)
+                {
+                    originalWindowStation = ReadSecurityDescriptor(windowStation);
+                    originalDesktop = ReadSecurityDescriptor(desktop);
+                    Grant(windowStation, originalWindowStation, sid, WindowStationAllAccess);
+                    Grant(desktop, originalDesktop, sid, DesktopAllAccess);
+                }
+                originalNamedObjectDirectory = ReadSecurityDescriptor(namedObjectDirectory, true);
+                // The synthetic caller acts as the guest's session owner, including the
+                // directory rights needed to create objects and coordinate target leases.
+                Grant(namedObjectDirectory, originalNamedObjectDirectory, sid,
+                    ReadControl | WriteDac | 0x000F, true);
             }
             catch
             {
@@ -253,15 +339,22 @@ namespace LaunchAs
 
         public static InteractiveObjectAclV1 Grant(string accountSid)
         {
-            return new InteractiveObjectAclV1(accountSid);
+            return new InteractiveObjectAclV1(accountSid, false);
         }
 
-        private static byte[] ReadSecurityDescriptor(IntPtr handle)
+        public static InteractiveObjectAclV1 GrantNamedObjectDirectory(string accountSid)
+        {
+            return new InteractiveObjectAclV1(accountSid, true);
+        }
+
+        private static byte[] ReadSecurityDescriptor(IntPtr handle, bool kernelObject = false)
         {
             int requestedInformation = DaclSecurityInformation;
             int lengthNeeded;
-            if (!GetUserObjectSecurity(
-                    handle, ref requestedInformation, null, 0, out lengthNeeded))
+            bool queried = kernelObject
+                ? GetKernelObjectSecurity(handle, requestedInformation, null, 0, out lengthNeeded)
+                : GetUserObjectSecurity(handle, ref requestedInformation, null, 0, out lengthNeeded);
+            if (!queried)
             {
                 int error = Marshal.GetLastWin32Error();
                 if (error != ErrorInsufficientBuffer)
@@ -270,8 +363,12 @@ namespace LaunchAs
                 }
             }
             var descriptor = new byte[lengthNeeded];
-            if (!GetUserObjectSecurity(handle, ref requestedInformation, descriptor,
-                    descriptor.Length, out lengthNeeded))
+            queried = kernelObject
+                ? GetKernelObjectSecurity(handle, requestedInformation, descriptor,
+                    descriptor.Length, out lengthNeeded)
+                : GetUserObjectSecurity(handle, ref requestedInformation, descriptor,
+                    descriptor.Length, out lengthNeeded);
+            if (!queried)
             {
                 throw new Win32Exception(Marshal.GetLastWin32Error());
             }
@@ -279,7 +376,7 @@ namespace LaunchAs
         }
 
         private static void Grant(IntPtr handle, byte[] original,
-            SecurityIdentifier sid, int accessMask)
+            SecurityIdentifier sid, int accessMask, bool kernelObject = false)
         {
             var descriptor = new RawSecurityDescriptor(original, 0);
             RawAcl dacl = descriptor.DiscretionaryAcl ?? new RawAcl(2, 1);
@@ -288,13 +385,17 @@ namespace LaunchAs
             descriptor.DiscretionaryAcl = dacl;
             var updated = new byte[descriptor.BinaryLength];
             descriptor.GetBinaryForm(updated, 0);
-            WriteSecurityDescriptor(handle, updated);
+            WriteSecurityDescriptor(handle, updated, kernelObject);
         }
 
-        private static void WriteSecurityDescriptor(IntPtr handle, byte[] descriptor)
+        private static void WriteSecurityDescriptor(
+            IntPtr handle, byte[] descriptor, bool kernelObject = false)
         {
             int requestedInformation = DaclSecurityInformation;
-            if (!SetUserObjectSecurity(handle, ref requestedInformation, descriptor))
+            bool written = kernelObject
+                ? SetKernelObjectSecurity(handle, requestedInformation, descriptor)
+                : SetUserObjectSecurity(handle, ref requestedInformation, descriptor);
+            if (!written)
             {
                 throw new Win32Exception(Marshal.GetLastWin32Error());
             }
@@ -304,6 +405,10 @@ namespace LaunchAs
         {
             try
             {
+                if (namedObjectDirectory != IntPtr.Zero && originalNamedObjectDirectory != null)
+                {
+                    WriteSecurityDescriptor(namedObjectDirectory, originalNamedObjectDirectory, true);
+                }
                 if (desktop != IntPtr.Zero && originalDesktop != null)
                 {
                     WriteSecurityDescriptor(desktop, originalDesktop);
@@ -315,6 +420,11 @@ namespace LaunchAs
             }
             finally
             {
+                if (namedObjectDirectory != IntPtr.Zero)
+                {
+                    CloseHandle(namedObjectDirectory);
+                    namedObjectDirectory = IntPtr.Zero;
+                }
                 if (desktop != IntPtr.Zero)
                 {
                     CloseDesktop(desktop);

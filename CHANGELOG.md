@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1] - 2026-10-19
+
+- Security: Interactive mode now permits named-object and subdirectory creation in the caller's shared namespace. Predictable names may allow IPC spoofing or denial of service. The grant is non-inheritable, leaves existing object ACLs unchanged, and is removed after the target process tree exits.
+- Fixed: Interactive launches temporarily lease the caller session's `BaseNamedObjects` directory to the child's logon SID, restoring named mutex and event access needed by PSReadLine and other applications.
+- Fixed: Shared-scope diagnostics follow active logged requests, so a failed or closing launch cannot take final restoration out of another session's text log.
+- Clarified: Directory pins prevent rename/deletion by every user until scope restoration; added focused coverage for pin lifetime.
+
 ## [1.4.0] - 2026-10-17
 
 - Added: `--restrict-access` for console and interactive launches. It adds a write-restricted token, ensures temporary account-SID denies on each launch, and removes them after the account's last session tree exits. Concurrent restricted sessions share their working directories. `--low-integrity` remains independently available. Read restriction skips empty optical/removable drives reporting "not ready"; other volume and ACL failures still reject launch. Inserted media is considered at the next launch.

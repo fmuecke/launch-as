@@ -36,6 +36,8 @@ class InteractiveDesktopAclLease final
     [[nodiscard]] DWORD Release();
     [[nodiscard]] const InteractiveObjectAclLeaseStatus& windowStationStatus() const noexcept;
     [[nodiscard]] const InteractiveObjectAclLeaseStatus& desktopStatus() const noexcept;
+    [[nodiscard]] const InteractiveObjectAclLeaseStatus& namedObjectDirectoryStatus()
+        const noexcept;
 
   private:
     using AceFingerprint = std::vector<BYTE>;
@@ -45,6 +47,7 @@ class InteractiveDesktopAclLease final
         HANDLE object = nullptr;
         ACCESS_MASK accessMask = 0;
         bool leased = false;
+        bool kernelObject = false;
         InteractiveObjectAclLeaseStatus status;
     };
 
@@ -54,9 +57,11 @@ class InteractiveDesktopAclLease final
 
     HWINSTA windowStation_ = nullptr;
     HDESK desktop_ = nullptr;
+    HANDLE namedObjectDirectory_ = nullptr;
     std::vector<BYTE> childLogonSid_;
     ObjectLease windowStationLease_;
     ObjectLease desktopLease_;
+    ObjectLease namedObjectDirectoryLease_;
 };
 
 } // namespace launch_as

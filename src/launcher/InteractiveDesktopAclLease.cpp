@@ -8,6 +8,7 @@
 #include <Sddl.h>
 #include <algorithm>
 #include <string>
+#include <winternl.h>
 
 namespace launch_as
 {
@@ -92,19 +93,62 @@ class DesktopAclMutationLock final
            *GetSidSubAuthority(sid, 0) == SECURITY_LOGON_IDS_RID;
 }
 
-[[nodiscard]] DWORD ReadSecurityDescriptor(HANDLE object, std::vector<BYTE>& descriptor)
+[[nodiscard]] DWORD OpenSessionNamedObjectDirectory(HANDLE& directory)
+{
+    DWORD sessionId = MAXDWORD;
+    if (!ProcessIdToSessionId(GetCurrentProcessId(), &sessionId))
+    {
+        return GetLastError();
+    }
+    const auto ntdll = GetModuleHandleW(L"ntdll.dll");
+    if (ntdll == nullptr)
+    {
+        return GetLastError();
+    }
+    using OpenDirectory = NTSTATUS(NTAPI*)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES);
+    const auto openDirectory =
+        reinterpret_cast<OpenDirectory>(GetProcAddress(ntdll, "NtOpenDirectoryObject"));
+    if (openDirectory == nullptr)
+    {
+        return GetLastError();
+    }
+    const auto statusToError = reinterpret_cast<decltype(&RtlNtStatusToDosError)>(
+        GetProcAddress(ntdll, "RtlNtStatusToDosError"));
+    if (statusToError == nullptr)
+    {
+        return GetLastError();
+    }
+    const std::wstring path = L"\\Sessions\\" + std::to_wstring(sessionId) + L"\\BaseNamedObjects";
+    UNICODE_STRING name {};
+    name.Length = static_cast<USHORT>(path.size() * sizeof(wchar_t));
+    name.MaximumLength = name.Length;
+    name.Buffer = const_cast<PWSTR>(path.data());
+    OBJECT_ATTRIBUTES attributes {};
+    attributes.Length = sizeof(attributes);
+    attributes.ObjectName = &name;
+    const NTSTATUS status = openDirectory(&directory, READ_CONTROL | WRITE_DAC, &attributes);
+    return status < 0 ? statusToError(status) : ERROR_SUCCESS;
+}
+
+[[nodiscard]] DWORD ReadSecurityDescriptor(
+    HANDLE object, bool kernelObject, std::vector<BYTE>& descriptor)
 {
     descriptor.clear();
     DWORD required = 0;
     SECURITY_INFORMATION information = DACL_SECURITY_INFORMATION;
-    GetUserObjectSecurity(object, &information, nullptr, 0, &required);
+    const auto read = [&](PSECURITY_DESCRIPTOR buffer, DWORD size)
+    {
+        return kernelObject ? GetKernelObjectSecurity(object, information, buffer, size, &required)
+                            : GetUserObjectSecurity(object, &information, buffer, size, &required);
+    };
+    read(nullptr, 0);
     const DWORD sizeError = GetLastError();
     if (sizeError != ERROR_INSUFFICIENT_BUFFER || required == 0)
     {
         return sizeError == ERROR_SUCCESS ? ERROR_INVALID_SECURITY_DESCR : sizeError;
     }
     descriptor.resize(required);
-    if (!GetUserObjectSecurity(object, &information, descriptor.data(), required, &required))
+    if (!read(descriptor.data(), required))
     {
         return GetLastError();
     }
@@ -122,7 +166,7 @@ class DesktopAclMutationLock final
     return present && dacl != nullptr ? ERROR_SUCCESS : ERROR_INVALID_SECURITY_DESCR;
 }
 
-[[nodiscard]] DWORD WriteDacl(HANDLE object, PACL dacl)
+[[nodiscard]] DWORD WriteDacl(HANDLE object, bool kernelObject, PACL dacl)
 {
     SECURITY_DESCRIPTOR descriptor {};
     if (!InitializeSecurityDescriptor(&descriptor, SECURITY_DESCRIPTOR_REVISION))
@@ -134,7 +178,9 @@ class DesktopAclMutationLock final
         return GetLastError();
     }
     SECURITY_INFORMATION information = DACL_SECURITY_INFORMATION;
-    if (!SetUserObjectSecurity(object, &information, &descriptor))
+    const BOOL written = kernelObject ? SetKernelObjectSecurity(object, information, &descriptor)
+                                      : SetUserObjectSecurity(object, &information, &descriptor);
+    if (!written)
     {
         return GetLastError();
     }
@@ -265,7 +311,7 @@ DWORD InteractiveDesktopAclLease::Acquire(PSID childLogonSid)
     {
         return ERROR_INVALID_SID;
     }
-    if (windowStationLease_.leased || desktopLease_.leased)
+    if (windowStationLease_.leased || desktopLease_.leased || namedObjectDirectoryLease_.leased)
     {
         return ERROR_BUSY;
     }
@@ -273,6 +319,7 @@ DWORD InteractiveDesktopAclLease::Acquire(PSID childLogonSid)
     CloseHandles();
     windowStationLease_ = {};
     desktopLease_ = {};
+    namedObjectDirectoryLease_ = {};
     const DWORD sidBytes = GetLengthSid(childLogonSid);
     childLogonSid_.resize(sidBytes);
     if (!CopySid(sidBytes, childLogonSid_.data(), childLogonSid))
@@ -295,6 +342,14 @@ DWORD InteractiveDesktopAclLease::Acquire(PSID childLogonSid)
         CloseHandles();
         return error;
     }
+    namedObjectDirectoryLease_.status.openError =
+        OpenSessionNamedObjectDirectory(namedObjectDirectory_);
+    if (namedObjectDirectoryLease_.status.openError != ERROR_SUCCESS)
+    {
+        const DWORD error = namedObjectDirectoryLease_.status.openError;
+        CloseHandles();
+        return error;
+    }
 
     windowStationLease_.object = windowStation_;
     windowStationLease_.accessMask = WINSTA_READATTRIBUTES | WINSTA_ACCESSCLIPBOARD |
@@ -304,32 +359,21 @@ DWORD InteractiveDesktopAclLease::Acquire(PSID childLogonSid)
     desktopLease_.accessMask = DESKTOP_CREATEMENU | DESKTOP_CREATEWINDOW | DESKTOP_ENUMERATE |
                                DESKTOP_HOOKCONTROL | DESKTOP_READOBJECTS | DESKTOP_WRITEOBJECTS |
                                READ_CONTROL;
+    namedObjectDirectoryLease_.object = namedObjectDirectory_;
+    namedObjectDirectoryLease_.kernelObject = true;
+    // Win32 opens this directory with QUERY, TRAVERSE, CREATE_OBJECT and
+    // CREATE_SUBDIRECTORY before resolving both Local\\ and Global\\ names.
+    // Keep this non-inheritable: existing objects retain their own access checks.
+    namedObjectDirectoryLease_.accessMask = 0x000f;
 
-    const DWORD windowStationError = Apply(windowStationLease_);
-    if (windowStationError != ERROR_SUCCESS)
+    for (ObjectLease* object : {&windowStationLease_, &desktopLease_, &namedObjectDirectoryLease_})
     {
-        const DWORD rollbackError = Remove(windowStationLease_);
-        if (!windowStationLease_.leased)
+        const DWORD error = Apply(*object);
+        if (error != ERROR_SUCCESS)
         {
-            CloseHandles();
+            const DWORD rollbackError = Release();
+            return rollbackError == ERROR_SUCCESS ? error : rollbackError;
         }
-        return rollbackError == ERROR_SUCCESS ? windowStationError : rollbackError;
-    }
-    const DWORD desktopError = Apply(desktopLease_);
-    if (desktopError != ERROR_SUCCESS)
-    {
-        const DWORD desktopRollbackError = Remove(desktopLease_);
-        const DWORD windowStationRollbackError = Remove(windowStationLease_);
-        if (!desktopLease_.leased && !windowStationLease_.leased)
-        {
-            CloseHandles();
-        }
-        if (desktopRollbackError != ERROR_SUCCESS)
-        {
-            return desktopRollbackError;
-        }
-        return windowStationRollbackError == ERROR_SUCCESS ? desktopError
-                                                           : windowStationRollbackError;
     }
     return ERROR_SUCCESS;
 }
@@ -343,7 +387,8 @@ DWORD InteractiveDesktopAclLease::Apply(ObjectLease& lease)
         return lockError;
     }
     std::vector<BYTE> originalDescriptor;
-    lease.status.readError = ReadSecurityDescriptor(lease.object, originalDescriptor);
+    lease.status.readError =
+        ReadSecurityDescriptor(lease.object, lease.kernelObject, originalDescriptor);
     PACL originalDacl = nullptr;
     if (lease.status.readError == ERROR_SUCCESS)
     {
@@ -378,7 +423,7 @@ DWORD InteractiveDesktopAclLease::Apply(ObjectLease& lease)
     {
         return lease.status.addError;
     }
-    lease.status.addError = WriteDacl(lease.object, updatedDacl);
+    lease.status.addError = WriteDacl(lease.object, lease.kernelObject, updatedDacl);
     LocalFree(updatedDacl);
     if (lease.status.addError != ERROR_SUCCESS)
     {
@@ -387,7 +432,8 @@ DWORD InteractiveDesktopAclLease::Apply(ObjectLease& lease)
     lease.leased = true;
 
     std::vector<BYTE> leasedDescriptor;
-    lease.status.verifyAddError = ReadSecurityDescriptor(lease.object, leasedDescriptor);
+    lease.status.verifyAddError =
+        ReadSecurityDescriptor(lease.object, lease.kernelObject, leasedDescriptor);
     PACL leasedDacl = nullptr;
     DWORD leaseCount = 0;
     if (lease.status.verifyAddError == ERROR_SUCCESS)
@@ -408,17 +454,15 @@ DWORD InteractiveDesktopAclLease::Apply(ObjectLease& lease)
 DWORD InteractiveDesktopAclLease::Release()
 {
     DWORD result = ERROR_SUCCESS;
-    const DWORD desktopError = Remove(desktopLease_);
-    if (desktopError != ERROR_SUCCESS)
+    for (ObjectLease* object : {&namedObjectDirectoryLease_, &desktopLease_, &windowStationLease_})
     {
-        result = desktopError;
+        const DWORD error = Remove(*object);
+        if (result == ERROR_SUCCESS && error != ERROR_SUCCESS)
+        {
+            result = error;
+        }
     }
-    const DWORD windowStationError = Remove(windowStationLease_);
-    if (result == ERROR_SUCCESS && windowStationError != ERROR_SUCCESS)
-    {
-        result = windowStationError;
-    }
-    if (!desktopLease_.leased && !windowStationLease_.leased)
+    if (!desktopLease_.leased && !windowStationLease_.leased && !namedObjectDirectoryLease_.leased)
     {
         CloseHandles();
         childLogonSid_.clear();
@@ -439,7 +483,7 @@ DWORD InteractiveDesktopAclLease::Remove(ObjectLease& lease)
         return lockError;
     }
     std::vector<BYTE> descriptor;
-    lease.status.removeError = ReadSecurityDescriptor(lease.object, descriptor);
+    lease.status.removeError = ReadSecurityDescriptor(lease.object, lease.kernelObject, descriptor);
     PACL dacl = nullptr;
     if (lease.status.removeError == ERROR_SUCCESS)
     {
@@ -459,8 +503,8 @@ DWORD InteractiveDesktopAclLease::Remove(ObjectLease& lease)
     }
     if (lease.status.removeError == ERROR_SUCCESS)
     {
-        lease.status.removeError =
-            WriteDacl(lease.object, reinterpret_cast<PACL>(withoutLease.data()));
+        lease.status.removeError = WriteDacl(
+            lease.object, lease.kernelObject, reinterpret_cast<PACL>(withoutLease.data()));
     }
     if (lease.status.removeError != ERROR_SUCCESS)
     {
@@ -469,7 +513,8 @@ DWORD InteractiveDesktopAclLease::Remove(ObjectLease& lease)
     lease.leased = false;
 
     std::vector<BYTE> finalDescriptor;
-    lease.status.verifyRemoveError = ReadSecurityDescriptor(lease.object, finalDescriptor);
+    lease.status.verifyRemoveError =
+        ReadSecurityDescriptor(lease.object, lease.kernelObject, finalDescriptor);
     PACL finalDacl = nullptr;
     DWORD finalLeaseCount = 0;
     std::vector<AceFingerprint> finalFingerprint;
@@ -495,6 +540,11 @@ DWORD InteractiveDesktopAclLease::Remove(ObjectLease& lease)
 
 void InteractiveDesktopAclLease::CloseHandles() noexcept
 {
+    if (namedObjectDirectory_ != nullptr)
+    {
+        CloseHandle(namedObjectDirectory_);
+        namedObjectDirectory_ = nullptr;
+    }
     if (desktop_ != nullptr)
     {
         CloseDesktop(desktop_);
@@ -507,6 +557,7 @@ void InteractiveDesktopAclLease::CloseHandles() noexcept
     }
     desktopLease_.object = nullptr;
     windowStationLease_.object = nullptr;
+    namedObjectDirectoryLease_.object = nullptr;
 }
 
 const InteractiveObjectAclLeaseStatus& InteractiveDesktopAclLease::windowStationStatus()
@@ -518,6 +569,12 @@ const InteractiveObjectAclLeaseStatus& InteractiveDesktopAclLease::windowStation
 const InteractiveObjectAclLeaseStatus& InteractiveDesktopAclLease::desktopStatus() const noexcept
 {
     return desktopLease_.status;
+}
+
+const InteractiveObjectAclLeaseStatus& InteractiveDesktopAclLease::namedObjectDirectoryStatus()
+    const noexcept
+{
+    return namedObjectDirectoryLease_.status;
 }
 
 } // namespace launch_as

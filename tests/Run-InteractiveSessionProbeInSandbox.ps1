@@ -31,6 +31,7 @@ $taskRegistered = $false
 $handshakeTaskRegistered = $false
 $callerAccount = 'LaunchAsDevCaller'
 $callerCreated = $false
+$callerNamespaceAcl = $null
 $aclResultPath = $null
 $aclExitCodePath = $null
 $aclConcurrencyResultPath = $null
@@ -214,6 +215,9 @@ try {
         -PasswordNeverExpires `
         -UserMayNotChangePassword
     $callerCreated = $true
+    Add-Type -Path (Join-Path $SourceDirectory 'LauncherAcceptanceLogon.cs')
+    $callerNamespaceAcl = [LaunchAs.InteractiveObjectAclV1]::GrantNamedObjectDirectory(
+        $callerUser.SID.Value)
     $callerCredential = [PSCredential]::new(
         "$env:COMPUTERNAME\$callerAccount", $securePassword)
     $aclResultDirectory = 'C:\Users\Public\Documents\LaunchAsInteractiveAclProbe'
@@ -283,6 +287,8 @@ try {
         $aclResult['windowStationLeaseRemoved'] -ne 'true' -or
         $aclResult['desktopLeaseAdded'] -ne 'true' -or
         $aclResult['desktopLeaseRemoved'] -ne 'true' -or
+        $aclResult['namedObjectDirectoryLeaseAdded'] -ne 'true' -or
+        $aclResult['namedObjectDirectoryLeaseRemoved'] -ne 'true' -or
         $aclResult['daclSemanticallyRestored'] -ne 'true' -or
         $aclResult['independentDaclSemanticallyRestored'] -ne 'true' -or
         $aclResult['probeSucceeded'] -ne 'true') {
@@ -458,6 +464,8 @@ try {
         "acl.windowStationLeaseRemoved=$($aclResult['windowStationLeaseRemoved'])"
         "acl.desktopLeaseAdded=$($aclResult['desktopLeaseAdded'])"
         "acl.desktopLeaseRemoved=$($aclResult['desktopLeaseRemoved'])"
+        "acl.namedObjectDirectoryLeaseAdded=$($aclResult['namedObjectDirectoryLeaseAdded'])"
+        "acl.namedObjectDirectoryLeaseRemoved=$($aclResult['namedObjectDirectoryLeaseRemoved'])"
         "acl.daclSemanticallyRestored=$($aclResult['daclSemanticallyRestored'])"
         "acl.independentDaclSemanticallyRestored=$($aclResult['independentDaclSemanticallyRestored'])"
         "acl.probeSucceeded=$($aclResult['probeSucceeded'])"
@@ -518,6 +526,9 @@ finally {
             -ErrorAction SilentlyContinue
     }
     if ($callerCreated) {
+        if ($null -ne $callerNamespaceAcl) {
+            $callerNamespaceAcl.Dispose()
+        }
         Remove-LocalUser -Name $callerAccount -ErrorAction SilentlyContinue
     }
     if ($null -ne $windowProcess -and -not $windowProcess.HasExited) {

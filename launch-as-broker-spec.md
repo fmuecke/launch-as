@@ -231,6 +231,16 @@ independent target logon SID, a visible GUI window, and successful lease release
 recovery, RDP, Fast User Switching, launcher disappearance, and broker restart remain additional
 acceptance work.
 
+The lease also adds a non-inheritable `0x0000000F` ACE for the child's logon SID on
+`\Sessions\<caller-session>\BaseNamedObjects`: query, traverse, create object, and create
+subdirectory. Win32 needs this directory access to initialize named mutexes and events, including
+global event opens. Cleanup removes only this lease's ACE and preserves overlapping leases.
+**Security limitation:** the child shares the caller's named-object namespace and can squat on
+predictable names, potentially spoofing IPC or denying service. Existing object ACLs remain in
+force, and the child never gains the caller's logon SID. Lease removal does not revoke acquired
+handles or delete objects kept alive by other processes. See [the threat model](THREAT_MODEL.md)
+for the accepted shared-session risks.
+
 #### 7.2.2 No normal-user token helper
 
 Do not move GUI or terminal plumbing into a helper running as the interactive user if that requires

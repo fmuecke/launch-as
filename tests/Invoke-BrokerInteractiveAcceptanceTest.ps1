@@ -59,6 +59,9 @@ $windowTitle = 'launch-as-interactive-acceptance-' + [guid]::NewGuid().ToString(
 $callerLogonSid = (& whoami /logonid | Select-Object -Last 1).Trim()
 $callerSessionId = (Get-Process -Id $PID).SessionId
 $launcherProcess = $null
+$callerEventName = 'Local\launch-as-caller-event-' + [guid]::NewGuid().ToString('N')
+$callerEvent = [Threading.EventWaitHandle]::new(
+    $false, [Threading.EventResetMode]::ManualReset, $callerEventName)
 
 try {
     & $aclLeaseProbe $aclLeaseReportPath
@@ -73,8 +76,8 @@ try {
 
     @(
         '@echo off'
-        ('"{0}" --mode interactive --user "{1}" --working-directory "{2}" -- "{3}" "{4}" "{5}" 4000' -f `
-                $launcher.Path, $Account, $reportDirectory, $probe.Path, $reportPath, $windowTitle)
+        ('"{0}" --mode interactive --user "{1}" --working-directory "{2}" -- "{3}" "{4}" "{5}" 4000 "{6}"' -f `
+                $launcher.Path, $Account, $reportDirectory, $probe.Path, $reportPath, $windowTitle, $callerEventName)
         'set "launcherExitCode=%ERRORLEVEL%"'
         ('> "{0}" echo %launcherExitCode%' -f $exitCodePath)
         'exit /b %launcherExitCode%'
@@ -109,6 +112,10 @@ try {
     if ((Get-TargetValue 'probeSucceeded') -ne 'true') {
         throw "The installed interactive target reported failure.`n$targetReport"
     }
+    if ((Get-TargetValue 'callerEventChecked') -ne 'true' -or
+        (Get-TargetValue 'callerEventError') -ne '5') {
+        throw "The interactive target could access the controlled caller event.`n$targetReport"
+    }
     if ([int](Get-TargetValue 'processSessionId') -ne $callerSessionId -or
         (Get-TargetValue 'processWindowStation') -ne 'WinSta0' -or
         (Get-TargetValue 'threadDesktop') -ne 'Default') {
@@ -140,6 +147,7 @@ finally {
     if ($null -ne $launcherProcess -and -not $launcherProcess.HasExited) {
         Stop-Process -Id $launcherProcess.Id -Force -ErrorAction SilentlyContinue
     }
+    $callerEvent.Dispose()
     if (Test-Path -LiteralPath $stdoutPath -PathType Leaf) {
         Get-Content -LiteralPath $stdoutPath | Write-Host
     }

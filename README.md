@@ -42,7 +42,7 @@ them unsuitable for workflows such as running an agent directly inside a VS Code
 
 ## Install the binary package
 
-Extract `launch-as-v1.4.0-win64.zip` and run the bundled setup script from its extracted
+Extract `launch-as-v1.4.*-win64.zip` and run the bundled setup script from its extracted
 directory. It elevates when needed, installs or updates the demand-start service and all four
 executables into `%ProgramFiles%\launch-as`, and can create a default account. Updating takes over
 that account and replaces its broker-owned password. The user who runs a fresh `install` becomes the
@@ -129,9 +129,17 @@ For a GUI program, select interactive mode explicitly:
 ```
 
 The launcher holds a temporary ACL lease for the target's unique logon SID on the caller's
-`WinSta0\Default` objects. It stays running until the complete GUI process tree exits and the broker
-releases that lease. Interactive mode deliberately shares the caller's UI surface; use console mode
-or a separate RDP, Windows Sandbox, or VM session for workloads that must not access that surface.
+`WinSta0\Default` objects and session `BaseNamedObjects` directory. It stays running until the
+complete GUI process tree exits and the broker releases that lease.
+
+**Security limitation:** Interactive mode shares the caller's UI and named-object namespace.
+The child can create named objects or subdirectories there, potentially squatting on predictable
+names to spoof IPC or deny service to other applications. The directory grant is non-inheritable
+and leaves existing object ACLs unchanged; the child retains its independent logon SID.
+Use console mode or a separate RDP, Windows Sandbox, or VM session when this shared access is
+unacceptable. Removing the lease does not revoke handles already opened or delete objects kept
+alive by other processes.
+Abrupt launcher termination can leave lease grants behind.
 
 Console and interactive launches support these controls:
 

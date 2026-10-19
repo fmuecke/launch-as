@@ -105,7 +105,7 @@ LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM wParam, LPARA
 
 int wmain(int argumentCount, wchar_t* arguments[])
 {
-    if (argumentCount != 4)
+    if (argumentCount != 4 && argumentCount != 5)
     {
         return ERROR_INVALID_PARAMETER;
     }
@@ -128,6 +128,33 @@ int wmain(int argumentCount, wchar_t* arguments[])
         ReadUserObjectName(GetThreadDesktop(GetCurrentThreadId()), desktopName);
     std::wstring logonSid;
     const DWORD logonSidError = ReadTokenLogonSid(logonSid);
+
+    // Win32 initializes the session's named-object directory even for an unnamed mutex.
+    HANDLE mutex = CreateMutexExW(nullptr, nullptr, 0, SYNCHRONIZE | MUTEX_MODIFY_STATE);
+    const DWORD mutexError = mutex != nullptr ? ERROR_SUCCESS : GetLastError();
+    const std::wstring mutexName =
+        L"Local\\launch-as-interactive-mutex-" + std::to_wstring(GetCurrentProcessId());
+    HANDLE namedMutex =
+        CreateMutexExW(nullptr, mutexName.c_str(), 0, SYNCHRONIZE | MUTEX_MODIFY_STATE);
+    const DWORD namedMutexError = namedMutex != nullptr ? ERROR_SUCCESS : GetLastError();
+    const std::wstring eventName =
+        L"Global\\launch-as-interactive-event-" + std::to_wstring(GetCurrentProcessId());
+    HANDLE event = CreateEventExW(nullptr, eventName.c_str(), 0, SYNCHRONIZE);
+    const DWORD eventError = event != nullptr ? ERROR_SUCCESS : GetLastError();
+    HANDLE openedEvent = OpenEventW(SYNCHRONIZE, FALSE, eventName.c_str());
+    const DWORD openEventError = openedEvent != nullptr ? ERROR_SUCCESS : GetLastError();
+    HANDLE callerEvent =
+        argumentCount == 5 ? OpenEventW(SYNCHRONIZE, FALSE, arguments[4]) : nullptr;
+    const DWORD callerEventError = argumentCount == 5
+                                       ? (callerEvent != nullptr ? ERROR_SUCCESS : GetLastError())
+                                       : ERROR_ACCESS_DENIED;
+    for (HANDLE handle : {mutex, namedMutex, event, openedEvent, callerEvent})
+    {
+        if (handle != nullptr)
+        {
+            CloseHandle(handle);
+        }
+    }
 
     const wchar_t className[] = L"LaunchAsInteractiveTargetProbeWindow";
     WNDCLASSW windowClass {};
@@ -162,7 +189,9 @@ int wmain(int argumentCount, wchar_t* arguments[])
 
     const bool success = sessionRead && windowStationError == ERROR_SUCCESS &&
                          desktopError == ERROR_SUCCESS && logonSidError == ERROR_SUCCESS &&
-                         window != nullptr;
+                         mutexError == ERROR_SUCCESS && namedMutexError == ERROR_SUCCESS &&
+                         eventError == ERROR_SUCCESS && openEventError == ERROR_SUCCESS &&
+                         callerEventError == ERROR_ACCESS_DENIED && window != nullptr;
     std::ofstream result(std::filesystem::path(arguments[1]), std::ios::binary | std::ios::trunc);
     if (!result)
     {
@@ -180,6 +209,12 @@ int wmain(int argumentCount, wchar_t* arguments[])
     result << "desktopError=" << desktopError << '\n';
     result << "tokenLogonSid=" << NarrowAscii(logonSid) << '\n';
     result << "logonSidError=" << logonSidError << '\n';
+    result << "mutexError=" << mutexError << '\n';
+    result << "namedMutexError=" << namedMutexError << '\n';
+    result << "globalEventError=" << eventError << '\n';
+    result << "openGlobalEventError=" << openEventError << '\n';
+    result << "callerEventError=" << callerEventError << '\n';
+    result << "callerEventChecked=" << (argumentCount == 5 ? "true" : "false") << '\n';
     result << "windowCreated=" << (window != nullptr ? "true" : "false") << '\n';
     result << "windowError=" << windowError << '\n';
     result << "probeSucceeded=" << (success ? "true" : "false") << '\n';

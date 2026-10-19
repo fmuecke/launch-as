@@ -3,6 +3,7 @@
 // Project: https://github.com/fmuecke/launch-as
 
 #include "InteractiveDesktopAclLease.h"
+#include "NamedObjectDirectoryTestSupport.h"
 
 #include <Sddl.h>
 #include <Windows.h>
@@ -59,17 +60,19 @@ void CloseWorker(Worker& worker)
                ProbeTimeoutMilliseconds) == WAIT_OBJECT_0;
 }
 
-[[nodiscard]] bool HasLeaseAce(HANDLE object, PSID sid, bool expected)
+[[nodiscard]] bool HasLeaseAce(HANDLE object, PSID sid, bool expected, bool kernelObject = false)
 {
     SECURITY_INFORMATION information = DACL_SECURITY_INFORMATION;
     DWORD required = 0;
-    GetUserObjectSecurity(object, &information, nullptr, 0, &required);
+    launch_as::test::ReadInteractiveObjectSecurity(
+        object, kernelObject, &information, nullptr, 0, &required);
     if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || required == 0)
     {
         return false;
     }
     std::vector<BYTE> descriptor(required);
-    if (!GetUserObjectSecurity(object, &information, descriptor.data(), required, &required))
+    if (!launch_as::test::ReadInteractiveObjectSecurity(
+            object, kernelObject, &information, descriptor.data(), required, &required))
     {
         return false;
     }
@@ -113,11 +116,18 @@ void CloseWorker(Worker& worker)
 {
     HWINSTA station = OpenWindowStationW(L"WinSta0", FALSE, READ_CONTROL);
     HDESK desktop = OpenDesktopW(L"Default", 0, FALSE, READ_CONTROL);
-    const bool matches = station != nullptr && desktop != nullptr &&
+    HANDLE namedObjects = launch_as::test::OpenSessionNamedObjectDirectory();
+    const bool matches = station != nullptr && desktop != nullptr && namedObjects != nullptr &&
                          HasLeaseAce(station, firstSid, firstExpected) &&
                          HasLeaseAce(station, secondSid, secondExpected) &&
                          HasLeaseAce(desktop, firstSid, firstExpected) &&
-                         HasLeaseAce(desktop, secondSid, secondExpected);
+                         HasLeaseAce(desktop, secondSid, secondExpected) &&
+                         HasLeaseAce(namedObjects, firstSid, firstExpected, true) &&
+                         HasLeaseAce(namedObjects, secondSid, secondExpected, true);
+    if (namedObjects != nullptr)
+    {
+        CloseHandle(namedObjects);
+    }
     if (desktop != nullptr)
     {
         CloseDesktop(desktop);

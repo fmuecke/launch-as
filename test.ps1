@@ -35,5 +35,6 @@ if (-not (Test-BrokerServiceInstalled)) {
     --mode interactive `
     --user LaunchAsUser `
     --working-directory C:\AgentSandbox\ `
-    -- C:\Windows\System32\notepad.exe    
+    -- 'C:\Program Files\PowerShell\7\pwsh.exe'
 
+#    -- C:\Windows\System32\notepad.exe

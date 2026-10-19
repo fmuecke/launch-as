@@ -252,6 +252,22 @@ The temporary, non-inheriting logon-SID ACEs grant this tested compatibility set
 | --- | --- | --- |
 | `WinSta0` | `0x00020366` | `READ_CONTROL`, `WINSTA_READATTRIBUTES`, `WINSTA_ACCESSCLIPBOARD`, `WINSTA_ACCESSGLOBALATOMS`, `WINSTA_EXITWINDOWS`, `WINSTA_ENUMERATE`, `WINSTA_READSCREEN` |
 | `Default` desktop | `0x000200CF` | `READ_CONTROL`, `DESKTOP_CREATEMENU`, `DESKTOP_CREATEWINDOW`, `DESKTOP_ENUMERATE`, `DESKTOP_HOOKCONTROL`, `DESKTOP_READOBJECTS`, `DESKTOP_WRITEOBJECTS` |
+| `\Sessions\<caller-session>\BaseNamedObjects` | `0x0000000F` | `DIRECTORY_QUERY`, `DIRECTORY_TRAVERSE`, `DIRECTORY_CREATE_OBJECT`, `DIRECTORY_CREATE_SUBDIRECTORY` |
+
+**Security limitation: shared named-object namespace.** Win32 needs directory creation rights
+before resolving named mutexes and events, including `Global\` event opens. Interactive mode
+leases these rights to the child's independent logon SID so applications such as PSReadLine can
+initialize. This lets the child create objects or subdirectories in the caller's session namespace.
+It can pre-create predictable names, potentially spoofing IPC or causing denial of service in
+applications that trust those names. The grant is non-inheritable and does not change existing
+object ACLs, grant directory `WRITE_DAC`/`WRITE_OWNER`, or add the caller's logon SID to the child.
+Removal deletes only the lease ACE after the target tree exits; it does not revoke acquired
+handles or delete objects kept alive elsewhere. This is a compatibility tradeoff, not kernel-object
+namespace isolation. Use a separate session or VM when that isolation is required.
+Abrupt coordinator termination can leave the grant in place; crash cleanup remains unverified.
+The caller must already have `READ_CONTROL` and `WRITE_DAC` on the leased objects. A different
+account started inside someone else's desktop session may lack these rights; acquisition then
+fails. Sandbox fixtures explicitly provision these coordinator rights for their synthetic caller.
 
 On 2026-09-26, each candidate right was removed individually and checked through
 `Invoke-LauncherAcceptanceInWindowsSandbox.ps1`, including the installed broker and public GUI
@@ -267,8 +283,9 @@ launch. Successful reductions accumulated; the rejected reduction was restored b
 | `WINSTA_WRITEATTRIBUTES` | Passed; removed. |
 | `WINSTA_ENUMDESKTOPS` | Passed; removed. |
 
-The ACL probe checks the exact masks and cleanup; the GUI probe checks caller-session placement,
-independent logon SID, visible window creation, normal exit, and lease release. These results do
+The ACL probe checks the exact masks and cleanup, including the named-object directory; the GUI
+probe checks caller-session placement, independent logon SID, named mutex and global event access,
+visible window creation, normal exit, and lease release. These results do
 not prove a universal minimum or compatibility with every GUI application. The grant omits
 `WRITE_DAC`, `WRITE_OWNER`, and `DELETE`; it does not negate permissions supplied by other ACEs.
 Remaining rights still expose clipboard, screen, hooks, and window-station logoff capabilities;

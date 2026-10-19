@@ -71,6 +71,11 @@ live result file. A timeout terminates the process and waits for exit before col
 Acceptance covers the scripted console and normal-completion GUI cases; the remaining
 interactive cases are listed in [Build and test](../README.md#build-and-test). The
 feasibility probe does not replace installed-service acceptance.
+The interactive target also checks named mutex creation, global event creation/opening, and
+denied access to a controlled caller-owned event. ACL probes verify the exact non-inheritable
+named-object directory grant, its removal, and preservation of overlapping leases.
+The synthetic caller receives temporary coordinator access to the session's named-object
+directory through `LauncherAcceptanceLogon.cs`; this fixture setup stays inside the guest.
 
 Write-scope acceptance exercises the independent `--low-integrity` flag with and without
 Low integrity in console and interactive modes: profile/working-tree writes, Medium
